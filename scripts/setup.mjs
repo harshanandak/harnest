@@ -35,14 +35,15 @@ const setupUsage = "Usage: bun run setup " + [...namedHosts, "other"].join("|") 
   "Removal supports cursor (user config), " + bridgeHosts.join(", ") + ".\n" +
   "Manual MCP configuration: " + manualBridgeHosts.join(", ") + ".";
 
-function printHostConfigReverse(result, host) {
+function hostConfigReverse(result, host) {
   if (result?.backup) {
     const quote = process.platform === "win32" ? "''" : "'\\''";
-    console.log(`Reverse path: node scripts/install-host-config.mjs --restore '${result.backup.replaceAll("'", quote)}'`);
-  } else if (result?.created && host) {
-    console.log(`Reverse path: bun run setup remove ${host}`);
-    console.log("Run it from the Harnest repository root, with the same config path environment variables you used for setup.");
+    return [`Reverse path: node scripts/install-host-config.mjs --restore '${result.backup.replaceAll("'", quote)}'`];
   }
+  if (result?.created && host) {
+    return [`Reverse path: bun run setup remove ${host}`, "Run it from the Harnest repository root, with the same config path environment variables you used for setup."];
+  }
+  return [];
 }
 
 async function setup(args) {
@@ -80,6 +81,7 @@ async function setup(args) {
     return;
   }
   let result;
+  const reverse = [];
   switch (host) {
     case "claude":
     case "codex":
@@ -91,22 +93,22 @@ async function setup(args) {
       break;
     case "cursor":
       result = await installCursorIntegration(project ?? cursorProject([]));
-      printHostConfigReverse(result.mcp, host);
-      printHostConfigReverse(result.projectMcp);
+      reverse.push(...hostConfigReverse(result.mcp, host), ...hostConfigReverse(result.projectMcp));
       break;
     case "pi":
       result = await installPiIntegration();
       break;
     case "other":
       result = await installJsonServer(resolve(positional[1]), "mcpServers", { type: "http", ...httpEntry(await readDaemonToken()) });
-      printHostConfigReverse(result);
+      reverse.push(...hostConfigReverse(result));
       break;
     default:
       result = await installBridgeHost(host);
-      printHostConfigReverse(result, host);
+      reverse.push(...hostConfigReverse(result, host));
       break;
   }
   if (result) console.log(JSON.stringify(result, null, 2));
+  for (const line of reverse) console.log(line);
   if (host === "amp") console.log("If Amp requests approval, run: amp mcp approve harnest");
   if (host === "kiro") console.log("In Kiro, run /mcp to check Harnest. For custom agents, enable includeMcpJson to load user-level servers.");
   console.log("Restart or reload the host to use Harnest.");
