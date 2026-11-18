@@ -1,0 +1,39 @@
+{
+  "requestId": "architecture-review-example-001",
+  "cwd": "C:/replace/with/your/repository",
+  "task": "Review an implementation plan from architecture, correctness and efficiency perspectives.",
+  "context": { "goal": "Produce concrete, evidence-backed findings and a consolidated recommendation." },
+  "policy": { "write": false },
+  "execution": { "background": true, "maxConcurrency": 3, "timeoutMs": 1200000 },
+  "nodes": [
+    {
+      "id": "architecture",
+      "target": "claude",
+      "route": { "model": "opus" },
+      "task": "Read the relevant architecture and implementation. Identify the boundaries and assumptions. Return a concise map with file references. Do not edit."
+    },
+    {
+      "id": "correctness",
+      "target": "codex",
+      "route": { "model": "gpt-6.1-sol", "thinking": "high" },
+      "metadata": { "routing": { "modelVersion": "pin" } },
+      "dependsOn": ["architecture"],
+      "task": "Use the architecture result in context.graph.upstream. Review correctness and failure recovery. Return at most five concrete findings with source evidence. Do not edit."
+    },
+    {
+      "id": "efficiency",
+      "target": "cursor",
+      "route": { "model": "cursor-grok-4.6-high-fast" },
+      "dependsOn": ["architecture"],
+      "task": "Use the architecture result in context.graph.upstream. Review unnecessary model calls, duplicated context, scheduling delays and retry cost. Return at most five concrete findings. Do not edit."
+    },
+    {
+      "id": "conclusion",
+      "target": "opencode",
+      "route": { "provider": "opencode-go", "model": "deepseek-v4.1-flash", "harnessVersion": "v2", "thinking": "high" },
+      "dependsOn": ["correctness", "efficiency"],
+      "task": "Consolidate only the two review results in context.graph.upstream. Preserve attribution and disagreements. Rank the smallest useful fixes. Do not edit."
+    }
+  ],
+  "outputs": ["conclusion"]
+}

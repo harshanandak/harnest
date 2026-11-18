@@ -1,0 +1,89 @@
+{
+  "requestId": "replace-per-item-pipeline-001",
+  "cwd": "C:/replace/with/your/repository",
+  "task": "Apply the same bounded change to each item, verify it twice, fix what verifiers find, then summarize.",
+  "context": { "change": "<replace with the exact change to apply to every item>" },
+  "policy": { "write": true },
+  "execution": { "background": true, "maxConcurrency": 4, "timeoutMs": 7200000 },
+  "nodes": [
+    {
+      "id": "impl-item-a",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-a",
+      "policy": { "write": true },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Apply the change to this item only. Run the focused tests for the touched files. Return what changed and which tests ran."
+    },
+    {
+      "id": "impl-item-b",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-b",
+      "policy": { "write": true },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Apply the change to this item only. Run the focused tests for the touched files. Return what changed and which tests ran."
+    },
+    {
+      "id": "verify-item-a-1",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-a",
+      "dependsOn": ["impl-item-a"],
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Review the change in context.graph.upstream[\"impl-item-a\"].result. Try to falsify it: check the diff line by line and rerun the focused tests. Return findings only."
+    },
+    {
+      "id": "verify-item-a-2",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-a",
+      "dependsOn": ["impl-item-a"],
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Adversarially review the same change from a different angle: edge cases, failure paths, missing tests. Return findings only."
+    },
+    {
+      "id": "fix-item-a",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-a",
+      "dependsOn": ["verify-item-a-1", "verify-item-a-2"],
+      "policy": { "write": true },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Fix every confirmed finding from both verifiers in context.graph.upstream. Re-run the focused tests. Return the final status."
+    },
+    {
+      "id": "verify-item-b-1",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-b",
+      "dependsOn": ["impl-item-b"],
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Review the change in context.graph.upstream[\"impl-item-b\"].result. Try to falsify it: check the diff line by line and rerun the focused tests. Return findings only."
+    },
+    {
+      "id": "verify-item-b-2",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-b",
+      "dependsOn": ["impl-item-b"],
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Adversarially review the same change from a different angle: edge cases, failure paths, missing tests. Return findings only."
+    },
+    {
+      "id": "fix-item-b",
+      "target": "auto",
+      "cwd": "C:/replace/with/isolated/worktree-b",
+      "dependsOn": ["verify-item-b-1", "verify-item-b-2"],
+      "policy": { "write": true },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Fix every confirmed finding from both verifiers in context.graph.upstream. Re-run the focused tests. Return the final status."
+    },
+    {
+      "id": "synthesize",
+      "target": "auto",
+      "dependsOn": ["fix-item-a", "fix-item-b"],
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Summarize each item's final state, tests run, and anything unresolved. Do not merge branches; the lead owns integration."
+    }
+  ],
+  "outputs": ["synthesize"]
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "harnest": {
+      "type": "http",
+      "url": "http://127.0.0.1:41237/mcp",
+      "headersHelper": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-mcp-headers.mjs\""
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "requestId": "replace-adversarial-review-001",
+  "cwd": "C:/replace/with/your/repository",
+  "task": "Review the change or plan in context from three independent angles, refute weak findings, and consolidate.",
+  "context": { "artifact": "<replace with the diff, plan, or file list to review>", "requiredResultFields": ["finalText"] },
+  "policy": { "write": false },
+  "execution": { "background": true, "maxConcurrency": 3, "timeoutMs": 2700000 },
+  "nodes": [
+    {
+      "id": "review-correctness",
+      "target": "auto",
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Find correctness defects: wrong results, broken state transitions, unhandled failures. Return at most five findings, each with file/line evidence and a minimal fix."
+    },
+    {
+      "id": "review-safety",
+      "target": "auto",
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Attack the change from a security and data-integrity angle: injection, secrets, destructive writes, permission widening. Return at most five findings with evidence."
+    },
+    {
+      "id": "review-efficiency",
+      "target": "auto",
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Find wasted work: duplicate scans, oversized context, unnecessary retries, avoidable model calls. Return at most five findings with evidence."
+    },
+    {
+      "id": "skeptic",
+      "target": "auto",
+      "dependsOn": ["review-correctness", "review-safety", "review-efficiency"],
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Use context.graph.upstream. Re-read each cited line and classify every finding as real, false positive, or uncertain. Drop false positives; keep evidence only."
+    },
+    {
+      "id": "consolidate",
+      "target": "auto",
+      "dependsOn": ["skeptic"],
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Merge real findings, deduplicate, rank by severity, preserve attribution to the originating angle, and state the smallest useful fixes."
+    }
+  ],
+  "outputs": ["consolidate"]
+}

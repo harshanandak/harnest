@@ -1,0 +1,33 @@
+{
+  "requestId": "replace-tournament-round-001",
+  "cwd": "C:/replace/with/your/repository",
+  "task": "One pairwise judging round of a tournament. The lead advances winners into the next round with a fresh requestId.",
+  "context": { "criterion": "<replace with the single judging criterion>", "candidates": { "pair-1": ["<id A1>", "<id B1>"], "pair-2": ["<id A2>", "<id B2>"] } },
+  "policy": { "write": false },
+  "execution": { "background": true, "maxConcurrency": 4, "timeoutMs": 1800000 },
+  "nodes": [
+    {
+      "id": "judge-pair-1",
+      "target": "auto",
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Compare the two candidates in context.candidates['pair-1'] against the judging criterion. Return JSON: { winner: <id>, loser: <id>, reason: <one sentence>, confidence: 0-1 }. If the criterion cannot separate them, say so explicitly."
+    },
+    {
+      "id": "judge-pair-2",
+      "target": "auto",
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Compare the two candidates in context.candidates['pair-2'] against the judging criterion. Return JSON: { winner: <id>, loser: <id>, reason: <one sentence>, confidence: 0-1 }."
+    },
+    {
+      "id": "collect",
+      "target": "auto",
+      "dependsOn": ["judge-pair-1", "judge-pair-2"],
+      "policy": { "write": false },
+      "metadata": { "routing": { "tier": "quick", "difficulty": "trivial" } },
+      "task": "Collect both judge results from context.graph.upstream into a winners list and a losers list with reasons. The lead uses this to build the next round."
+    }
+  ],
+  "outputs": ["collect"]
+}

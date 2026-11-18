@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.harnest/schemas/handoff-request.schema.json",
+  "title": "Harnest handoff request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["requestId", "target", "task", "cwd"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "requestId": { "type": "string", "minLength": 1 },
+    "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+    "task": { "type": "string", "minLength": 1 },
+    "cwd": { "type": "string", "minLength": 1 },
+    "context": {},
+    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "engine": { "const": "taskflow" },
+        "name": { "type": "string" },
+        "spec": {}
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "agent": { "type": "string" },
+        "variant": { "type": "string" },
+        "thinking": { "type": ["string", "boolean"] },
+        "harnessVersion": { "type": "string", "enum": ["v1", "v2"], "description": "OpenCode version selector. Other targets may reject this field according to their adapter contract." },
+        "serverUrl": { "type": "string", "minLength": 1, "description": "OpenCode private server URL." }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "background": { "type": "boolean" },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "sessionId": { "type": "string" },
+        "transport": { "enum": ["oneshot", "session"], "description": "Session transport uses the native interactive protocol; unsupported controls never silently fall back to one-shot execution." }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "write": { "type": "boolean", "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true." },
+        "readOnly": { "type": "boolean", "description": "Legacy alias for !write; must not contradict write or allowWrites" },
+        "allowWrites": { "type": "boolean", "description": "Legacy alias for write; must not contradict write or readOnly" },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "maxCostUsd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "harnest": {
+          "type": "object",
+          "properties": {
+            "writeApproved": { "type": "boolean", "description": "Exact guarded-host approval marker. Set true only after the lead confirms the intended write scope; there is no separate writeScope protocol field." }
+          }
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["auto", "pin", "prefer"] },
+            "tier": { "enum": ["quick", "balanced", "deep", "review"] },
+            "difficulty": { "enum": ["trivial", "bounded", "hard"] },
+            "allowTrainingEndpoints": { "type": "boolean" },
+            "harnessOrder": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "fallbacks": { "type": "boolean" },
+            "contextTokens": { "type": "number", "minimum": 0 },
+            "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+            "weights": { "type": "object" },
+            "route": { "type": "object" },
+            "require": { "type": "object" },
+            "prefer": { "type": "object" },
+            "avoid": { "type": "object" },
+            "maxCostUsd": { "type": "number", "minimum": 0 },
+            "deadlineMs": { "type": "number", "minimum": 1 },
+            "candidates": { "type": "array", "items": { "type": "object" } },
+            "rules": { "type": "array", "items": { "type": "object" } },
+            "defaults": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}

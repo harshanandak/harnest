@@ -1,0 +1,4 @@
+agents/*.md text eol=lf
+codex-agents/*.toml text eol=lf
+opencode-agents/*.md text eol=lf
+scripts/vendor/codex-plugin-validator/* text eol=lf

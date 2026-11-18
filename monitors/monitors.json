@@ -1,0 +1,7 @@
+[
+  {
+    "name": "harnest-workflows",
+    "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/workflow-monitor.mjs\"",
+    "description": "Harnest workflows: phases, agent activity, retries, controls and completion"
+  }
+]

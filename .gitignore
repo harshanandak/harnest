@@ -1,0 +1,11 @@
+node_modules/
+.harnest/
+.pi/taskflows/runs/
+coverage/
+*.log
+*.tmp
+harnest.config.local.json
+harnest.routing.local.mjs
+*.bak-harnest-*
+
+audit/

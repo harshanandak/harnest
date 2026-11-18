@@ -1,0 +1,11 @@
+interface:
+  display_name: "Workflow handoff"
+  short_description: "Hand a complete workflow to a supported harness or registered ACP agent."
+policy:
+  # A cross-harness handoff spends another model's budget; never fire implicitly.
+  allow_implicit_invocation: false
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "harnest"
+      description: "Harnest MCP server (handoff_workflow/status/result/trace)"

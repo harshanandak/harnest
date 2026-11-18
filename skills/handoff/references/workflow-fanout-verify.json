@@ -1,0 +1,43 @@
+{
+  "requestId": "replace-fanout-verify-001",
+  "cwd": "C:/replace/with/your/repository",
+  "task": "Research the question from independent angles, verify every claim, synthesize one answer.",
+  "context": { "question": "<replace with the exact question>" },
+  "policy": { "write": false },
+  "execution": { "background": true, "maxConcurrency": 4, "timeoutMs": 3600000 },
+  "nodes": [
+    {
+      "id": "angle-code",
+      "target": "auto",
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Answer the question from the code and implementation angle. Return findings with exact file references."
+    },
+    {
+      "id": "angle-docs",
+      "target": "auto",
+      "metadata": { "routing": { "tier": "quick", "difficulty": "trivial" } },
+      "task": "Answer from the documentation and contract angle. Cite exact paths and quote the relevant lines."
+    },
+    {
+      "id": "angle-ops",
+      "target": "auto",
+      "metadata": { "routing": { "tier": "balanced", "difficulty": "bounded" } },
+      "task": "Answer from the operations and runtime angle, including failure modes and recovery behavior."
+    },
+    {
+      "id": "verify",
+      "target": "auto",
+      "dependsOn": ["angle-code", "angle-docs", "angle-ops"],
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Use context.graph.upstream. For every claim check the cited evidence and mark it supported, unsupported, or uncertain. Return only verified claims with their evidence, and list anything you could not verify."
+    },
+    {
+      "id": "synthesize",
+      "target": "auto",
+      "dependsOn": ["verify"],
+      "metadata": { "routing": { "tier": "review", "difficulty": "hard" } },
+      "task": "Write the final answer from verified claims only. Preserve disagreements and uncertainty explicitly. Do not add new claims."
+    }
+  ],
+  "outputs": ["synthesize"]
+}

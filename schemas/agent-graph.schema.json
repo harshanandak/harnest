@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "type": "string"
+    },
+    "context": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "write": {
+          "type": "boolean",
+          "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true."
+        },
+        "readOnly": {
+          "type": "boolean",
+          "description": "Legacy alias for !write; must not contradict write or allowWrites."
+        },
+        "allowWrites": {
+          "type": "boolean",
+          "description": "Legacy alias for write; must not contradict write or readOnly."
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "maxCostUsd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "harnest": {
+          "type": "object",
+          "properties": {
+            "writeApproved": {
+              "type": "boolean",
+              "description": "Exact guarded-host approval marker. Set true only after the lead confirms the intended write scope; there is no separate writeScope protocol field."
+            }
+          },
+          "additionalProperties": {}
+        },
+        "routing": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": {}
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "background": {
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "minItems": 1,
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "pi",
+              "claude",
+              "codex",
+              "opencode",
+              "cursor",
+              "gemini",
+              "amp",
+              "acp"
+            ]
+          },
+          "task": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependsOn": {
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          },
+          "route": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "agent": {
+                "type": "string",
+                "minLength": 1
+              },
+              "variant": {
+                "type": "string",
+                "minLength": 1
+              },
+              "thinking": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "harnessVersion": {
+                "type": "string",
+                "enum": [
+                  "v1",
+                  "v2"
+                ]
+              },
+              "serverUrl": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "write": {
+                "type": "boolean",
+                "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true."
+              },
+              "readOnly": {
+                "type": "boolean",
+                "description": "Legacy alias for !write; must not contradict write or allowWrites."
+              },
+              "allowWrites": {
+                "type": "boolean",
+                "description": "Legacy alias for write; must not contradict write or readOnly."
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "maxCostUsd": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "harnest": {
+                "type": "object",
+                "properties": {
+                  "writeApproved": {
+                    "type": "boolean",
+                    "description": "Exact guarded-host approval marker. Set true only after the lead confirms the intended write scope; there is no separate writeScope protocol field."
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "routing": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": {}
+          },
+          "execution": {
+            "type": "object",
+            "properties": {
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "task"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "outputs": {
+      "minItems": 1,
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      }
+    }
+  },
+  "required": [
+    "requestId",
+    "cwd",
+    "nodes"
+  ],
+  "additionalProperties": false,
+  "description": "Agent-authored DAG. Each node is a prompt-only handoff; dependencies pass attributed results. Different nodes may use different harnesses. Completed nodes are preserved during recovery.",
+  "$id": "https://local.harnest/schemas/agent-graph.schema.json",
+  "title": "Harnest mixed-harness DAG"
+}

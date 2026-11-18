@@ -1,0 +1,20 @@
+{
+  "name": "harnest-local",
+  "interface": {
+    "displayName": "Harnest MCP"
+  },
+  "plugins": [
+    {
+      "name": "harnest",
+      "source": {
+        "source": "local",
+        "path": "."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

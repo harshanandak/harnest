@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.harnest/schemas/handoff-comparison.schema.json",
+  "title": "Harnest multi-model comparison",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request", "candidates"],
+  "properties": {
+    "request": {
+      "allOf": [
+        { "$ref": "./handoff-request.schema.json" },
+        {
+          "properties": {
+            "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini"] }
+          }
+        }
+      ]
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "route"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+          "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini"] },
+          "route": {
+            "type": "object",
+            "required": ["model"],
+            "properties": {
+              "provider": { "type": "string" },
+              "model": { "type": "string", "minLength": 1 },
+              "variant": { "type": "string" },
+              "thinking": { "type": ["string", "boolean"] },
+              "harnessVersion": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

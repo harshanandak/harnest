@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR revisions share a group; every push to main gets its own so a queued run is never replaced.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS bills 10x minutes on private repos, so it runs on main pushes and manual runs only.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: '1.4.4'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      # The vendored plugin validator imports yaml.
+      - run: python -m pip install PyYAML==6.0.2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run smoke:mcp
+      - run: bun run smoke:mcp --bridge
+      - run: bun run validate:plugin
+
+  memory:
+    name: memory (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS bills 10x minutes on private repos, so it runs on main pushes and manual runs only.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.18.0'
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: '1.4.4'
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML==6.0.2
+      - run: bun install --frozen-lockfile
+      - run: node scripts/check-mcp-memory.mjs --budget-mib 120
+      - run: node scripts/check-daemon-memory.mjs
+        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: harnest-mcp-memory-${{ matrix.os }}
+          path: harnest-mcp-memory.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: harnest-daemon-memory-${{ matrix.os }}
+          path: harnest-daemon-memory.json
+          if-no-files-found: error

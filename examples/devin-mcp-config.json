@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "harnest": {
+      "command": "node",
+      "args": ["/absolute/path/to/harnest/src/mcp-bridge.mjs"]
+    }
+  }
+}

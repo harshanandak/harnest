@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.harnest/schemas/handoff-receipt.schema.json",
+  "title": "Harnest terminal receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "requestId", "jobId", "target", "contextDigest", "state", "createdAt"],
+  "properties": {
+    "protocolVersion": { "const": "1.0" },
+    "requestId": { "type": "string" },
+    "jobId": { "type": "string" },
+    "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+    "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "state": { "enum": ["queued", "running", "completed", "failed", "cancelled", "partial"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "startedAt": { "type": ["string", "null"], "format": "date-time" },
+    "completedAt": { "type": ["string", "null"], "format": "date-time" },
+    "sessionId": { "type": ["string", "null"] },
+    "workflowRunId": { "type": ["string", "null"] },
+    "route": { "type": "object" },
+    "routingDecision": { "type": ["object", "null"] },
+    "result": { "type": ["object", "null"] },
+    "usage": { "type": ["object", "null"] },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "background": { "type": "boolean" },
+        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "foregroundConverted": { "type": "boolean" },
+        "convertedAt": { "type": ["string", "null"], "format": "date-time" },
+        "requestedTimeoutMs": { "type": ["integer", "null"], "minimum": 1, "maximum": 86400000 },
+        "safeForegroundWaitMs": { "type": ["integer", "null"], "minimum": 1 },
+        "hint": { "type": ["string", "null"] },
+        "effectivePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["write", "mode"],
+          "properties": {
+            "write": { "type": "boolean" },
+            "mode": { "type": "string" }
+          }
+        },
+        "launchFlags": { "type": "array", "items": { "type": "string" } },
+        "transport": { "enum": ["oneshot", "session"] }
+      }
+    },
+    "usageSummary": { "type": ["object", "null"] },
+    "capabilities": { "type": "object" },
+    "cleanupError": { "type": "object" },
+    "resumeOf": { "type": ["string", "null"] },
+    "usageAttemptsDropped": { "type": "integer", "minimum": 0 },
+    "usageTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputTokens", "uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "costUsd", "reportedAttempts", "unreportedAttempts", "partial"],
+      "properties": {
+        "inputTokens": { "type": "number", "minimum": 0 },
+        "uncachedInputTokens": { "type": "number", "minimum": 0 },
+        "outputTokens": { "type": "number", "minimum": 0 },
+        "cacheReadTokens": { "type": "number", "minimum": 0 },
+        "cacheWriteTokens": { "type": "number", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "reportedAttempts": { "type": "integer", "minimum": 0 },
+        "unreportedAttempts": { "type": "integer", "minimum": 0 },
+        "partial": { "type": "boolean" }
+      }
+    },
+    "usageAttempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt", "jobId", "target", "route", "state", "usageReported", "usage", "usageSummary"],
+        "properties": {
+          "attempt": { "type": "integer", "minimum": 1 },
+          "jobId": { "type": "string" },
+          "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+          "route": { "type": "object" },
+          "state": { "type": "string" },
+          "usageReported": { "type": "boolean" },
+          "usage": { "type": ["object", "null"] },
+          "usageSummary": { "type": ["object", "null"] }
+        }
+      }
+    },
+    "error": { "type": ["object", "null"] },
+    "cancellation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["state", "requestedAt", "requestedBy", "acknowledgedAt"],
+      "properties": {
+        "state": { "enum": ["requested", "acknowledged", "unacknowledged", "completed-before-cancel"] },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "requestedBy": { "type": "string" },
+        "acknowledgedAt": { "type": ["string", "null"], "format": "date-time" },
+        "downstreamExit": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["code", "signal"],
+          "properties": {
+            "code": { "type": ["integer", "null"] },
+            "signal": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "controls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["commandId", "kind", "delivery", "state", "requestedAt", "updatedAt", "effect", "route", "acknowledgement", "error"],
+        "properties": {
+          "commandId": { "type": "string" },
+          "kind": { "enum": ["message", "reroute"] },
+          "delivery": { "enum": ["steer", "follow_up"] },
+          "state": { "enum": ["accepted", "applied", "rejected", "uncertain"] },
+          "requestedAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "effect": { "type": ["string", "null"] },
+          "route": { "type": ["object", "null"] },
+          "acknowledgement": { "type": ["object", "null"] },
+          "error": { "type": ["object", "null"] }
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "eventCount", "lastEventAt", "lastActivity"],
+      "properties": {
+        "ref": { "type": "string" },
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "lastEventAt": { "type": ["string", "null"], "format": "date-time" },
+        "lastActivity": { "type": ["string", "null"] },
+        "recovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["malformedRecords", "lastSafeSequence"],
+          "properties": {
+            "malformedRecords": { "type": "integer", "minimum": 0 },
+            "lastSafeSequence": { "type": "integer", "minimum": 0 },
+            "error": { "type": "string" }
+          }
+        },
+        "progress": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["phase", "current", "recent", "lastMeaningfulAt"],
+          "properties": {
+            "phase": { "type": "string" },
+            "current": { "type": "string" },
+            "recent": { "type": "array", "items": { "type": "string" }, "maxItems": 5 },
+            "lastMeaningfulAt": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lookupKey", "canResume", "heartbeatAt"],
+      "properties": {
+        "lookupKey": { "type": "string" },
+        "canResume": { "type": "boolean" },
+        "heartbeatAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

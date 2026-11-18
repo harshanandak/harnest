@@ -1,0 +1,17 @@
+---
+description: Route multi-agent delegation through harnest handoff tools and the handoff skill
+alwaysApply: false
+---
+
+When the user asks to delegate a bounded task to another harness
+(OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a registered ACP agent), compare models, or fan out parallel
+research lanes or dependency graphs, invoke the `handoff` skill (`/handoff`) and call the
+`harnest` MCP tools (`handoff_workflow`, `handoff_status`,
+`handoff_trace`, `handoff_result`, `handoff_compare`,
+`handoff_review`, `handoff_message`, `handoff_reroute`,
+`handoff_fleet`, `handoff_post`, `handoff_read`). Do not paste the playbook into chat;
+read `.cursor/skills/handoff/SKILL.md` when the skill fires.
+For graphs use `handoff_graph_validate/start/status/result/cancel/resume`;
+read `references/agent-graphs.md` for per-task routing and selective recovery.
+For a firsthand terminal workflow tree (models, thinking levels, node drill-in), use the
+`/workflows` command or run `node scripts/graph-view.mjs` from a repo terminal.

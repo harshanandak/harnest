@@ -1,0 +1,15 @@
+{
+  "name": "harnest-local",
+  "description": "Harnest MCP coordinates durable workflows across supported agent harnesses.",
+  "owner": {
+    "name": "Harsha Nanda"
+  },
+  "plugins": [
+    {
+      "name": "harnest",
+      "source": "./",
+      "description": "Harnest MCP coordinates durable handoffs across supported native harnesses and trusted registered ACP agents.",
+      "version": "0.1.0+claude.20261118113830"
+    }
+  ]
+}

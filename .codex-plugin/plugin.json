@@ -1,0 +1,42 @@
+{
+  "name": "harnest",
+  "version": "0.1.0+codex.20261118113830",
+  "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Gemini CLI, Amp, and trusted registered ACP agents.",
+  "author": {
+    "name": "Harsha Nanda"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "handoff",
+    "opencode",
+    "pi",
+    "cursor",
+    "claude",
+    "codex",
+    "gemini",
+    "amp",
+    "taskflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Harnest MCP",
+    "shortDescription": "Coordinate durable workflows across agent harnesses.",
+    "longDescription": "Harnest MCP coordinates native handoffs and dependency graphs while the lead owns planning, review and integration. Direct MCP setup supports registered ACP agents; host plugins and worker bridges are optional.",
+    "developerName": "Harsha Nanda",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Hand this workflow to the cheapest qualified harness.",
+      "Run this graph in OpenCode and return its receipt.",
+      "Run this graph in Pi and return its receipt.",
+      "Run this graph in Codex and return its receipt.",
+      "Run this graph in Gemini and return its receipt.",
+      "Run this graph in Amp and return its receipt."
+    ]
+  },
+  "mcpServers": {}
+}

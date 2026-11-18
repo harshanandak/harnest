@@ -1,0 +1,7 @@
+{
+  "name": "harnest-opencode",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": { ".": "./index.js", "./tui": "./tui.tsx" }
+}

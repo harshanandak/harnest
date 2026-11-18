@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "SubagentStart": [
+      {
+        "matcher": "opencode-worker|pi-worker|cursor-worker|claude-worker|codex-worker|gemini-worker|amp-worker|acp-worker|workflow-rescue",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-worker-start.mjs\"" }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "opencode-worker|pi-worker|cursor-worker|claude-worker|codex-worker|gemini-worker|amp-worker|acp-worker|workflow-rescue",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-worker-stop.mjs\"" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*__handoff_.*",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-guard-write.mjs\"" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__(plugin_harnest_harnest|harnest)__handoff_.*",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-audit-handoff.mjs\"" }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-session-start.mjs\"" }]
+      }
+    ]
+  }
+}
