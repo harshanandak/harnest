@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { basename, delimiter, isAbsolute, join, parse, win32 } from "node:path";
 
 const windows = process.platform === "win32";
@@ -60,8 +60,16 @@ export function requireNativeCommand(command, env) {
   return executable;
 }
 
+let hostWindowsRoot;
+
 export function windowsSystemCommand(command, env = process.env) {
-  const root = env.SystemRoot || env.windir;
+  if (windows && env === process.env && !hostWindowsRoot) {
+    // Resolve the Windows object manager's SystemRoot alias to a regular path.
+    try { hostWindowsRoot = realpathSync.native("\\\\?\\GLOBALROOT\\SystemRoot"); }
+    catch { /* Some environments restrict access to the NT namespace. */ }
+  }
+  // SystemRoot and windir are trusted host environment when the OS path is unavailable.
+  const root = (env === process.env && hostWindowsRoot) || env.SystemRoot || env.windir;
   if (!root || !win32.isAbsolute(root) || win32.parse(root).root.length <= 1) {
     throw new Error("SystemRoot or windir must be a fully qualified Windows path to launch " + command);
   }

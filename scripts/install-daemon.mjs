@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { ensureDaemon } from "../src/daemon-client.mjs";
 import { withoutHarnestToken } from "../src/daemon-env.mjs";
 import { daemonDirectory, jobStateDirectory } from "../src/daemon-settings.mjs";
-import { windowsSystemCommand } from "../src/launch-command.mjs";
+import { NativeLaunchError, requireNativeCommand, windowsSystemCommand } from "../src/launch-command.mjs";
 import { readExisting, replaceWithBackup } from "./install-files.mjs";
 
 const daemon = fileURLToPath(new URL("../src/daemon.mjs", import.meta.url));
@@ -118,17 +118,19 @@ async function autostart() {
     run(scheduler, ["/create", "/tn", name, "/xml", path, "/f"]);
     return;
   }
+  const mac = process.platform === "darwin";
+  const serviceManager = requireNativeCommand(mac ? "launchctl" : "systemctl");
   const { path, content } = loginItem(process.platform);
   const previous = await readExisting(path);
   await replaceWithBackup(path, content, previous);
-  if (process.platform === "darwin") {
+  if (mac) {
     const domain = `gui/${process.getuid()}`;
-    try { run("launchctl", ["print", `${domain}/${label}`]); } catch {
-      run("launchctl", ["bootstrap", domain, path]);
+    try { run(serviceManager, ["print", `${domain}/${label}`]); } catch {
+      run(serviceManager, ["bootstrap", domain, path]);
     }
   } else {
-    run("systemctl", ["--user", "daemon-reload"]);
-    run("systemctl", ["--user", "enable", unit]);
+    run(serviceManager, ["--user", "daemon-reload"]);
+    run(serviceManager, ["--user", "enable", unit]);
   }
 }
 
@@ -142,23 +144,26 @@ export async function removeAutostart({
     execute(windowsSystemCommand("schtasks.exe", env), ["/delete", "/tn", target, "/f"]);
     return;
   }
-  if (platform === "darwin") {
+  const mac = platform === "darwin";
+  const serviceManager = requireNativeCommand(mac ? "launchctl" : "systemctl", env);
+  if (mac) {
     const service = `gui/${uid}/${label}`;
     let loaded = false;
-    try { execute("launchctl", ["print", service]); loaded = true; } catch { /* already unloaded */ }
-    if (loaded) execute("launchctl", ["bootout", service]);
+    try { execute(serviceManager, ["print", service]); loaded = true; } catch { /* already unloaded */ }
+    if (loaded) execute(serviceManager, ["bootout", service]);
   } else {
-    execute("systemctl", ["--user", "disable", unit]);
+    execute(serviceManager, ["--user", "disable", unit]);
   }
   await removeFile(target).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  if (platform !== "darwin") execute("systemctl", ["--user", "daemon-reload"]);
+  if (!mac) execute(serviceManager, ["--user", "daemon-reload"]);
 }
 
 export async function setupDaemon({ noAutostart = false } = {}) {
   await ensureDaemon();
   if (!noAutostart) {
-    try { await autostart(); } catch {
-      throw new Error("Could not register the Harnest login item. Use --no-autostart to install without a login item.");
+    try { await autostart(); } catch (error) {
+      const message = error instanceof NativeLaunchError ? error.message : "Could not register the Harnest login item.";
+      throw new Error(message + " Use --no-autostart to install without a login item.", { cause: error });
     }
   }
 }

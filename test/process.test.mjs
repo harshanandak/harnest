@@ -76,16 +76,82 @@ function terminationProbe(t) {
   return { child, state, kills };
 }
 
-test("Windows cleanup kills the direct child when the system root is relative", { skip: process.platform !== "win32" }, (t) => {
-  const previousRoot = process.env.SystemRoot;
-  process.env.SystemRoot = "relative";
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.SystemRoot;
-    else process.env.SystemRoot = previousRoot;
-  });
-  const { child, kills } = terminationProbe(t);
+test("Windows cleanup warns and kills the direct child when neither tree killer can launch", { skip: process.platform !== "win32" }, (t) => {
+  const child = fakeChild();
+  child.pid = 424242;
+  child.kill = t.mock.fn();
+  const warnings = t.mock.method(console, "warn", () => {});
+  const intercepted = t.mock.method(childProcess, "spawn", () => { throw new Error("unavailable tree killer"); });
+  syncBuiltinESMExports();
+  t.after(() => { intercepted.mock.restore(); syncBuiltinESMExports(); });
+
   terminateProcessTree(child);
-  assert.deepEqual(kills, [{ exited: false, closed: false, signal: "SIGTERM" }]);
+  assert.equal(intercepted.mock.callCount(), 2);
+  assert.match(intercepted.mock.calls[0].arguments[0], /[\\/]taskkill\.exe$/i);
+  assert.match(intercepted.mock.calls[1].arguments[0], /[\\/]powershell\.exe$/i);
+  assert.equal(child.kill.mock.callCount(), 1);
+  assert.match(warnings.mock.calls[0].arguments[0], /descendants may survive/i);
+});
+
+test("Windows cleanup accepts a process created later in the cancellation millisecond", { skip: process.platform !== "win32" }, async (t) => {
+  const requestedAt = Date.UTC(2026, 0, 1, 0, 0, 0, 123);
+  const child = fakeChild();
+  child.pid = 424242;
+  const taskkill = new EventEmitter();
+  const intercepted = t.mock.method(childProcess, "spawn", () => taskkill);
+  syncBuiltinESMExports();
+  t.after(() => { intercepted.mock.restore(); syncBuiltinESMExports(); });
+
+  const clock = t.mock.method(Date, "now", () => requestedAt);
+  try { terminateProcessTree(child); }
+  finally { clock.mock.restore(); }
+  taskkill.emit("close", 1);
+
+  assert.equal(intercepted.mock.callCount(), 2);
+  const [command, args] = intercepted.mock.calls[1].arguments;
+  assert.match(command, /[\\/]powershell\.exe$/i);
+  assert.equal(args.at(-2), "-EncodedCommand");
+  const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
+
+  function probeCreationTime(ticksAfterCutoff) {
+    // Inject a CIM row and report selection without touching real processes.
+    const fixtureScript = script
+      .replace(/^Import-Module [^\n]*\n\$processes = [^\n]*$/m, () => `
+$processes = @([pscustomobject]@{
+  ProcessId = ${child.pid}
+  ParentProcessId = ${process.pid}
+  CreationDate = [DateTimeOffset]::FromUnixTimeMilliseconds(${requestedAt}).UtcDateTime.AddTicks(${ticksAfterCutoff})
+})`)
+      .replace(/^function Stop-Tree\(\$entry\) \{[\s\S]*?^\}/m, () => "function Stop-Tree($entry) { Write-Output $entry.ProcessId }");
+    const encoded = Buffer.from(fixtureScript, "utf16le").toString("base64");
+    return exec(command, [...args.slice(0, -1), encoded], { timeout: 8000 });
+  }
+
+  const { stdout } = await probeCreationTime(4_560);
+  assert.equal(stdout.trim(), String(child.pid));
+  await assert.rejects(probeCreationTime(10_000), { code: 1 });
+});
+
+test("Windows cleanup warns without targeting the root after it exits before taskkill fails", { skip: process.platform !== "win32" }, (t) => {
+  const child = fakeChild();
+  child.pid = 424242;
+  child.kill = t.mock.fn();
+  const taskkill = new EventEmitter();
+  const warnings = t.mock.method(console, "warn", () => {});
+  const intercepted = t.mock.method(childProcess, "spawn", () => taskkill);
+  syncBuiltinESMExports();
+  t.after(() => { intercepted.mock.restore(); syncBuiltinESMExports(); });
+
+  terminateProcessTree(child);
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  taskkill.emit("close", 1);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.match(intercepted.mock.calls[0].arguments[0], /[\\/]taskkill\.exe$/i);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.match(warnings.mock.calls[0].arguments[0], /descendants may survive/i);
 });
 
 for (const mode of ["callback rejection", "timeout"]) {

@@ -213,25 +213,74 @@ export function classifyProviderFailure(input = {}) {
   return null;
 }
 
+function killChild(child) {
+  try { child.kill(); } catch { /* The process already exited. */ }
+}
+
+function launchWindowsTreeKiller(command, args, options, onFailure) {
+  try {
+    const killer = nodeSpawn(windowsSystemCommand(command), args, {
+      windowsHide: true, shell: false, stdio: "ignore", ...options,
+    });
+    killer.on("error", () => {}); // A failed spawn also emits close.
+    killer.once("close", (code) => { if (code !== 0) onFailure(); });
+    killer.unref?.();
+  } catch { onFailure(); }
+}
+
+function killWindowsTreeWithPowerShell(child, requestedAt) {
+  const directFallback = () => {
+    console.warn("Windows process tree cleanup failed. Descendants may survive.");
+    if (child.exitCode == null && child.signalCode == null) killChild(child);
+  };
+  // Windows reuses PIDs. Check parentage and start times before killing through an open handle.
+  const script = `
+$ErrorActionPreference = 'Stop'
+Import-Module ($PSHOME + '\\Modules\\CimCmdlets\\CimCmdlets.psd1')
+$processes = @(CimCmdlets\\Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate)
+$requestedAt = [DateTimeOffset]::FromUnixTimeMilliseconds(${requestedAt}).UtcDateTime
+$script:incomplete = $false
+function Stop-Tree($entry) {
+  foreach ($descendant in $processes) {
+    if ($descendant.ParentProcessId -eq $entry.ProcessId -and $descendant.CreationDate -gt $entry.CreationDate) {
+      Stop-Tree $descendant
+    }
+  }
+  try {
+    $process = [Diagnostics.Process]::GetProcessById($entry.ProcessId)
+    $null = $process.Handle
+    $age = $process.StartTime.ToUniversalTime() - $entry.CreationDate.ToUniversalTime()
+    if ([Math]::Abs($age.Ticks) -ge [TimeSpan]::TicksPerMillisecond) {
+      $script:incomplete = $true
+      return
+    }
+    $process.Kill()
+  } catch { $script:incomplete = $true }
+}
+foreach ($entry in $processes) {
+  if ($entry.ProcessId -eq ${child.pid} -and $entry.ParentProcessId -eq ${process.pid} -and
+      $entry.CreationDate -and $entry.CreationDate.ToUniversalTime() -le $requestedAt) {
+    Stop-Tree $entry
+    exit [int]$script:incomplete
+  }
+}
+exit 1
+`;
+  launchWindowsTreeKiller("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64"),
+  ], { timeout: 8000, env: withoutHarnestToken(process.env) }, directFallback);
+}
+
 export function terminateProcessTree(child) {
   if (!child || child.killed) return;
   if (process.platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) {
-    try {
-      const killer = nodeSpawn(windowsSystemCommand("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], {
-        windowsHide: true,
-        shell: false,
-        stdio: "ignore",
-      });
-      killer.on("error", () => {
-        try { child.kill(); } catch { /* The process already exited. */ }
-      });
-      killer.unref?.();
-      return;
-    } catch {
-      // Fall through to the direct child when taskkill cannot start.
-    }
+    const requestedAt = Date.now();
+    launchWindowsTreeKiller("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { timeout: 3000 }, () => {
+      if (child.exitCode == null && child.signalCode == null) killWindowsTreeWithPowerShell(child, requestedAt);
+    });
+    return true;
   }
-  try { child.kill(); } catch { /* The process already exited. */ }
+  killChild(child);
 }
 
 function byteLimit(value, fallback, name) {
@@ -347,8 +396,8 @@ export async function runProcess(command, args, options = {}) {
       batchPromises = [];
       batchLines = batchBytes = 0;
       stopInput();
-      if (!exited && !closed) {
-        terminateProcessTree(child);
+      // Windows tree cleanup handles its own timeouts and direct-child fallback.
+      if (!exited && !closed && !terminateProcessTree(child)) {
         // SIGTERM may be ignored; do not resolve a failed run while it is alive.
         killTimer = setTimeout(() => {
           if (!exited && !closed) {
