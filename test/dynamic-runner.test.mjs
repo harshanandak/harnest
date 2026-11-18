@@ -685,6 +685,125 @@ for (const controllerType of ["local", "separate"]) {
   });
 }
 
+for (const { name, resume, mismatchedFence } of [
+  { name: "a matching steer acknowledgement resolves an uncertain control after settlement" },
+  { name: "a matching steer acknowledgement resolves an old control without changing the resumed attempt", resume: true },
+  { name: "a steer acknowledgement with a mismatched fence leaves the control uncertain", mismatchedFence: true },
+]) {
+  test(name, { timeout: 30_000 }, async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const childDispatched = Promise.withResolvers();
+    const finishChild = Promise.withResolvers();
+    const acknowledgementReady = Promise.withResolvers();
+    const deliverAcknowledgement = Promise.withResolvers();
+    const resumeEntered = Promise.withResolvers();
+    const finishResume = Promise.withResolvers();
+    const commandId = "late-steer";
+    const child = call("first attempt child");
+    const resumedSource = planOf([child]);
+    const f = await fixture(t, async () => {
+      await finishChild.promise;
+      return { result: { finalText: "finished" } };
+    }, {
+      runner: { engine: { ...fixtureEngine, async runScript(input) {
+        if (input.source === resumedSource) {
+          resumeEntered.resolve();
+          await finishResume.promise;
+        }
+        return fixtureEngine.runScript(input);
+      } } },
+    });
+    const transact = f.runner.store.transact.bind(f.runner.store);
+    t.mock.method(f.runner.store, "transact", async (...args) => {
+      const outcome = await transact(...args);
+      const event = outcome?.journal.find((entry) => entry.type === "dispatch" && entry.jobId);
+      if (event) childDispatched.resolve(event.jobId);
+      return outcome;
+    });
+    t.mock.method(f.companion, "message", async (jobId) => {
+      acknowledgementReady.resolve(jobId);
+      await deliverAcknowledgement.promise;
+      return { commandId, state: "applied" };
+    });
+
+    const spec = f.spec([child, { type: "throw", message: "first attempt failed" }]);
+    const runId = runIdFor(spec.requestId);
+    const started = f.runner.start(spec);
+    let controlled;
+    let resumed;
+    try {
+      const jobId = await Promise.race([childDispatched.promise, started.then(() => assert.fail("run settled before dispatch"))]);
+      controlled = f.runner.control({ runId, commandId, action: "steer", invocationId: "inv-0", message: "keep going" });
+      const controlledJobId = await Promise.race([
+        acknowledgementReady.promise,
+        controlled.then(() => assert.fail("steer did not reach the acknowledgement gate")),
+      ]);
+      assert.equal(controlledJobId, jobId);
+      const applying = await f.runner.store.readRun(runId);
+      const pending = applying.controls.find((control) => control.commandId === commandId);
+      assert.equal(pending.state, "accepted");
+      assert.deepEqual(pending.application, { ownerId: applying.lease.ownerId, fence: applying.lease.fence, attempt: 1 });
+
+      finishChild.resolve();
+      const settled = await started;
+      assert.equal(settled.state, "partial");
+      const uncertain = settled.controls.find((control) => control.commandId === commandId);
+      assert.equal(uncertain.state, "uncertain");
+      assert.equal(uncertain.error?.details?.kind, "interrupted");
+
+      if (resume) {
+        resumed = f.runner.resume({ runId, commandId: "resume-second", source: resumedSource });
+        await Promise.race([resumeEntered.promise, resumed.then(() => assert.fail("resumed run settled before the gate"))]);
+      }
+      if (mismatchedFence) {
+        await transact(runId, (record) => {
+          record.controls.find((control) => control.commandId === commandId).application.fence += 1;
+          return { record };
+        });
+      }
+      const before = await f.runner.store.readRun(runId);
+      assert.equal(before.attempt, resume ? 2 : 1);
+      assert.equal(before.state, resume ? "running" : "partial");
+      assert.equal(before.controls.find((control) => control.commandId === commandId).state, "uncertain");
+
+      deliverAcknowledgement.resolve();
+      const finalControl = await controlled;
+      const after = await f.runner.store.readRun(runId);
+      if (mismatchedFence) {
+        assert.deepEqual(finalControl, uncertain);
+        assert.deepEqual(after, before);
+      } else {
+        assert.equal(finalControl.state, "applied");
+        assert.equal(finalControl.effect, "next-agent-step");
+        assert.equal(finalControl.error, null);
+        assert.deepEqual(finalControl.acknowledgement, { commandId, state: "applied" });
+        assert.equal(after.controls.find((control) => control.commandId === commandId).application, undefined);
+        assert.deepEqual(after, {
+          ...before, controls: after.controls, updatedAt: after.updatedAt,
+          revision: before.revision + 1, journalSequence: before.journalSequence + 1,
+        });
+      }
+      const { events } = await f.runner.store.readJournal(runId);
+      const lifecycle = events.filter((event) => event.commandId === commandId || event.type === "settled"
+        || event.type === "resume" || (event.type === "claimed" && event.attempt === 2));
+      assert.deepEqual(lifecycle.map((event) => [event.type, event.state ?? event.attempt]), [
+        ["control", "accepted"], ["control", "uncertain"], ["settled", "partial"],
+        ...(resume ? [["resume", 2], ["claimed", 2]] : []),
+        ...(mismatchedFence ? [] : [["control", "applied"]]),
+      ]);
+      if (resumed) {
+        finishResume.resolve();
+        assert.equal((await resumed).state, "completed");
+      }
+    } finally {
+      finishChild.resolve();
+      deliverAcknowledgement.resolve();
+      finishResume.resolve();
+      await Promise.allSettled([started, controlled, resumed]);
+    }
+  });
+}
+
 test("claim rejects an unstamped control on an already queued second attempt", { timeout: 30_000 }, async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const f = await fixture(t, () => assert.fail("the workflow has no agents"), {

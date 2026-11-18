@@ -58,6 +58,20 @@ function setCallUncertainty(call, uncertain) {
   if (attempt) attempt.uncertain = call.uncertain;
 }
 
+function finishControl(command, fields) {
+  Object.assign(command, { error: null, ...fields });
+  command.updatedAt = now();
+  if (command.state === "applied") command.appliedAt = command.updatedAt;
+  return {
+    type: "control", at: command.updatedAt, commandId: command.commandId, action: command.action,
+    state: command.state, effect: command.effect ?? null, invocationId: command.invocationId ?? null,
+  };
+}
+
+function undeliveredControl() {
+  return { state: "rejected", error: compactError(dynamicError("not-active", "run ended before the control was applied")) };
+}
+
 function boundOutput(value) {
   if (value === null || value === undefined) return null;
   let size;
@@ -319,6 +333,31 @@ export class DynamicWorkflowRunner {
 
   // ---- control plane -------------------------------------------------------
 
+  #reconcilePendingControls(record, { claiming = false } = {}) {
+    const journal = [];
+    const attempt = record.attempt ?? 1;
+    const stopped = record.state === "cancelled" && record.cancellation?.reason === "stop"
+      && record.cancellation.state === "acknowledged" && !record.calls.some((call) => call.uncertain);
+    for (const command of record.controls ?? []) {
+      if (command.state !== "accepted") continue;
+      const currentAttempt = (command.attempt ?? command.application?.attempt ?? 1) === attempt;
+      if (claiming && currentAttempt && !command.application) continue;
+      if (stopped && currentAttempt && command.action === "stop") {
+        delete command.application;
+        journal.push(finishControl(command, { state: "applied", effect: "cancellation-requested" }));
+      } else if (command.application) {
+        // Preserve the delivery fence so a late acknowledgement can refine the outcome.
+        journal.push(finishControl(command, {
+          state: "uncertain",
+          error: compactError(dynamicError("interrupted", "control application had not reported an outcome")),
+        }));
+      } else {
+        journal.push(finishControl(command, undeliveredControl()));
+      }
+    }
+    return journal;
+  }
+
   async validate(input) {
     const spec = await normalizeDynamicSpec(input);
     const engine = await this.#engine();
@@ -493,7 +532,10 @@ export class DynamicWorkflowRunner {
         current.recoveryRequired = true;
         current.completedAt = now();
         current.error = compactError(dynamicError("unclaimed", `queued run was never claimed after ${attempts} dispatch attempt(s)`, { attempts, maxAttempts }));
-        return { record: current, journal: [{ type: "recovery", at: current.updatedAt, state: "partial", reason: "unclaimed" }] };
+        return { record: current, journal: [
+          ...this.#reconcilePendingControls(current),
+          { type: "recovery", at: current.updatedAt, state: "partial", reason: "unclaimed" },
+        ] };
       }
       current.dispatch = { attempts: attempts + 1, maxAttempts, lastAttemptAt: now() };
       return { record: current, journal: [{ type: "dispatch", at: current.updatedAt, attempts: attempts + 1, reason: "unclaimed-timeout" }] };
@@ -520,7 +562,10 @@ export class DynamicWorkflowRunner {
         call.error ??= compactError(dynamicError("interrupted", "call was in flight when the owner was lost"));
       }
       record.updatedAt = now();
-      return { record, journal: [{ type: "recovery", at: record.updatedAt, state: "partial", reason: "lease-expired" }] };
+      return { record, journal: [
+        ...this.#reconcilePendingControls(record),
+        { type: "recovery", at: record.updatedAt, state: "partial", reason: "lease-expired" },
+      ] };
     }).then((result) => result?.record ?? null);
   }
 
@@ -680,21 +725,7 @@ export class DynamicWorkflowRunner {
       }
       // Close out pending controls in the same transaction that queues the next attempt.
       const attempt = record.attempt ?? 1;
-      const journal = [];
-      for (const command of record.controls ?? []) {
-        if (command.state !== "accepted") continue;
-        command.updatedAt = now();
-        if (command.action === "stop" && (command.attempt ?? attempt) === attempt
-          && record.state === "cancelled" && record.cancellation?.reason === "stop") {
-          command.state = "applied";
-          command.appliedAt = command.updatedAt;
-          command.effect = "cancellation-requested";
-        } else {
-          command.state = "rejected";
-          command.error = compactError(dynamicError("not-active", `previous attempt ended before applying ${command.action}`));
-        }
-        journal.push({ type: "control", at: command.updatedAt, commandId: command.commandId, action: command.action, state: command.state, effect: command.effect, invocationId: command.invocationId });
-      }
+      const journal = this.#reconcilePendingControls(record);
       record.attempt = attempt + 1;
       record.state = "queued";
       record.dispatch = { attempts: 0, maxAttempts: this.maxDispatchAttempts, lastAttemptAt: now() };
@@ -750,7 +781,10 @@ export class DynamicWorkflowRunner {
       record.completedAt = null;
       record.recoveryRequired = false;
       record.updatedAt = now();
-      return { record, journal: [{ type: "claimed", at: record.updatedAt, attempt, fence }] };
+      return { record, journal: [
+        ...this.#reconcilePendingControls(record, { claiming: true }),
+        { type: "claimed", at: record.updatedAt, attempt, fence },
+      ] };
     });
     if (!outcome?.record) return null;
     active.fence = outcome.record.lease.fence;
@@ -960,27 +994,28 @@ export class DynamicWorkflowRunner {
   }
 
   async #updateControl(runId, active, commandId, fields, mutate) {
-    const apply = (record) => {
-      const command = (record.controls ?? []).find((item) => item.commandId === commandId);
-      if (!command || command.state !== "accepted") return null;
-      Object.assign(command, fields);
-      command.updatedAt = now();
-      if (command.state === "applied") command.appliedAt = command.updatedAt;
-      mutate?.(record, command);
-      return { record, journal: [{ type: "control", at: command.updatedAt, commandId, action: command.action, state: command.state, effect: command.effect ?? null, invocationId: command.invocationId ?? null }] };
+    const apply = (record, owned) => {
+      const command = (record?.controls ?? []).find((item) => item.commandId === commandId);
+      if (!command) return null;
+      const application = command.application;
+      const ownsApplication = application?.ownerId === this.ownerId && application.fence === active.fence
+        && application.attempt === active.attempt;
+      if (application && !ownsApplication) return null;
+      if (command.state !== "accepted" && !(command.state === "uncertain" && ownsApplication)) return null;
+      if (!owned && !ownsApplication && (record.lease || !RUN_TERMINAL.has(record.state)
+        || (record.attempt ?? 1) !== active.attempt || (command.attempt ?? 1) !== active.attempt)) return null;
+      delete command.application;
+      const event = finishControl(command, fields);
+      if (owned) mutate?.(record, command);
+      record.updatedAt = command.updatedAt;
+      return { record, journal: [event] };
     };
     try {
-      await this.#transact(runId, active, apply);
+      await this.#transact(runId, active, (record) => apply(record, true));
     } catch (error) {
       if (error?.details?.kind !== "lease-lost") throw error;
-      // The owner can settle while a control's side effect is completing; the
-      // command record must not stay accepted forever. A terminal run with no
-      // lease has no competing owner, so finalizing it here is fenced-safe.
-      await this.store.transact(runId, (record) => {
-        if (!record || record.lease || !RUN_TERMINAL.has(record.state)
-          || (record.attempt ?? 1) !== active.attempt) return null;
-        return apply(record);
-      }).catch(() => undefined);
+      // A late outcome may update its fenced command, even after resume.
+      await this.store.transact(runId, (record) => apply(record, false)).catch(() => undefined);
     }
   }
 
@@ -999,8 +1034,23 @@ export class DynamicWorkflowRunner {
   }
 
   async #applyCommand(runId, active, command) {
-    if (active.stopped || RUN_TERMINAL.has(active.record?.state)) return;
     try {
+      if (active.stopped || RUN_TERMINAL.has(active.record?.state)) {
+        await this.#updateControl(runId, active, command.commandId, undeliveredControl());
+        return;
+      }
+      // Commit the delivery fence before invoking a side effect that can outlive the run.
+      const started = await this.#transact(runId, active, (record) => {
+        const pending = record.controls.find((item) => item.commandId === command.commandId);
+        if (pending?.state !== "accepted" || pending.application || (pending.attempt ?? 1) !== active.attempt) return null;
+        pending.application = { ownerId: this.ownerId, fence: active.fence, attempt: active.attempt };
+        return { record };
+      });
+      if (!started) return;
+      if (active.stopped || RUN_TERMINAL.has(active.record?.state)) {
+        await this.#updateControl(runId, active, command.commandId, undeliveredControl());
+        return;
+      }
       if (command.action === "pause") {
         active.paused = true;
         await this.#updateControl(runId, active, command.commandId, { state: "applied", effect: "dispatch-gate-closed" }, (record) => {
@@ -1112,7 +1162,10 @@ export class DynamicWorkflowRunner {
         }
       }
     } catch (error) {
-      if (error?.details?.kind === "lease-lost") return;
+      if (error?.details?.kind === "lease-lost") {
+        await this.#updateControl(runId, active, command.commandId, undeliveredControl());
+        return;
+      }
       await this.#updateControl(runId, active, command.commandId, { state: "rejected", error: compactError(error) }).catch(() => undefined);
     }
   }
@@ -1132,7 +1185,10 @@ export class DynamicWorkflowRunner {
           setCallUncertainty(call, true);
           call.error ??= compactError(error);
         }
-        return { record, journal: [{ type: "recovery", at: record.updatedAt, state: "partial", error: record.error }] };
+        return { record, journal: [
+          ...this.#reconcilePendingControls(record),
+          { type: "recovery", at: record.updatedAt, state: "partial", error: record.error },
+        ] };
       });
     } catch { /* owner may already have settled */ }
   }
@@ -1203,7 +1259,10 @@ export class DynamicWorkflowRunner {
         call.error ??= compactError(failure ?? dynamicError("interrupted", "run settled before the call reported"));
       }
       record.progress = null;
-      return { record, journal: [{ type: "settled", at: record.updatedAt, state, error: record.error }] };
+      return { record, journal: [
+        ...this.#reconcilePendingControls(record),
+        { type: "settled", at: record.updatedAt, state, error: record.error },
+      ] };
     }).catch(async (error) => { if (error?.details?.kind !== "lease-lost") throw error; });
     if (deferred) return true;
     active.settleDone = true;
