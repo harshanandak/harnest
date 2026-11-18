@@ -219,6 +219,8 @@ function killChild(child) {
 
 function killWindowsTree(child) {
   const isRunning = () => !child.killed && child.exitCode == null && child.signalCode == null;
+  // Once the root has exited there is no tree left to walk; taskkill then reports 128 (not found).
+  if (!isRunning()) return;
   // A failed spawn can emit both error and close.
   let warned = false;
   const onFailure = () => {
@@ -227,16 +229,12 @@ function killWindowsTree(child) {
     console.warn("Windows process tree cleanup failed. Descendants may survive.");
     if (isRunning()) killChild(child);
   };
-  if (!isRunning()) {
-    onFailure();
-    return;
-  }
   try {
     const killer = nodeSpawn(windowsSystemCommand("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], {
       windowsHide: true, shell: false, stdio: "ignore", timeout: 3000,
     });
     killer.on("error", onFailure);
-    killer.once("close", (code) => { if (code !== 0) onFailure(); });
+    killer.once("close", (code) => { if (code !== 0 && code !== 128) onFailure(); });
     killer.unref?.();
   } catch { onFailure(); }
 }

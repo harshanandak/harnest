@@ -140,14 +140,26 @@ test("Windows cleanup warns without targeting the root after it exits before tas
   assertWindowsCleanupWarning(warnings);
 });
 
-test("Windows cleanup warns without launching taskkill when the root has already exited", { skip: process.platform !== "win32" }, (t) => {
+test("Windows cleanup skips taskkill silently when the root has already exited", { skip: process.platform !== "win32" }, (t) => {
   const { child, warnings, intercepted } = windowsCleanupProbe(t);
   child.exitCode = 0;
   terminateProcessTree(child);
 
   assert.equal(intercepted.mock.callCount(), 0);
   assert.equal(child.kill.mock.callCount(), 0);
-  assertWindowsCleanupWarning(warnings);
+  assert.equal(warnings.mock.callCount(), 0);
+});
+
+test("Windows cleanup stays silent when taskkill reports the root is gone", { skip: process.platform !== "win32" }, (t) => {
+  const { child, taskkill, warnings, intercepted } = windowsCleanupProbe(t);
+  terminateProcessTree(child);
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  taskkill.emit("close", 128);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assert.equal(warnings.mock.callCount(), 0);
 });
 
 test("Windows cleanup emits no warning when taskkill succeeds", { skip: process.platform !== "win32" }, (t) => {
