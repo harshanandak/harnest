@@ -97,6 +97,12 @@ node scripts/install-host-config.mjs --restore "/absolute/path/to/FILE.bak-harne
 
 For OpenCode, use the installer manifest command printed during setup. For a Pi extension file or directory moved out of the auto-loaded extensions directory, move it back to its printed original path. If reverting the entire installation, uninstall the new plugin or remove the newly installed extension before restoring the old registration. Restart the host after restoring and keep backups private.
 
+## Remove an MCP registration
+
+Run `bun run setup remove <host>` to disconnect Harnest from any of the nine automatic ACP presets, Gemini CLI, Amp, or Cursor's user config. Setup prints this command when it creates the user config. Run it from the Harnest repository root, with the same config path environment variables you used for setup.
+
+The command saves a private backup before removing the `harnest` MCP entry. It keeps the file, its other settings, and surrounding comments. Restart the host afterward.
+
 ## ACP presets as lead clients
 
 Run `bun run setup <host>` using the host ID below. For automatic setup, reload the CLI and run `bun run doctor --host <host>` to check the configured bridge and discover the Harnest tools. Each preset setup has CI fixture coverage only, with no live CLI testing.

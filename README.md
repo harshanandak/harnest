@@ -22,6 +22,8 @@ Run `bun run setup --help` for lead host names. Setup can install the MCP bridge
 
 Use `bun run setup <host>` for `claude`, `codex`, `opencode`, `cursor`, `pi`, `gemini`, and `amp` as well. For Cursor, add `--project "/absolute/path/to/project"` to install its workspace files. `bun run setup other` prints a stdio bridge snippet for other clients. See the [HTTP setup and verification instructions](docs/users/getting-started.md#add-the-mcp-server).
 
+Run `bun run setup remove <host>` to disconnect Harnest from an automatic ACP preset, Gemini CLI, Amp, or Cursor's user config. Use the same config path overrides as setup. The command backs up the file before removing the Harnest MCP entry. See the [host removal instructions](docs/users/integrations.md#remove-an-mcp-registration).
+
 ## Supported clients and downstream agents
 
 A lead client connects to Harnest through MCP. The downstream agent executes the task and uses its own native authentication. Direct MCP use requires only the connection and downstream CLI.

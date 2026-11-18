@@ -21,6 +21,7 @@
 - Claude resolves its HTTP headers helper from the installed plugin root. Codex native workers honor `CODEX_HOME`, and Codex-to-Codex guidance uses the MCP tool directly.
 - The stdio bridge restarts a disconnected daemon and retries only discovery or requests refused before delivery. Pi retries dynamic and routing tool discovery after a successful reconnect.
 - HTTP installer configs and backups use user-only permissions. Codex worker setup preserves changed and retired workers for rollback, and stdio bridge setups retain the resolved state directories.
+- Fresh setup for the nine automatic ACP presets, Gemini CLI, Amp, and Cursor prints `bun run setup remove <host>`. The command backs up the user config and removes only the Harnest MCP entry.
 - On Windows, daemon startup restores and verifies user-only permissions on the daemon directory and existing token file before reusing the credential.
 
 ### Security

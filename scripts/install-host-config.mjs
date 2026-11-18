@@ -7,6 +7,8 @@ import { daemonAddress, daemonDirectory, jobStateDirectory } from "../src/daemon
 import { setupDaemon } from "./install-daemon.mjs";
 import { readExisting, replaceWithBackup } from "./install-files.mjs";
 
+const hostConfigCommand = "node scripts/install-host-config.mjs";
+
 export function httpEntry(token) {
   return { url: `${daemonAddress()}/mcp`, headers: { Authorization: `Bearer ${token}` } };
 }
@@ -66,12 +68,18 @@ export function codexConfig(previous, entry, migrated = []) {
   return (remainder ? `${remainder}\n\n` : "") + [...lines, ...keptSettings].join("\n") + "\n";
 }
 
+export function cursorUserConfig(home = homedir()) {
+  return { path: join(home, ".cursor", "mcp.json"), key: "mcpServers" };
+}
+
 export async function installHostConfig(host, { home = homedir(), codexHome = process.env.CODEX_HOME || join(home, ".codex") } = {}) {
   const entry = bridgeEntry();
-  const path = host === "codex" ? join(codexHome, "config.toml")
-    : host === "cursor" ? join(home, ".cursor", "mcp.json") : null;
-  if (!path) throw new Error("Expected codex or cursor");
-  if (host === "cursor") return installJsonServer(path, "mcpServers", entry);
+  if (host === "cursor") {
+    const { path, key } = cursorUserConfig(home);
+    return installJsonServer(path, key, entry);
+  }
+  if (host !== "codex") throw new Error("Expected codex or cursor");
+  const path = join(codexHome, "config.toml");
   const previous = await readExisting(path);
   const migrated = [];
   const backup = await replaceWithBackup(path, codexConfig(previous, entry, migrated), previous, { sensitive: true });
@@ -93,7 +101,7 @@ function propertyValue(object, key, path) {
   return matches[0]?.children[1];
 }
 
-function removeLegacyServer(text, map, property) {
+function removeServerProperty(text, map, property) {
   const scanner = createScanner(text, true);
   const after = property.offset + property.length;
   scanner.setPosition(after);
@@ -136,7 +144,7 @@ export async function installJsonServer(path, key, entry, { existingOnly = false
   const current = propertyValue(map, "harnest", path);
   if (existingOnly && !legacy && !current) return null;
 
-  if (legacy) text = removeLegacyServer(text, map, legacy.parent);
+  if (legacy) text = removeServerProperty(text, map, legacy.parent);
   const options = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: text.includes("\r\n") ? "\r\n" : "\n" } };
   const edit = (location, value) => { text = applyEdits(text, modify(text, location, value, options)); };
   if (!map) edit([key], { harnest: entry });
@@ -146,7 +154,25 @@ export async function installJsonServer(path, key, entry, { existingOnly = false
   parseHostJson(text, path, format);
   const backup = await replaceWithBackup(path, bom + text, previous, { sensitive: true });
   const migrated = legacy ? [`${key}.agent-companion`] : [];
-  return { path, backup, migrated };
+  const result = { path, backup, migrated };
+  if (previous === null) result.created = true;
+  return result;
+}
+
+export async function removeJsonServer({ path, key, format = "json" }) {
+  const previous = await readExisting(path);
+  if (previous === null) return { path, backup: null, status: "config-missing" };
+  const bom = previous.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const text = previous.slice(bom.length);
+  const root = parseHostJson(text, path, format);
+  const servers = propertyValue(root, key, path);
+  if (servers && !["object", "null"].includes(servers.type)) throw new Error(`Invalid MCP configuration: ${path}`);
+  const current = propertyValue(servers, "harnest", path);
+  if (!current) return { path, backup: null, status: "already-absent" };
+  const next = removeServerProperty(text, servers, current.parent);
+  parseHostJson(next, path, format);
+  const backup = await replaceWithBackup(path, bom + next, previous, { sensitive: true });
+  return { path, backup, status: "removed" };
 }
 
 export async function restoreHostConfig(backup) {
@@ -163,7 +189,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     try { console.log(JSON.stringify(await restoreHostConfig(flags[0]))); }
     catch { console.error("Harnest configuration restore failed"); process.exitCode = 1; }
   } else if (!["claude", "codex", "cursor"].includes(host) || flags.some((flag) => flag !== "--no-autostart")) {
-    console.error("Usage: node scripts/install-host-config.mjs claude|codex|cursor [--no-autostart]");
+    console.error(`Usage: ${hostConfigCommand} claude|codex|cursor [--no-autostart]\n` +
+      `       ${hostConfigCommand} --restore BACKUP`);
     process.exitCode = 1;
   } else {
     try {

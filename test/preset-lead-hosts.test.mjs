@@ -129,8 +129,11 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         const entry = host === "gemini" ? { ...bridge, trust: false } : expected[host] ?? bridge;
         assert.deepEqual(installed, { [key]: { harnest: entry } });
         const prefix = "Reverse path: ";
-        const reverseLines = stdout.split(/\r?\n/).filter((line) => line.startsWith(prefix));
+        const outputLines = stdout.split(/\r?\n/);
+        const reverseLines = outputLines.filter((line) => line.startsWith(prefix));
         assert.deepEqual(reverseLines, [`Reverse path: bun run setup remove ${host}`]);
+        assert.equal(outputLines[outputLines.indexOf(reverseLines[0]) + 1],
+          "Run it from the Harnest repository root, with the same config path environment variables you used for setup.");
 
         const other = { command: "other" };
         const legacy = { command: "legacy" };
@@ -157,7 +160,10 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         if (host === "cursor") assert.equal(await readFile(projectPath, "utf8"), raw);
 
         const files = await readdir(dirname(path));
-        await runShell(command, options);
+        const secondRemoval = await runShell(command, options);
+        const { status, message } = JSON.parse(secondRemoval.stdout);
+        assert.equal(status, "already-absent");
+        assert.equal(message, "The Harnest MCP entry is already absent.");
         assert.equal(await readFile(path, "utf8"), updated);
         assert.deepEqual(await readdir(dirname(path)), files);
       });
