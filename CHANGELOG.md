@@ -6,6 +6,7 @@
 
 - Per-phase agent counts, reported token totals, and elapsed time for JavaScript workflows, plus a runnable bounded verification-loop example.
 - Eleven [ACP registration presets](docs/users/supported-agents.md#downstream-coverage), including Copilot CLI and Devin. `bun run acp add <preset-id>` shows the documented launch. With `--trust`, it saves and prints the absolute executable path, which also appears in `bun run acp list`. Each preset is unverified with Harnest.
+- [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. Each preset has CI fixture coverage only, with no live CLI testing.
 
 ### Changed
 
@@ -21,6 +22,7 @@
 - Claude resolves its HTTP headers helper from the installed plugin root. Codex native workers honor `CODEX_HOME`, and Codex-to-Codex guidance uses the MCP tool directly.
 - The stdio bridge restarts a disconnected daemon and retries only discovery or requests refused before delivery. Pi retries dynamic and routing tool discovery after a successful reconnect.
 - HTTP installer configs and backups use user-only permissions. Codex worker setup preserves changed and retired workers for rollback, and stdio bridge setups retain the resolved state directories.
+- Fresh setup for the nine automatic ACP presets, Gemini CLI, Amp, and Cursor prints `bun run setup remove <host>`. The command backs up the user config and removes only the Harnest MCP entry.
 - On Windows, daemon startup restores and verifies user-only permissions on the daemon directory and existing token file before reusing the credential.
 
 ### Security

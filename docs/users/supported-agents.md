@@ -57,6 +57,8 @@ See [Registered ACP agents](../acp-agents.md) for registration and protocol deta
 
 ## Lead clients
 
-A compatible client can lead a Harnest handoff through the HTTP daemon or the stdio bridge. The repository also supplies optional host experiences for Codex, Claude Code, OpenCode, Pi, and Cursor. Gemini CLI and Amp can connect through their MCP configuration. Devin CLI can connect as an MCP lead client without becoming a named downstream target.
+A compatible client can lead a Harnest handoff through the HTTP daemon or the stdio bridge. The repository also supplies optional host experiences for Codex, Claude Code, OpenCode, Pi, and Cursor. Gemini CLI and Amp can connect through their MCP configuration.
+
+GitHub Copilot CLI, Qwen Code, Kilo, Cline CLI, Kiro CLI, Factory Droid, Auggie, Kimi CLI, and Devin CLI have automatic user-level MCP setup. Goose and Mistral Vibe have manual setup instructions. Each preset setup has CI fixture coverage only, with no live CLI testing. See the [lead configuration table](integrations.md#acp-presets-as-lead-clients) for paths and setup commands.
 
 Connecting a lead client does not install or authenticate a downstream agent. Configure each downstream CLI through its own supported install and login flow, then select it with the request's `target`.

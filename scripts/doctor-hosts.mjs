@@ -6,11 +6,14 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { clientPort, daemonAddress, readDaemonToken } from "../src/daemon-settings.mjs";
 import { assertMcpCatalog } from "./harnest-mcp-catalog.mjs";
 import { readExisting } from "./install-files.mjs";
-import { bridgeEntry, httpEntry } from "./install-host-config.mjs";
+import { bridgeEntry, httpEntry, readJsonServers } from "./install-host-config.mjs";
 import { claudeConfigDir } from "./install-plugin-host.mjs";
 import { isLegacyOpenCodePlugin, openCodeConfigDir, parseConfig } from "./install-opencode-integration.mjs";
 import { isLegacyPiExtension, piConfigDir } from "./install-pi-integration.mjs";
 import { bridgeHostConfig, namedHosts } from "./setup.mjs";
+import { manualBridgeConfig } from "./preset-lead-hosts.mjs";
+
+export const doctorHosts = [...namedHosts];
 
 async function readJson(path) {
   const raw = await readExisting(path);
@@ -21,10 +24,23 @@ async function readJson(path) {
 
 const exists = (path) => access(path).then(() => true, () => false);
 const legacy = (entries) => Object.hasOwn(entries ?? {}, "agent-companion");
-const fromJson = async (path, key = "mcpServers") => {
-  const servers = (await readJson(path))[key];
+const fromJson = async (path, key = "mcpServers", format = "json") => {
+  const servers = await readJsonServers(path, key, format);
   return { entry: servers?.harnest, old: legacy(servers), path };
 };
+
+async function presetConnection(host, home) {
+  const { path, key, format } = bridgeHostConfig(host, home);
+  const result = await fromJson(path, key, format);
+  const entry = result.entry;
+  if (entry?.disabled === true || entry?.enabled === false) throw new Error(`Harnest is disabled in ${path}`);
+  if (host === "cline" && entry?.transport?.type === "stdio") result.entry = entry.transport;
+  if (host === "kilo" && entry?.type === "local" && Array.isArray(entry.command)) {
+    const [command, ...args] = entry.command;
+    result.entry = { command, args, env: entry.environment };
+  }
+  return result;
+}
 
 function codexEntry(config) {
   const pick = (name) => new RegExp('^\\s*' + name + '\\s*=\\s*(.+)$', "m").exec(config)?.[1];
@@ -128,12 +144,16 @@ async function installedConnection(host, { home, project, configPath }) {
       return { ...(local.entry ? local : global), old: local.old || global.old };
     }
     case "devin": {
-      const local = await fromJson(join(project, ".devin", "mcp_config.local.json"));
-      const shared = await fromJson(join(project, ".devin", "mcp_config.json"));
-      return { ...(local.entry ? local : shared), old: local.old || shared.old };
+      const { key, format } = bridgeHostConfig(host, home);
+      const local = await fromJson(join(project, ".devin", "mcp_config.local.json"), key, format);
+      const shared = await fromJson(join(project, ".devin", "mcp_config.json"), key, format);
+      const global = await presetConnection(host, home);
+      return { ...(local.entry ? local : shared.entry ? shared : global), old: local.old || shared.old || global.old };
     }
     case "other":
       return fromJson(configPath);
+    default:
+      return presetConnection(host, home);
   }
 }
 
@@ -169,13 +189,17 @@ async function checkConnection(entry, project) {
 }
 
 export async function checkLeadConnections({ host, home = homedir(), project = process.cwd(), configPath } = {}) {
-  const hosts = [...namedHosts, "devin"];
-  if (host && !hosts.includes(host) && !(host === "other" && configPath)) {
-    throw new Error("Use --host " + hosts.join("|") + " or --host other --config FILE.");
+  if (host && !doctorHosts.includes(host) && !(host === "other" && configPath)) {
+    throw new Error("Use --host " + doctorHosts.join("|") + " or --host other --config FILE.");
   }
   let ok = true;
-  for (const name of host ? [host] : hosts) {
+  for (const name of host ? [host] : doctorHosts) {
     try {
+      const manual = manualBridgeConfig(name, { home });
+      if (manual) {
+        if (host) throw new Error(`Verify ${manual.path} in the host. ${manual.verify}`);
+        continue;
+      }
       const { entry, path, assets = [], old } = await installedConnection(name, { home, project, configPath });
       if (old) throw new Error("A legacy agent-companion registration remains.");
       if (!entry && !host) continue;

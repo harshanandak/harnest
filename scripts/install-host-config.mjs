@@ -1,9 +1,13 @@
 ﻿import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { applyEdits, createScanner, getNodeValue, modify, parseTree, SyntaxKind } from "jsonc-parser";
 import { daemonAddress, daemonDirectory, jobStateDirectory } from "../src/daemon-settings.mjs";
 import { setupDaemon } from "./install-daemon.mjs";
 import { readExisting, replaceWithBackup } from "./install-files.mjs";
+
+const hostConfigCommand = "node scripts/install-host-config.mjs";
 
 export function httpEntry(token) {
   return { url: `${daemonAddress()}/mcp`, headers: { Authorization: `Bearer ${token}` } };
@@ -64,32 +68,111 @@ export function codexConfig(previous, entry, migrated = []) {
   return (remainder ? `${remainder}\n\n` : "") + [...lines, ...keptSettings].join("\n") + "\n";
 }
 
+export function cursorUserConfig(home = homedir()) {
+  return { path: join(home, ".cursor", "mcp.json"), key: "mcpServers" };
+}
+
 export async function installHostConfig(host, { home = homedir(), codexHome = process.env.CODEX_HOME || join(home, ".codex") } = {}) {
   const entry = bridgeEntry();
-  const path = host === "codex" ? join(codexHome, "config.toml")
-    : host === "cursor" ? join(home, ".cursor", "mcp.json") : null;
-  if (!path) throw new Error("Expected codex or cursor");
-  if (host === "cursor") return installJsonServer(path, "mcpServers", entry);
+  if (host === "cursor") {
+    const { path, key } = cursorUserConfig(home);
+    return installJsonServer(path, key, entry);
+  }
+  if (host !== "codex") throw new Error("Expected codex or cursor");
+  const path = join(codexHome, "config.toml");
   const previous = await readExisting(path);
   const migrated = [];
   const backup = await replaceWithBackup(path, codexConfig(previous, entry, migrated), previous, { sensitive: true });
   return { path, backup, migrated };
 }
 
-export async function installJsonServer(path, key, entry, { existingOnly = false } = {}) {
+const jsonOptions = (format) => ({ disallowComments: format === "json", allowTrailingComma: format === "jsonc" });
+
+function parseHostJson(text, path, format) {
+  const errors = [];
+  const root = parseTree(text, errors, jsonOptions(format));
+  if (errors.length || root?.type !== "object") throw new Error(`Invalid MCP configuration: ${path}`);
+  return root;
+}
+
+function propertyValue(object, key, path) {
+  const matches = object?.children?.filter(({ children }) => children[0].value === key) ?? [];
+  if (matches.length > 1) throw new Error(`Duplicate MCP configuration key ${key}: ${path}`);
+  return matches[0]?.children[1];
+}
+
+function removeServerProperty(text, map, property) {
+  const scanner = createScanner(text, true);
+  const after = property.offset + property.length;
+  scanner.setPosition(after);
+  if (scanner.scan() !== SyntaxKind.CommaToken) {
+    const index = map.children.indexOf(property);
+    if (index === 0) return text.slice(0, property.offset) + text.slice(after);
+    const previous = map.children[index - 1];
+    scanner.setPosition(previous.offset + previous.length);
+    scanner.scan();
+  }
+  // Remove the separator and property separately so comments between them survive.
+  return applyEdits(text, [
+    { offset: property.offset, length: property.length, content: "" },
+    { offset: scanner.getTokenOffset(), length: 1, content: "" },
+  ]);
+}
+
+export async function readJsonServers(path, key, format = "json") {
+  const raw = await readExisting(path);
+  if (raw === null) return {};
+  const root = parseHostJson(raw.replace(/^\uFEFF/, ""), path, format);
+  const servers = propertyValue(root, key, path);
+  if (!servers || servers.type === "null") return {};
+  if (servers.type !== "object") throw new Error(`Invalid MCP configuration: ${path}`);
+  return Object.fromEntries(["harnest", "agent-companion"].flatMap((name) => {
+    const node = propertyValue(servers, name, path);
+    return node ? [[name, getNodeValue(node)]] : [];
+  }));
+}
+
+export async function installJsonServer(path, key, entry, { existingOnly = false, format = "json" } = {}) {
   const previous = await readExisting(path);
-  let config;
-  try {
-    config = JSON.parse(previous?.replace(/^\uFEFF/, "") ?? "{}");
-    config[key] ??= {};
-    if (Array.isArray(config) || Array.isArray(config[key]) || typeof config[key] !== "object") throw new Error();
-  } catch { throw new Error(`Invalid MCP configuration: ${path}`); }
-  const migrated = Object.hasOwn(config[key], "agent-companion") ? [`${key}.agent-companion`] : [];
-  if (existingOnly && !migrated.length && !Object.hasOwn(config[key], "harnest")) return null;
-  delete config[key]["agent-companion"];
-  config[key].harnest = entry;
-  const backup = await replaceWithBackup(path, JSON.stringify(config, null, 2) + "\n", previous, { sensitive: true });
-  return { path, backup, migrated };
+  const bom = previous?.startsWith("\uFEFF") ? "\uFEFF" : "";
+  let text = previous?.slice(bom.length) ?? "{}\n";
+  const root = parseHostJson(text, path, format);
+  const servers = propertyValue(root, key, path);
+  if (servers && !["object", "null"].includes(servers.type)) throw new Error(`Invalid MCP configuration: ${path}`);
+  const map = servers?.type === "object" ? servers : undefined;
+  const legacy = propertyValue(map, "agent-companion", path);
+  const current = propertyValue(map, "harnest", path);
+  if (existingOnly && !legacy && !current) return null;
+
+  if (legacy) text = removeServerProperty(text, map, legacy.parent);
+  const options = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: text.includes("\r\n") ? "\r\n" : "\n" } };
+  const edit = (location, value) => { text = applyEdits(text, modify(text, location, value, options)); };
+  if (!map) edit([key], { harnest: entry });
+  else if (!current || !isDeepStrictEqual(JSON.parse(JSON.stringify(getNodeValue(current))), entry)) {
+    edit([key, "harnest"], entry);
+  }
+  parseHostJson(text, path, format);
+  const backup = await replaceWithBackup(path, bom + text, previous, { sensitive: true });
+  const migrated = legacy ? [`${key}.agent-companion`] : [];
+  const result = { path, backup, migrated };
+  if (previous === null) result.created = true;
+  return result;
+}
+
+export async function removeJsonServer({ path, key, format = "json" }) {
+  const previous = await readExisting(path);
+  if (previous === null) return { path, backup: null, status: "config-missing" };
+  const bom = previous.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const text = previous.slice(bom.length);
+  const root = parseHostJson(text, path, format);
+  const servers = propertyValue(root, key, path);
+  if (servers && !["object", "null"].includes(servers.type)) throw new Error(`Invalid MCP configuration: ${path}`);
+  const current = propertyValue(servers, "harnest", path);
+  if (!current) return { path, backup: null, status: "already-absent" };
+  const next = removeServerProperty(text, servers, current.parent);
+  parseHostJson(next, path, format);
+  const backup = await replaceWithBackup(path, bom + next, previous, { sensitive: true });
+  return { path, backup, status: "removed" };
 }
 
 export async function restoreHostConfig(backup) {
@@ -106,7 +189,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     try { console.log(JSON.stringify(await restoreHostConfig(flags[0]))); }
     catch { console.error("Harnest configuration restore failed"); process.exitCode = 1; }
   } else if (!["claude", "codex", "cursor"].includes(host) || flags.some((flag) => flag !== "--no-autostart")) {
-    console.error("Usage: node scripts/install-host-config.mjs claude|codex|cursor [--no-autostart]");
+    console.error(`Usage: ${hostConfigCommand} claude|codex|cursor [--no-autostart]\n` +
+      `       ${hostConfigCommand} --restore BACKUP`);
     process.exitCode = 1;
   } else {
     try {
