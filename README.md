@@ -18,7 +18,9 @@ bun run doctor --host codex
 
 Restart Codex and confirm it discovers `handoff_workflow`, `handoff_status`, `handoff_trace`, and `handoff_result`. Then try [your first handoff](#your-first-handoff).
 
-Use `bun run setup <host>` with `claude`, `codex`, `opencode`, `cursor`, `pi`, `gemini`, or `amp`. For Cursor, add `--project "/absolute/path/to/project"` to install its workspace files. For other clients, `bun run setup other` prints a stdio bridge snippet. See the [HTTP setup and verification instructions](docs/users/getting-started.md#add-the-mcp-server).
+Run `bun run setup --help` for lead host names. Setup can install the MCP bridge for GitHub Copilot CLI, Qwen Code, Kilo, Cline CLI, Kiro CLI, Factory Droid, Auggie, Kimi CLI, and Devin CLI. For Goose and Mistral Vibe, setup prints manual MCP configuration. These preset setups have CI fixture coverage only, with no live CLI testing. See the [preset lead host instructions](docs/users/integrations.md#acp-presets-as-lead-clients).
+
+Use `bun run setup <host>` for `claude`, `codex`, `opencode`, `cursor`, `pi`, `gemini`, and `amp` as well. For Cursor, add `--project "/absolute/path/to/project"` to install its workspace files. `bun run setup other` prints a stdio bridge snippet for other clients. See the [HTTP setup and verification instructions](docs/users/getting-started.md#add-the-mcp-server).
 
 ## Supported clients and downstream agents
 

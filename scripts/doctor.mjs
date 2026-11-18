@@ -6,16 +6,18 @@ import { runProcess } from "../src/process.mjs";
 import { validateRoutingConfiguration } from "../src/routing.mjs";
 import { listConfiguredAcpAgents } from "../src/acp-registry.mjs";
 import { daemonStatus } from "../src/daemon-client.mjs";
-import { checkLeadConnections } from "./doctor-hosts.mjs";
+import { checkLeadConnections, doctorHosts } from "./doctor-hosts.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const leadOptions = {};
 const leadFlags = { "--host": "host", "--project": "project", "--config": "configPath" };
 const args = process.argv.slice(2);
+const usage = "Usage: bun run doctor [--host " + [...doctorHosts, "other"].join("|") + "] [--project DIR] [--config FILE]";
+if (args.length === 1 && ["--help", "-h"].includes(args[0])) { console.log(usage); process.exit(0); }
 for (let index = 0; index < args.length; index += 2) {
   const option = leadFlags[args[index]];
   const value = args[index + 1];
-  if (!option || !value || value.startsWith("--")) throw new Error("Usage: bun run doctor [--host NAME] [--project DIR] [--config FILE]");
+  if (!option || !value || value.startsWith("--")) throw new Error(usage);
   leadOptions[option] = option === "host" ? value : resolve(value);
 }
 if (!await checkLeadConnections(leadOptions)) process.exitCode = 1;

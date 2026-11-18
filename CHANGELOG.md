@@ -6,6 +6,7 @@
 
 - Per-phase agent counts, reported token totals, and elapsed time for JavaScript workflows, plus a runnable bounded verification-loop example.
 - Eleven [ACP registration presets](docs/users/supported-agents.md#downstream-coverage), including Copilot CLI and Devin. `bun run acp add <preset-id>` shows the documented launch. With `--trust`, it saves and prints the absolute executable path, which also appears in `bun run acp list`. Each preset is unverified with Harnest.
+- [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. Each preset has CI fixture coverage only, with no live CLI testing.
 
 ### Changed
 

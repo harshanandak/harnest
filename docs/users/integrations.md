@@ -97,15 +97,29 @@ node scripts/install-host-config.mjs --restore "/absolute/path/to/FILE.bak-harne
 
 For OpenCode, use the installer manifest command printed during setup. For a Pi extension file or directory moved out of the auto-loaded extensions directory, move it back to its printed original path. If reverting the entire installation, uninstall the new plugin or remove the newly installed extension before restoring the old registration. Restart the host after restoring and keep backups private.
 
-## Devin CLI as a lead client
+## ACP presets as lead clients
 
-Devin can connect to the shared daemon through the stdio bridge:
+Run `bun run setup <host>` using the host ID below. For automatic setup, reload the CLI and run `bun run doctor --host <host>` to check the configured bridge and discover the Harnest tools. Each preset setup has CI fixture coverage only, with no live CLI testing.
 
-```powershell
-devin mcp add --scope local harnest -- node "/absolute/path/to/harnest/src/mcp-bridge.mjs"
-```
+`~` means the user's home on macOS and Linux and `%USERPROFILE%` on Windows. An override marked **none documented** means the linked CLI documentation specifies a default user path and describes no environment variable for changing it.
 
-Restart Devin and verify the entry with `devin mcp list`. Devin is not a named downstream target. A native Devin CLI may be registered through the generic, write-only ACP route, subject to the proof limits in [Devin CLI setup](../devin-cli.md).
+| Host ID | Setup | User config and overrides | Format and key | Official sources |
+| --- | --- | --- | --- | --- |
+| `github-copilot-cli` | Automatic | `~/.copilot/mcp-config.json` or `$COPILOT_HOME/mcp-config.json` | JSON · `mcpServers` | [Path override](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/configure-copilot-cli#editing-trusted-directories), [MCP file and stdio fields](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers#editing-the-configuration-file) |
+| `qwen-code` | Automatic | `~/.qwen/settings.json` or `$QWEN_HOME/settings.json`. Export `QWEN_HOME` before setup if Qwen normally sets it through its own environment loader. | JSON with comments · `mcpServers` | [MCP scope and fields](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/), [settings reader](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/config/settings.ts), [path resolution](https://github.com/QwenLM/qwen-code/blob/main/packages/core/src/config/storage.ts) |
+| `kilo` | Automatic | `~/.config/kilo/kilo.json` on all three platforms. Uses `XDG_CONFIG_HOME` when set and prefers an existing `kilo.jsonc`. `KILO_CONFIG` selects a file explicitly. `KILO_CONFIG_DIR` and `KILO_CONFIG_CONTENT` are additional overlays. | JSON or JSONC · `mcp` | [Config and MCP fields](https://kilo.ai/docs/automate/mcp/using-in-cli), [global path](https://github.com/Kilo-Org/kilocode/blob/main/packages/core/src/global.ts), [XDG resolution](https://github.com/sindresorhus/xdg-basedir/blob/main/index.js), [overlay precedence](https://kilo.ai/docs/contributing/architecture/cli-runtime#config-precedence) |
+| `cline` | Automatic | `~/.cline/data/settings/cline_mcp_settings.json`. `CLINE_DIR` replaces `~/.cline`, `CLINE_DATA_DIR` replaces the resulting `data` directory, and `CLINE_MCP_SETTINGS_PATH` replaces the full path. | JSON · `mcpServers` | [Paths and overrides](https://github.com/cline/cline/blob/main/docs/cli/cli-reference.mdx#configuration-files), [stdio registration](https://github.com/cline/cline/blob/main/apps/cli/src/wizards/mcp/settings.ts) |
+| `goose` | Manual | Linux `$XDG_CONFIG_HOME/goose/config.yaml` or `~/.config/goose/config.yaml`. macOS `~/Library/Application Support/Block/goose/config.yaml`. Windows `%APPDATA%\Block\goose\config\config.yaml`. An absolute `GOOSE_PATH_ROOT` selects `$GOOSE_PATH_ROOT/config/config.yaml`. | YAML · `extensions` | [Path resolution](https://github.com/block/goose/blob/main/crates/goose/src/config/paths.rs), [config filename](https://github.com/block/goose/blob/main/crates/goose/src/config/base.rs), [stdio fields](https://github.com/block/goose/blob/main/crates/goose/src/config/extensions.rs) |
+| `kiro` | Automatic | `~/.kiro/settings/mcp.json` or `$KIRO_HOME/settings/mcp.json` with a valid absolute `KIRO_HOME`. | JSON · `mcpServers` | [MCP path and stdio fields](https://kiro.dev/docs/mcp/configuration/), [override and path rules](https://kiro.dev/docs/reference/settings/#environment-variables), [override scope](https://kiro.dev/docs/reference/cli-commands/#log-files) |
+| `factory-droid` | Automatic | `~/.factory/mcp.json`. Override none documented. | JSON · `mcpServers` | [Path and stdio fields](https://docs.factory.com/harness/mcp#configuration-file) |
+| `auggie` | Automatic | `~/.augment/settings.json`. Override none documented. | JSONC · `mcpServers` | [Paths and format](https://docs.augmentcode.com/cli/settings#settings-files), [stdio fields](https://docs.augmentcode.com/cli/integrations#mcp-overrides) |
+| `kimi` | Automatic | `~/.kimi/mcp.json` or `$KIMI_SHARE_DIR/mcp.json` for the `kimi` executable. | JSON · `mcpServers` | [Paths and override](https://moonshotai.github.io/kimi-cli/en/configuration/data-locations.html), [stdio fields](https://moonshotai.github.io/kimi-cli/en/customization/mcp.html) |
+| `mistral-vibe` | Manual | `~/.vibe/config.toml` or `$VIBE_HOME/config.toml`. | TOML · `[[mcp_servers]]` | [Path and override](https://github.com/mistralai/mistral-vibe#custom-vibe-home-directory), [stdio fields](https://docs.mistral.ai/vibe/code/cli/mcp-servers) |
+| `devin` | Automatic | `~/.config/devin/mcp_config.json` on macOS and Linux, `%APPDATA%\devin\mcp_config.json` on Windows. Requires Devin v3000.3 or newer. Override none documented. | JSON with comments · `mcpServers` | [Paths and stdio fields](https://docs.devin.ai/cli/extensibility/mcp/configuration#via-config-file), [comment support](https://docs.devin.ai/cli/reference/configuration/config-file#json-with-comments) |
+
+For Goose and Mistral Vibe, setup prints the resolved path and a ready-to-merge snippet with the bridge command, arguments, and state directories. Make a copy of the configuration before editing. Verify Goose with `goose info -v` and Vibe with `/mcp harnest` in a new Vibe session.
+
+For Kiro, open `/mcp` to check that Harnest loaded. If a custom agent omits global MCP configuration, set `includeMcpJson` to `true` in that agent's configuration. [Kiro custom agent configuration](https://kiro.dev/docs/cli/v3/agent-config/#includemcpjson-field)
 
 ## Registered ACP agents
 

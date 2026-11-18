@@ -1,6 +1,8 @@
 ﻿import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { applyEdits, createScanner, getNodeValue, modify, parseTree, SyntaxKind } from "jsonc-parser";
 import { daemonAddress, daemonDirectory, jobStateDirectory } from "../src/daemon-settings.mjs";
 import { setupDaemon } from "./install-daemon.mjs";
 import { readExisting, replaceWithBackup } from "./install-files.mjs";
@@ -76,19 +78,74 @@ export async function installHostConfig(host, { home = homedir(), codexHome = pr
   return { path, backup, migrated };
 }
 
-export async function installJsonServer(path, key, entry, { existingOnly = false } = {}) {
+const jsonOptions = (format) => ({ disallowComments: format === "json", allowTrailingComma: format === "jsonc" });
+
+function parseHostJson(text, path, format) {
+  const errors = [];
+  const root = parseTree(text, errors, jsonOptions(format));
+  if (errors.length || root?.type !== "object") throw new Error(`Invalid MCP configuration: ${path}`);
+  return root;
+}
+
+function propertyValue(object, key, path) {
+  const matches = object?.children?.filter(({ children }) => children[0].value === key) ?? [];
+  if (matches.length > 1) throw new Error(`Duplicate MCP configuration key ${key}: ${path}`);
+  return matches[0]?.children[1];
+}
+
+function removeLegacyServer(text, map, property) {
+  const scanner = createScanner(text, true);
+  const after = property.offset + property.length;
+  scanner.setPosition(after);
+  if (scanner.scan() !== SyntaxKind.CommaToken) {
+    const index = map.children.indexOf(property);
+    if (index === 0) return text.slice(0, property.offset) + text.slice(after);
+    const previous = map.children[index - 1];
+    scanner.setPosition(previous.offset + previous.length);
+    scanner.scan();
+  }
+  // Remove the separator and property separately so comments between them survive.
+  return applyEdits(text, [
+    { offset: property.offset, length: property.length, content: "" },
+    { offset: scanner.getTokenOffset(), length: 1, content: "" },
+  ]);
+}
+
+export async function readJsonServers(path, key, format = "json") {
+  const raw = await readExisting(path);
+  if (raw === null) return {};
+  const root = parseHostJson(raw.replace(/^\uFEFF/, ""), path, format);
+  const servers = propertyValue(root, key, path);
+  if (!servers || servers.type === "null") return {};
+  if (servers.type !== "object") throw new Error(`Invalid MCP configuration: ${path}`);
+  return Object.fromEntries(["harnest", "agent-companion"].flatMap((name) => {
+    const node = propertyValue(servers, name, path);
+    return node ? [[name, getNodeValue(node)]] : [];
+  }));
+}
+
+export async function installJsonServer(path, key, entry, { existingOnly = false, format = "json" } = {}) {
   const previous = await readExisting(path);
-  let config;
-  try {
-    config = JSON.parse(previous?.replace(/^\uFEFF/, "") ?? "{}");
-    config[key] ??= {};
-    if (Array.isArray(config) || Array.isArray(config[key]) || typeof config[key] !== "object") throw new Error();
-  } catch { throw new Error(`Invalid MCP configuration: ${path}`); }
-  const migrated = Object.hasOwn(config[key], "agent-companion") ? [`${key}.agent-companion`] : [];
-  if (existingOnly && !migrated.length && !Object.hasOwn(config[key], "harnest")) return null;
-  delete config[key]["agent-companion"];
-  config[key].harnest = entry;
-  const backup = await replaceWithBackup(path, JSON.stringify(config, null, 2) + "\n", previous, { sensitive: true });
+  const bom = previous?.startsWith("\uFEFF") ? "\uFEFF" : "";
+  let text = previous?.slice(bom.length) ?? "{}\n";
+  const root = parseHostJson(text, path, format);
+  const servers = propertyValue(root, key, path);
+  if (servers && !["object", "null"].includes(servers.type)) throw new Error(`Invalid MCP configuration: ${path}`);
+  const map = servers?.type === "object" ? servers : undefined;
+  const legacy = propertyValue(map, "agent-companion", path);
+  const current = propertyValue(map, "harnest", path);
+  if (existingOnly && !legacy && !current) return null;
+
+  if (legacy) text = removeLegacyServer(text, map, legacy.parent);
+  const options = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: text.includes("\r\n") ? "\r\n" : "\n" } };
+  const edit = (location, value) => { text = applyEdits(text, modify(text, location, value, options)); };
+  if (!map) edit([key], { harnest: entry });
+  else if (!current || !isDeepStrictEqual(JSON.parse(JSON.stringify(getNodeValue(current))), entry)) {
+    edit([key, "harnest"], entry);
+  }
+  parseHostJson(text, path, format);
+  const backup = await replaceWithBackup(path, bom + text, previous, { sensitive: true });
+  const migrated = legacy ? [`${key}.agent-companion`] : [];
   return { path, backup, migrated };
 }
 

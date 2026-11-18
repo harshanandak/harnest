@@ -31,7 +31,7 @@ Install the lead client's integration from the Harnest checkout. For example, th
 bun run setup codex
 ```
 
-The supported names are `claude`, `codex`, `opencode`, `cursor`, `pi`, `gemini`, and `amp`. Use `bun run setup cursor --project "/absolute/path/to/project"` for a Cursor workspace outside the Harnest checkout. See the [host installation instructions](integrations.md) for paths, native approval, and restoring migration backups.
+Run `bun run setup --help` for supported names, including the [ACP preset lead hosts](integrations.md#acp-presets-as-lead-clients). Use `bun run setup cursor --project "/absolute/path/to/project"` for a Cursor workspace outside the Harnest checkout. See the [host installation instructions](integrations.md) for paths, native approval, and restoring migration backups.
 
 Run setup with the downstream CLIs on `PATH` and the intended `HARNEST_STATE_DIR` if customized. Pass `--no-autostart` to skip login registration. The bridge starts the daemon when the host connects and can restart it on connection failure.
 
