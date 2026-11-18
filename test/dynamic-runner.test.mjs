@@ -631,6 +631,109 @@ function gateQueuedResume(t, runner) {
   return { queued, release };
 }
 
+for (const controllerType of ["local", "separate"]) {
+  test(`settlement rejects a ${controllerType} control accepted before application`, { timeout: 30_000 }, async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const entered = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    const accepted = Promise.withResolvers();
+    const deliver = Promise.withResolvers();
+    const commandId = "pause-before-settlement";
+    const f = await fixture(t, () => assert.fail("the workflow has no agents"), {
+      runner: { engine: { ...fixtureEngine, async runScript() {
+        entered.resolve();
+        await finish.promise;
+        return "finished";
+      } } },
+    });
+    const controller = controllerType === "local" ? f.runner : new DynamicWorkflowRunner({ companion: f.companion });
+    const transact = controller.store.transact.bind(controller.store);
+    t.mock.method(controller.store, "transact", async (...args) => {
+      const outcome = await transact(...args);
+      if (outcome?.journal.some((event) => event.commandId === commandId && event.state === "accepted")) {
+        accepted.resolve();
+        if (controllerType === "local") await deliver.promise;
+      }
+      return outcome;
+    });
+
+    const spec = f.spec([]);
+    const runId = runIdFor(spec.requestId);
+    const started = f.runner.start(spec);
+    let controlled;
+    try {
+      await Promise.race([entered.promise, started.then(() => assert.fail("owner settled before the gate"))]);
+      controlled = controller.control({ runId, commandId, action: "pause" });
+      await Promise.race([accepted.promise, controlled.then(() => assert.fail("control was not accepted"))]);
+      if (controllerType === "separate") assert.equal((await controlled).state, "accepted");
+      finish.resolve();
+      const result = await started;
+      assert.equal(result.state, "completed");
+      deliver.resolve();
+      const finalControl = controllerType === "local"
+        ? await controlled
+        : result.controls.find((command) => command.commandId === commandId);
+      assert.equal(finalControl.state, "rejected");
+      assert.equal(finalControl.error?.details?.kind, "not-active");
+      const { events } = await controller.store.readJournal(runId);
+      assert.deepEqual(events.filter((event) => event.commandId === commandId).map((event) => event.state), ["accepted", "rejected"]);
+    } finally {
+      finish.resolve();
+      deliver.resolve();
+      await Promise.allSettled([started, controlled]);
+    }
+  });
+}
+
+test("claim rejects an unstamped control on an already queued second attempt", { timeout: 30_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = await fixture(t, () => assert.fail("the workflow has no agents"), {
+    runner: { engine: { ...fixtureEngine, async runScript() { throw new Error("first attempt failed"); } } },
+  });
+  const entered = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const worker = new DynamicWorkflowRunner({
+    companion: f.companion, clock: () => 1,
+    engine: { ...fixtureEngine, async runScript() {
+      entered.resolve();
+      await finish.promise;
+      return "finished";
+    } },
+  });
+  const { runId, state } = await f.runner.start(f.spec([]));
+  assert.equal(state, "partial");
+  const queue = gateQueuedResume(t, f.runner);
+  const resumed = f.runner.resume({ runId, commandId: "resume-second" });
+  const commandId = "legacy-steer";
+  let executed;
+  try {
+    const queued = await Promise.race([queue.queued.promise, resumed.then(() => assert.fail("resume bypassed the queue gate"))]);
+    assert.equal(queued.lease, null);
+    const accepted = await worker.control({ runId, commandId, action: "steer", invocationId: "inv-0", message: "keep going" });
+    assert.equal(accepted.state, "accepted");
+    await worker.store.transact(runId, (record) => {
+      delete record.controls.find((command) => command.commandId === commandId).attempt;
+      return { record };
+    });
+
+    executed = worker.execute(runId);
+    await Promise.race([entered.promise, executed.then(() => assert.fail("worker settled before the gate"))]);
+    const claimed = await worker.status({ runId });
+    assert.equal(claimed.state, "running");
+    assert.equal(claimed.attempt, 2);
+    const control = claimed.controls.find((command) => command.commandId === commandId);
+    assert.equal(control.state, "rejected");
+    assert.equal(control.error?.details?.kind, "not-active");
+    finish.resolve();
+    assert.equal((await executed).state, "completed");
+  } finally {
+    finish.resolve();
+    await Promise.allSettled([executed]);
+    queue.release.resolve();
+    await Promise.allSettled([resumed]);
+  }
+});
+
 function gateControlCommit(t, runner, commandId) {
   const committed = Promise.withResolvers();
   const transact = runner.store.transact.bind(runner.store);
