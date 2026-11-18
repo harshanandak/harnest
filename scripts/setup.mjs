@@ -108,10 +108,10 @@ async function setup(args) {
       break;
   }
   if (result) console.log(JSON.stringify(result, null, 2));
-  for (const line of reverse) console.log(line);
   if (host === "amp") console.log("If Amp requests approval, run: amp mcp approve harnest");
   if (host === "kiro") console.log("In Kiro, run /mcp to check Harnest. For custom agents, enable includeMcpJson to load user-level servers.");
   console.log("Restart or reload the host to use Harnest.");
+  for (const line of reverse) console.log(line);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
