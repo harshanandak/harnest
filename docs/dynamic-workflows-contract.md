@@ -36,6 +36,10 @@ Use a separate workflow store and detached worker with atomic/fenced writes, imm
 
 Run pause drains in-flight work without new dispatch. Stop requests child cancellation and reaches terminal only after truthful reconciliation. Steer/reroute forwards to existing Harnest controls; unsupported targets stay explicit. restart-agent must stop/reconcile the old attempt before replay. Never turn accepted into applied without adapter evidence.
 
+The runner reconciles pending controls at settlement and before resume. An undelivered control becomes `rejected`. A stop for the current attempt becomes `applied` when the run was cancelled by a stop, cancellation was acknowledged and no child outcome is uncertain. An in-flight control with a durable application fence and an unknown outcome becomes `uncertain`. A late acknowledgement from the same owner, fence and attempt can replace `uncertain` with the actual outcome, even after resume. If the owner died, `uncertain` can be permanent and explicitly records that the outcome is unknown.
+
+At claim, the runner also reconciles controls with an application fence or an attempt that differs from the claimed attempt. Undelivered controls for the claimed attempt stay eligible for delivery. For an unstamped legacy control, claim uses the application fence's attempt if present and otherwise treats the control as belonging to attempt 1. On a later attempt, claim rejects an unstamped control that has no application fence.
+
 ## Session adapters
 
 Each file exports its named class `ClaudeSessionAdapter`, `CodexSessionAdapter`, or `CursorSessionAdapter`, plus a default export. Keep `run(request,{signal,onProgress})` and `control(command)` compatible with existing adapters and preserve result/sessionId/route/usage contracts. Mode is selected by trusted configuration/validated request `execution.transport: "session"`; normal one-shot behavior remains available. The lead wires adapter selection and public validation.

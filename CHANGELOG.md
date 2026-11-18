@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- JavaScript workflows finalize pending controls when they settle or recover. Workers reject ambiguous unstamped controls when claiming a later attempt, and late acknowledgements can resolve controls whose delivery was in flight.
 - JavaScript workflow controls stay with the attempt that accepted them. Resume finalizes pending controls before queuing the next attempt.
 - Claude resolves its HTTP headers helper from the installed plugin root. Codex native workers honor `CODEX_HOME`, and Codex-to-Codex guidance uses the MCP tool directly.
 - The stdio bridge restarts a disconnected daemon and retries only discovery or requests refused before delivery. Pi retries dynamic and routing tool discovery after a successful reconnect.
