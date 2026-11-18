@@ -24,7 +24,7 @@
 
 ### Security
 
-- Resolve daemon and Pi terminal utilities through absolute `PATH` entries. On Windows, use the Windows directory reported by the OS when available and try Windows PowerShell for tree cleanup if `taskkill` fails. ([#58](https://github.com/harshanandak/harnest/issues/58))
+- Resolve daemon and Pi terminal utilities through absolute `PATH` entries. On Windows, use the Windows directory reported by the OS when available and run `taskkill /T /F` from `System32` for process tree cleanup. If `taskkill` is unavailable or fails, or the root has already exited, warn once that descendants may survive and try to stop the direct child if it is still running. ([#58](https://github.com/harshanandak/harnest/issues/58))
 
 - Resolve native CLI names from absolute `PATH` entries for handoffs and diagnostic probes. On Windows, launch system tools from `System32`, unwrap the Codex npm shim for doctor, and reject ACP `.cmd` and `.bat` shims in favor of the native executable. ([#51](https://github.com/harshanandak/harnest/issues/51))
 

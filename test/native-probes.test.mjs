@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
-import childProcess, { execFile, spawn } from "node:child_process";
-import { once } from "node:events";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { windowsSystemCommand } from "../src/launch-command.mjs";
-import { terminateProcessTree } from "../src/process.mjs";
 
 const exec = promisify(execFile);
 const windows = process.platform === "win32";
@@ -129,53 +125,4 @@ console.log(JSON.stringify(await closed));
 
   assert.equal(existsSync(marker), false, "the taskkill.exe executable in the cleanup cwd ran");
   assert.notDeepEqual(JSON.parse(stdout), [0, null], "cleanup must stop the child before it exits naturally");
-});
-
-test("Windows cleanup stops a grandchild when taskkill cannot launch", { skip: !windows, timeout: 20_000 }, async (t) => {
-  const cwd = await probeDirectory(t);
-  const child = spawn(process.execPath, ["-e", `
-const { spawn } = require("node:child_process");
-// Node's Windows job object would automatically terminate a non-detached child.
-const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { detached: true, stdio: "ignore" });
-grandchild.once("spawn", () => process.send(grandchild.pid));
-`], { stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true });
-  const closed = once(child, "close");
-  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill(); });
-  const [grandchildPid] = await once(child, "message");
-  let grandchildStopped = false;
-  t.after(() => {
-    if (grandchildStopped) return;
-    try { process.kill(grandchildPid); } catch (error) { if (error.code !== "ESRCH") throw error; }
-  });
-  process.kill(grandchildPid, 0);
-
-  const spawnProcess = childProcess.spawn;
-  const taskkill = windowsSystemCommand("taskkill.exe");
-  let taskkillAttempts = 0;
-  const intercepted = t.mock.method(childProcess, "spawn", (command, args, options) => {
-    if (command === taskkill) {
-      assert.deepEqual(args, ["/PID", String(child.pid), "/T", "/F"]);
-      taskkillAttempts++;
-      command = join(cwd, "missing-taskkill.exe");
-    }
-    return spawnProcess(command, args, options);
-  });
-  syncBuiltinESMExports();
-  t.after(() => { intercepted.mock.restore(); syncBuiltinESMExports(); });
-
-  terminateProcessTree(child);
-  await closed;
-  assert.equal(taskkillAttempts, 1);
-  for (let attempt = 0; attempt < 80; attempt++) {
-    try { process.kill(grandchildPid, 0); }
-    catch (error) {
-      if (error.code === "ESRCH") {
-        grandchildStopped = true;
-        return;
-      }
-      throw error;
-    }
-    await delay(100);
-  }
-  assert.fail("grandchild survived Windows cleanup after taskkill failed to launch");
 });
