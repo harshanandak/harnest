@@ -12,7 +12,7 @@
  * reads bounded status/trace pages; there is no subagent transcript to delegate to.
  */
 import { spawn } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { once } from "node:events";
 import { readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +21,7 @@ import { Type } from "typebox";
 import { createDaemonClient, ensureDaemon } from "__HARNEST_DAEMON_CLIENT_URL__";
 import { jobStateDirectory } from "__HARNEST_DAEMON_SETTINGS_URL__";
 import { renderDynamicView, watchDynamicView } from "__HARNEST_DYNAMIC_VIEW_URL__";
-import { windowsSystemCommand } from "__HARNEST_LAUNCH_COMMAND_URL__";
+import { resolveTrustedCommand, windowsSystemCommand } from "__HARNEST_LAUNCH_COMMAND_URL__";
 
 const client = createDaemonClient();
 let readiness;
@@ -153,25 +153,12 @@ export function graphViewCommandLine(nodePath, scriptPath, args = []) {
   return [...paths, ...safeArgs].map(quote).join(" ");
 }
 
-/** True when an executable is on PATH; `has` stays injectable for tests. */
-export function onPath(name, env = process.env, platform = process.platform) {
-  const separator = platform === "win32" ? ";" : ":";
-  for (const dir of String(env.PATH || env.Path || "").split(separator)) {
-    if (!dir) continue;
-    try {
-      accessSync(join(dir, name), constants.X_OK);
-      return true;
-    } catch { /* keep looking */ }
-  }
-  return false;
-}
-
 /**
  * Best-effort terminal launcher for the interactive viewer. A missing launcher
  * returns null so the caller prints the exact command instead of failing
  * silently; Windows uses cmd's own `start`, Windows Terminal is not required.
  */
-export function terminalLaunchPlan({ commandLine, platform = process.platform, has = () => false, env = process.env } = {}) {
+export function terminalLaunchPlan({ commandLine, platform = process.platform, env = process.env } = {}) {
   if (typeof commandLine !== "string" || !commandLine) return null;
   if (platform === "win32") {
     try {
@@ -180,19 +167,36 @@ export function terminalLaunchPlan({ commandLine, platform = process.platform, h
     } catch { return null; }
   }
   if (platform === "darwin") {
-    return { via: "Terminal.app", command: "osascript", args: ["-e", `tell application "Terminal" to do script "${commandLine.replaceAll('"', '\\"')}"`, "-e", 'tell application "Terminal" to activate'] };
+    const command = resolveTrustedCommand("osascript", env);
+    if (!command) return null;
+    return { via: "Terminal.app", command, args: ["-e", `tell application "Terminal" to do script "${commandLine.replaceAll('"', '\\"')}"`, "-e", 'tell application "Terminal" to activate'] };
   }
-  const candidates = [
-    { via: "x-terminal-emulator", command: "x-terminal-emulator", args: ["-e", "sh", "-lc", commandLine] },
-    { via: "gnome-terminal", command: "gnome-terminal", args: ["--", "sh", "-lc", commandLine] },
-    { via: "konsole", command: "konsole", args: ["-e", "sh", "-lc", commandLine] },
-    { via: "xterm", command: "xterm", args: ["-e", "sh", "-lc", commandLine] },
-  ];
-  return candidates.find((candidate) => has(candidate.command)) ?? null;
+  const shell = resolveTrustedCommand("sh", env);
+  if (!shell) return null;
+  for (const via of ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]) {
+    const command = resolveTrustedCommand(via, env);
+    if (command) return { via, command, args: [via === "gnome-terminal" ? "--" : "-e", shell, "-lc", commandLine] };
+  }
+  return null;
 }
 
 /** Injectable launcher: tests drive this so no window opens during a test run. */
-export const terminalLauncher = { spawn: (command, args, options) => spawn(command, args, options) };
+export const terminalLauncher = {
+  async spawn(command, args, options) {
+    const child = spawn(command, args, options);
+    await once(child, "spawn");
+    child.unref();
+  },
+};
+
+async function openViewerTerminal(commandLine, cwd) {
+  const plan = terminalLaunchPlan({ commandLine });
+  if (!plan) return null;
+  try {
+    await terminalLauncher.spawn(plan.command, plan.args, { detached: true, stdio: "ignore", cwd });
+    return plan;
+  } catch { return null; }
+}
 
 const HandoffRouteSchema = Type.Object({
   provider: Type.Optional(Type.String({ minLength: 1 })),
@@ -559,11 +563,7 @@ export default function harnestExtension(pi) {
     const script = join(dirname(fileURLToPath(GRAPH_VIEW_URL)), "dynamic-view.mjs");
     const commandLine = graphViewCommandLine(process.execPath, script, target ? [target] : []);
     if (!commandLine) throw new Error("Viewer path or run ID contains shell metacharacters");
-    const plan = terminalLaunchPlan({ commandLine, platform: process.platform, has: onPath });
-    if (plan) {
-      const child = terminalLauncher.spawn(plan.command, plan.args, { detached: true, stdio: "ignore", cwd: dirname(dirname(script)) });
-      child?.unref?.();
-    }
+    const plan = await openViewerTerminal(commandLine, dirname(dirname(script)));
     if (ctx?.hasUI) ctx.ui.notify(plan ? "Multi-agent workflow viewer opened" : `Open a terminal and run:\n${commandLine}`, "info");
   });
 
@@ -703,15 +703,8 @@ export default function harnestExtension(pi) {
       pi.appendEntry("harnest-view", { watch: true, graphId: target, opened: false, at: Date.now() });
       return;
     }
-    const plan = terminalLaunchPlan({ commandLine, platform: process.platform, has: onPath });
-    let opened = false;
-    if (plan) {
-      try {
-        const child = terminalLauncher.spawn(plan.command, plan.args, { detached: true, stdio: "ignore", cwd });
-        child?.unref?.();
-        opened = true;
-      } catch { opened = false; }
-    }
+    const plan = await openViewerTerminal(commandLine, cwd);
+    const opened = Boolean(plan);
     const message = opened
       ? `workflow viewer opened in ${plan.via}\n${commandLine}`
       : `open a terminal in ${cwd} and run:\n${commandLine}`;

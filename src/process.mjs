@@ -213,25 +213,39 @@ export function classifyProviderFailure(input = {}) {
   return null;
 }
 
+function killChild(child) {
+  try { child.kill(); } catch { /* The process already exited. */ }
+}
+
+function killWindowsTree(child) {
+  const isRunning = () => !child.killed && child.exitCode == null && child.signalCode == null;
+  // Once the root has exited there is no tree left to walk; taskkill then reports 128 (not found).
+  if (!isRunning()) return;
+  // A failed spawn can emit both error and close.
+  let warned = false;
+  const onFailure = () => {
+    if (warned) return;
+    warned = true;
+    console.warn("Windows process tree cleanup failed. Descendants may survive.");
+    if (isRunning()) killChild(child);
+  };
+  try {
+    const killer = nodeSpawn(windowsSystemCommand("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], {
+      windowsHide: true, shell: false, stdio: "ignore", timeout: 3000,
+    });
+    killer.on("error", onFailure);
+    killer.once("close", (code) => { if (code !== 0 && code !== 128) onFailure(); });
+    killer.unref?.();
+  } catch { onFailure(); }
+}
+
 export function terminateProcessTree(child) {
   if (!child || child.killed) return;
   if (process.platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) {
-    try {
-      const killer = nodeSpawn(windowsSystemCommand("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], {
-        windowsHide: true,
-        shell: false,
-        stdio: "ignore",
-      });
-      killer.on("error", () => {
-        try { child.kill(); } catch { /* The process already exited. */ }
-      });
-      killer.unref?.();
-      return;
-    } catch {
-      // Fall through to the direct child when taskkill cannot start.
-    }
+    killWindowsTree(child);
+    return true;
   }
-  try { child.kill(); } catch { /* The process already exited. */ }
+  killChild(child);
 }
 
 function byteLimit(value, fallback, name) {
@@ -347,8 +361,8 @@ export async function runProcess(command, args, options = {}) {
       batchPromises = [];
       batchLines = batchBytes = 0;
       stopInput();
-      if (!exited && !closed) {
-        terminateProcessTree(child);
+      // Windows tree cleanup handles its own timeouts and direct-child fallback.
+      if (!exited && !closed && !terminateProcessTree(child)) {
         // SIGTERM may be ignored; do not resolve a failed run while it is alive.
         killTimer = setTimeout(() => {
           if (!exited && !closed) {

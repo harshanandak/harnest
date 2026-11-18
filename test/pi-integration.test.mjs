@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -188,7 +188,7 @@ test("the Pi extension wires the live workflow view into commands, a tool, and t
 });
 
 test("Pi /harnest_view renders the shared waterfall into a widget and stops cleanly", { timeout: 30_000 }, async () => {
-  const { default: extension, terminalLaunchPlan, terminalLauncher, onPath } = await loadPiExtension();
+  const { default: extension, terminalLaunchPlan, terminalLauncher } = await loadPiExtension();
   const { pi, tools, commands, handlers } = stubPi();
   const execCalls = [];
   pi.exec = async (command, args, options) => {
@@ -249,7 +249,7 @@ test("Pi /harnest_view renders the shared waterfall into a widget and stops clea
     return { unref() {} };
   };
   await commands.get("harnest_watch").handler("", ctx);
-  const planned = terminalLaunchPlan({ commandLine: "node x", platform: process.platform, has: onPath });
+  const planned = terminalLaunchPlan({ commandLine: "node x" });
   if (planned) {
     assert.equal(launches.length, 1, "a side terminal must be spawned when a launcher exists");
     assert.match(notes.at(-1).message, /opened in/);
@@ -259,7 +259,7 @@ test("Pi /harnest_view renders the shared waterfall into a widget and stops clea
   }
 
   // A launcher that fails must degrade to the copy-paste command, never silence.
-  terminalLauncher.spawn = () => { throw new Error("no launcher"); };
+  terminalLauncher.spawn = async () => { throw new Error("no launcher"); };
   await commands.get("harnest_watch").handler("", ctx);
   assert.equal(notes.at(-1).type, "warning");
   assert.match(notes.at(-1).message, /graph-view\.mjs"? --watch/);
@@ -282,6 +282,26 @@ test("Pi /harnest_view renders the shared waterfall into a widget and stops clea
   assert.equal(widgets.at(-1).lines, undefined, "session_shutdown must clear the widget");
 });
 
+test("Pi side terminals resolve both the emulator and nested shell through absolute PATH", { skip: process.platform === "win32" }, async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-terminal-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const installed = join(cwd, "installed bin");
+  await mkdir(installed);
+  for (const command of ["xterm", "sh", "osascript"]) {
+    for (const directory of [cwd, installed]) {
+      await writeFile(join(directory, command), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    }
+  }
+  const { terminalLaunchPlan } = await loadPiExtension();
+  const commandLine = "/usr/bin/node /repo/graph-view.mjs --watch";
+  const env = { PATH: relative(process.cwd(), cwd) + ":" + installed };
+  const plan = terminalLaunchPlan({ commandLine, platform: "linux", env });
+  assert.deepEqual(plan, {
+    via: "xterm", command: join(installed, "xterm"), args: ["-e", join(installed, "sh"), "-lc", commandLine],
+  });
+  assert.equal(terminalLaunchPlan({ commandLine, platform: "darwin", env }).command, join(installed, "osascript"));
+});
+
 test("Pi workflow-view helpers fit frames to the widget and plan a side terminal", async () => {
   const { widgetRows, graphViewArgs, frameSummary, terminalLaunchPlan, graphViewCommandLine, terminalLauncher } = await loadPiExtension();
   const rows = widgetRows(["title  running  2/3 nodes  9s", "a".repeat(50), "b", "c", "enter open node   up/down select   r refresh   q quit", ""].join("\n"), { width: 40, maxRows: 3 });
@@ -296,8 +316,8 @@ test("Pi workflow-view helpers fit frames to the widget and plan a side terminal
   assert.deepEqual(graphViewArgs({ graphId: "graph-abc", ascii: true, watch: true }), ["--watch", "--ascii", "graph-abc"]);
   assert.deepEqual(frameSummary("Plan probe  running  2/3 nodes  12s"), { title: "Plan probe", state: "running", completed: 2, total: 3 });
   assert.equal(frameSummary("not a frame"), null);
-  assert.equal(terminalLaunchPlan({ commandLine: "node x", platform: "linux", has: () => false }), null);
-  assert.equal(terminalLaunchPlan({ commandLine: "node x", platform: "linux", has: (name) => name === "xterm" }).command, "xterm");
+  assert.equal(terminalLaunchPlan({ commandLine: "node x", platform: "linux", env: { PATH: "." } }), null);
+  assert.equal(terminalLaunchPlan({ commandLine: "node x", platform: "darwin", env: { PATH: "." } }), null);
   const windowsPlan = terminalLaunchPlan({ commandLine: "node x", platform: "win32", env: { SystemRoot: "C:\\Windows" } });
   assert.equal(windowsPlan.command, "C:\\Windows\\System32\\cmd.exe");
   assert.deepEqual(windowsPlan.args, ["/d", "/c", "start", "", "C:\\Windows\\System32\\cmd.exe", "/d", "/k", "node x"]);

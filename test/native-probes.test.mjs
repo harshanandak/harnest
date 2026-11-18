@@ -80,6 +80,19 @@ test("Windows system commands require a fully qualified root and fall back to wi
   }
 });
 
+test("Windows system commands prefer the OS directory to SystemRoot", { skip: !windows }, async (t) => {
+  const cwd = await probeDirectory(t);
+  const launchCommand = new URL("../src/launch-command.mjs", import.meta.url).href;
+  // Node needs the real SystemRoot to start, so the child installs the decoy after startup.
+  const { stdout } = await exec(process.execPath, ["--input-type=module", "-e", `
+for (const key of Object.keys(process.env)) if (/^(systemroot|windir)$/i.test(key)) delete process.env[key];
+process.env.SystemRoot = process.env.windir = process.argv[2];
+const { windowsSystemCommand } = await import(process.argv[1]);
+console.log(windowsSystemCommand("taskkill.exe"));
+`, launchCommand, cwd], { timeout: 5000 });
+  assert.equal(stdout.trim().toLowerCase(), join(process.env.SystemRoot, "System32", "taskkill.exe").toLowerCase());
+});
+
 test("Windows process cleanup never runs taskkill.exe from the cwd", { skip: !windows }, async (t) => {
   const cwd = await probeDirectory(t);
   const marker = join(cwd, "taskkill-decoy-ran");

@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createDaemonClient } from "../src/daemon-client.mjs";
 import { readDaemonToken } from "../src/daemon-settings.mjs";
-import { windowsSystemCommand } from "../src/launch-command.mjs";
+import { requireNativeCommand, windowsSystemCommand } from "../src/launch-command.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const exec = promisify(execFile);
@@ -106,7 +106,7 @@ async function childProcesses(parentPids) {
     { windowsHide: true });
     return JSON.parse(stdout);
   }
-  const { stdout } = await exec("ps", ["-eo", "pid=,ppid=,rss=,comm="]);
+  const { stdout } = await exec(requireNativeCommand("ps"), ["-eo", "pid=,ppid=,rss=,comm="]);
   return stdout.trim().split("\n").map((row) => {
     const [, pid, parentPid, rss, image] = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/.exec(row);
     return { image: image.trim(), pid: Number(pid), parentPid: Number(parentPid), rssBytes: Number(rss) * 1024 };

@@ -76,16 +76,100 @@ function terminationProbe(t) {
   return { child, state, kills };
 }
 
-test("Windows cleanup kills the direct child when the system root is relative", { skip: process.platform !== "win32" }, (t) => {
-  const previousRoot = process.env.SystemRoot;
-  process.env.SystemRoot = "relative";
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.SystemRoot;
-    else process.env.SystemRoot = previousRoot;
-  });
-  const { child, kills } = terminationProbe(t);
+function windowsCleanupProbe(t) {
+  const child = fakeChild();
+  child.pid = 424242;
+  child.kill = t.mock.fn();
+  const taskkill = new EventEmitter();
+  const warnings = t.mock.method(console, "warn", () => {});
+  const intercepted = t.mock.method(childProcess, "spawn", () => taskkill);
+  syncBuiltinESMExports();
+  t.after(() => { intercepted.mock.restore(); syncBuiltinESMExports(); });
+  return { child, taskkill, warnings, intercepted };
+}
+
+function assertWindowsCleanupWarning(warnings) {
+  assert.deepEqual(warnings.mock.calls.map((call) => call.arguments), [
+    ["Windows process tree cleanup failed. Descendants may survive."],
+  ]);
+}
+
+test("Windows cleanup warns once and kills the direct child when taskkill cannot launch", { skip: process.platform !== "win32" }, (t) => {
+  const { child, taskkill, warnings, intercepted } = windowsCleanupProbe(t);
   terminateProcessTree(child);
-  assert.deepEqual(kills, [{ exited: false, closed: false, signal: "SIGTERM" }]);
+  taskkill.emit("error", new Error("taskkill could not launch"));
+  taskkill.emit("close", -1, null);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  const [command, args] = intercepted.mock.calls[0].arguments;
+  assert.match(command, /^[a-z]:[\\/].*[\\/]System32[\\/]taskkill\.exe$/i);
+  assert.deepEqual(args, ["/PID", String(child.pid), "/T", "/F"]);
+  assert.equal(child.kill.mock.callCount(), 1);
+  assertWindowsCleanupWarning(warnings);
+});
+
+test("Windows cleanup warns once and kills the direct child when spawning taskkill throws", { skip: process.platform !== "win32" }, (t) => {
+  const { child, warnings, intercepted } = windowsCleanupProbe(t);
+  intercepted.mock.mockImplementation(() => { throw new Error("taskkill could not launch"); });
+  terminateProcessTree(child);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.equal(child.kill.mock.callCount(), 1);
+  assertWindowsCleanupWarning(warnings);
+});
+
+test("Windows cleanup warns once and kills the direct child when taskkill exits nonzero", { skip: process.platform !== "win32" }, (t) => {
+  const { child, taskkill, warnings, intercepted } = windowsCleanupProbe(t);
+  terminateProcessTree(child);
+  taskkill.emit("close", 1, null);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.equal(child.kill.mock.callCount(), 1);
+  assertWindowsCleanupWarning(warnings);
+});
+
+test("Windows cleanup warns without targeting the root after it exits before taskkill fails", { skip: process.platform !== "win32" }, (t) => {
+  const { child, taskkill, warnings, intercepted } = windowsCleanupProbe(t);
+  terminateProcessTree(child);
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  taskkill.emit("close", 1);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assertWindowsCleanupWarning(warnings);
+});
+
+test("Windows cleanup skips taskkill silently when the root has already exited", { skip: process.platform !== "win32" }, (t) => {
+  const { child, warnings, intercepted } = windowsCleanupProbe(t);
+  child.exitCode = 0;
+  terminateProcessTree(child);
+
+  assert.equal(intercepted.mock.callCount(), 0);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assert.equal(warnings.mock.callCount(), 0);
+});
+
+test("Windows cleanup stays silent when taskkill reports the root is gone", { skip: process.platform !== "win32" }, (t) => {
+  const { child, taskkill, warnings, intercepted } = windowsCleanupProbe(t);
+  terminateProcessTree(child);
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  taskkill.emit("close", 128);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assert.equal(warnings.mock.callCount(), 0);
+});
+
+test("Windows cleanup emits no warning when taskkill succeeds", { skip: process.platform !== "win32" }, (t) => {
+  const { child, taskkill, warnings, intercepted } = windowsCleanupProbe(t);
+  terminateProcessTree(child);
+  taskkill.emit("close", 0, null);
+
+  assert.equal(intercepted.mock.callCount(), 1);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assert.equal(warnings.mock.callCount(), 0);
 });
 
 for (const mode of ["callback rejection", "timeout"]) {

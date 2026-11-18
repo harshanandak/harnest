@@ -192,23 +192,28 @@ test("login items round-trip only allowlisted settings and preserve both state d
   }
 });
 
-test("uninstall removes only the registered login item on each platform", async () => {
-  const home = resolve("fixture home");
-  const env = { XDG_CONFIG_HOME: join(home, "custom config"), SystemRoot: "C:\\Windows" };
+test("uninstall removes only the registered login item on each platform", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "harnest-autostart-removal-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const extension = process.platform === "win32" ? ".EXE" : "";
+  const launchctl = join(home, "launchctl" + extension);
+  const systemctl = join(home, "systemctl" + extension);
+  for (const command of [launchctl, systemctl]) await writeFile(command, "", { mode: 0o755 });
+  const env = { PATH: home, PATHEXT: ".EXE", XDG_CONFIG_HOME: join(home, "custom config"), SystemRoot: "C:\\Windows" };
   const cases = {
     win32: [
       ["C:\\Windows\\System32\\whoami.exe", "/user", "/fo", "csv", "/nh"],
       ["C:\\Windows\\System32\\schtasks.exe", "/delete", "/tn", `Harnest-${sid}`, "/f"],
     ],
     darwin: [
-      ["launchctl", "print", "gui/501/com.harnest.daemon"],
-      ["launchctl", "bootout", "gui/501/com.harnest.daemon"],
+      [launchctl, "print", "gui/501/com.harnest.daemon"],
+      [launchctl, "bootout", "gui/501/com.harnest.daemon"],
       ["unlink", join(home, "Library", "LaunchAgents", "com.harnest.daemon.plist")],
     ],
     linux: [
-      ["systemctl", "--user", "disable", "harnest.service"],
+      [systemctl, "--user", "disable", "harnest.service"],
       ["unlink", join(env.XDG_CONFIG_HOME, "systemd", "user", "harnest.service")],
-      ["systemctl", "--user", "daemon-reload"],
+      [systemctl, "--user", "daemon-reload"],
     ],
   };
   for (const [platform, expected] of Object.entries(cases)) {
@@ -220,6 +225,21 @@ test("uninstall removes only the registered login item on each platform", async 
     });
     assert.deepEqual(calls, expected);
   }
+});
+
+test("Linux autostart removal skips a systemctl decoy in relative PATH", { skip: process.platform !== "linux" }, async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "harnest-systemctl-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const trusted = join(home, "installed bin");
+  await mkdir(trusted);
+  await writeFile(join(home, "systemctl"), '#!/bin/sh\nprintf "decoy\\n" >> calls\n', { mode: 0o755 });
+  await writeFile(join(trusted, "systemctl"), '#!/bin/sh\nprintf "%s\\n" "$*" >> calls\n', { mode: 0o755 });
+  const installer = new URL("../scripts/install-daemon.mjs", import.meta.url).href;
+  await promisify(execFile)(process.execPath, ["--input-type=module", "-e",
+    'const { removeAutostart } = await import(process.argv[1]); await removeAutostart();', installer], {
+    cwd: home, env: { HOME: home, PATH: `.:${trusted}` },
+  });
+  assert.equal(await readFile(join(home, "calls"), "utf8"), "--user disable harnest.service\n--user daemon-reload\n");
 });
 
 test("Pi installer backs up the extension and bakes the daemon client link", async (t) => {
