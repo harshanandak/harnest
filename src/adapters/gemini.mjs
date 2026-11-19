@@ -1,4 +1,5 @@
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
+import { validateAdapterExecution } from "../execution-controls.mjs";
 
 import { harnessLaunch } from "../config.mjs";
 import { assertAdapterRoute } from "../model-policy.mjs";
@@ -110,6 +111,7 @@ function buildArgs(request, launchArgs, policyArgs, route, sessionId) {
   const args = [...launchArgs, ...policyArgs, "-p", "", "--output-format", "stream-json"];
   if (sessionId) args.push("--resume", sessionId);
   if (route.model) args.push("--model", route.model);
+  for (const dir of request.execution?.addDirs ?? []) args.push("--include-directories", dir);
   return args;
 }
 
@@ -326,6 +328,7 @@ export class GeminiAdapter {
   async run(request, { signal, onProgress } = {}) {
     assertPromptOnlyWorkflow("gemini", request?.workflow);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    request = validateAdapterExecution(request, "gemini");
     if (signal?.aborted) throw adapterError("Gemini execution aborted", "abort", { aborted: true, timedOut: false });
     validatePolicy(request.policy || {});
     const route = resolvedRoute(request.route || {});
@@ -514,7 +517,7 @@ export class GeminiAdapter {
         });
       }
       const args = buildArgs(
-        request,
+        validateAdapterExecution(request, "gemini"),
         Array.isArray(this.launch.args) ? this.launch.args : [],
         prepared.args,
         route,

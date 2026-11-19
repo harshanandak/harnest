@@ -4,6 +4,9 @@
 // implementation and lets this adapter supply the injected executable/spawn
 // seam required by the companion contract.
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { digestContext, normalizePolicyControls } from "../protocol.mjs";
 import {
   ProcessError,
@@ -16,6 +19,8 @@ import {
 } from "../process.mjs";
 import { harnessLaunch, openCodeEnvironment } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
+import { executionError, stageAttachments, validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import { compactText, structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
 import { OpenCodeControl } from "./opencode-control.mjs";
@@ -273,6 +278,8 @@ function buildArgs(request, { model, agent, thinking, variant, sessionId, prompt
   if (version === "v1" && effectiveVariant) args.push("--variant", effectiveVariant);
   else if (route.thinking === true) args.push("--thinking");
   if (sessionId) args.push("--session", sessionId);
+  if (request.execution?.sessionAction === "fork") args.push("--fork");
+  for (const { path } of request.execution?.attachments ?? []) args.push("--file", path);
   return args;
 }
 
@@ -519,6 +526,9 @@ export class OpenCodeAdapter {
     assertNoClaudeRoute("opencode", request.route);
     assertNoClaudeWorkflow("opencode", request.workflow);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    request = validateAdapterExecution(request, "opencode");
+    const { sessionId, sessionAction, attachments } = request.execution;
+    const fork = sessionAction === "fork";
     const harnessVersion = validateHarnessVersion(request.route?.harnessVersion);
     if (!resolvedModel(request.route, request.route?.model)) {
       throw new TypeError("OpenCode handoff requires an explicit route.model");
@@ -564,7 +574,7 @@ export class OpenCodeAdapter {
     const taskflowCore = flowSpec !== null ? await this.#loadTaskflowCore() : null;
     const execution = executionSignal(signal, request.execution?.timeoutMs);
     const state = {
-      sessionId: request.execution?.sessionId || null,
+      sessionId: fork ? null : sessionId || null,
       workflowRunId: null,
       usage: emptyUsage(),
       eventSummary: { count: 0, types: [] },
@@ -590,22 +600,34 @@ export class OpenCodeAdapter {
     this.activeHarnessVersion = harnessVersion;
     this.hostAttached = hostAttached;
     this.controlRuntime = controlRuntime;
-    this.controlStart = controlRuntime?.start({
-      request,
-      version: harnessVersion,
-      launch: harnessVersion === "v2" ? this.launchV2 : this.launch,
-      env: openCodeEnvironment(harnessVersion, mergeProcessEnv(this.env)),
-      signal: execution.signal,
-      serverUrl: this.options.serverUrl || request.route?.serverUrl,
-    });
+    let scratch;
     try {
+      const launch = harnessVersion === "v2" ? this.launchV2 : this.launch;
+      const env = openCodeEnvironment(harnessVersion, mergeProcessEnv(this.env));
+      await requireExecutionFlags({ launch, request, env, spawnFn: this.spawnFn, signal: execution.signal }, ["run"], [
+        ...(fork ? [["sessionAction", "--fork"]] : []),
+        ...(attachments?.length ? [["attachments", "--file"]] : []),
+      ]);
+      this.controlStart = controlRuntime?.start({
+        request, version: harnessVersion, launch, env, signal: execution.signal,
+        serverUrl: this.options.serverUrl || request.route?.serverUrl,
+      });
       if (this.controlStart) await this.controlStart;
       if (flowSpec !== null) {
         return await this.#runWorkflow(request, flowSpec, execution, state, onProgress, taskflowCore);
       }
-      return await this.#runSingle(request, execution, state, onProgress);
+      request = validateAdapterExecution(request, "opencode");
+      if (attachments?.length) {
+        scratch = await mkdtemp(join(tmpdir(), "harnest-opencode-input-"));
+        request.execution.attachments = await stageAttachments(request.execution.attachments, scratch);
+      }
+      const result = await this.#runSingle(request, execution, state, onProgress);
+      if (fork && (!result.sessionId || result.sessionId === sessionId)) {
+        throw executionError("sessionAction", "OpenCode did not report a new session ID for the fork");
+      }
+      return result;
     } catch (error) {
-      if (error instanceof NativeLaunchError || error?.name === "OpenCodeAdapterError") throw error;
+      if (error instanceof NativeLaunchError || error?.name === "OpenCodeAdapterError" || error?.details?.kind === "validation") throw error;
       throw processFailure(error, { ...execution.state, ...state });
     } finally {
       await controlRuntime?.stop().catch(() => {});
@@ -614,6 +636,7 @@ export class OpenCodeAdapter {
       this.activeHarnessVersion = null;
       this.hostAttached = null;
       execution.dispose();
+      if (scratch) await rm(scratch, { recursive: true, force: true });
     }
   }
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { realpath } from "node:fs/promises";
 import test from "node:test";
 import { CursorAdapter } from "../src/adapters/cursor.mjs";
 import { harnessLaunch } from "../src/config.mjs";
@@ -51,6 +52,35 @@ function request(overrides = {}) {
 test("createAdapter supports cursor target", () => {
   const adapter = createAdapter("cursor", { cursor: { command: "fake-cursor" } });
   assert.ok(adapter instanceof CursorAdapter);
+});
+
+test("Cursor passes both directories while retaining read-only Ask mode", async () => {
+  const dirs = [await realpath(process.cwd()), await realpath("docs")];
+  const calls = [];
+  const adapter = new CursorAdapter({
+    command: "fake-cursor",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: args[0] === "--help" ? "  --add-dir <path>\n" : streamJsonResult("read") });
+    },
+  });
+  await adapter.run(request({ execution: { addDirs: dirs } }));
+  assert.deepEqual(calls[0], ["--help"]);
+  assert.deepEqual(calls[1].slice(-9, -1), ["--mode", "ask", "--workspace", process.cwd(), "--add-dir", dirs[0], "--add-dir", dirs[1]]);
+  assert.ok(!calls[1].includes("--force"));
+});
+
+test("Cursor rejects extra directories when the installed CLI lacks --add-dir", async () => {
+  const calls = [];
+  const adapter = new CursorAdapter({
+    command: "fake-cursor",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: "  --mode <mode>\n" });
+    },
+  });
+  await assert.rejects(adapter.run(request({ execution: { addDirs: [process.cwd()] } })), /execution\.addDirs requires --add-dir/);
+  assert.deepEqual(calls, [["--help"]]);
 });
 
 test("harnessLaunch supports cursor via env and default", () => {
@@ -173,6 +203,7 @@ test("Cursor emits explicit plan and sandbox flags without force", async () => {
     command: "fake-cursor",
     spawnFn(_command, args) {
       calls.push(args);
+      if (args[0] === "--help") return new FakeChild({ stdout: "  --add-dir <directory>\n" });
       return new FakeChild({ stdout: streamJsonResult("planned") });
     },
   });
@@ -190,6 +221,14 @@ test("Cursor emits explicit plan and sandbox flags without force", async () => {
     assert.equal(result.execution.effectivePolicy.mode, mode);
     assert.equal(result.execution.effectivePolicy.write, write);
   }
+  const dir = await realpath(process.cwd());
+  const combined = request({ route: {}, policy: { mode: "plan", sandbox: true }, execution: { addDirs: [dir] } });
+  await adapter.run(combined);
+  assert.deepEqual(calls[4], ["--help"]);
+  assert.deepEqual(calls[5].slice(0, -1), [
+    "--trust", "-p", "--output-format", "stream-json", "--stream-partial-output",
+    "--mode", "plan", "--sandbox", "enabled", "--workspace", combined.cwd, "--add-dir", dir,
+  ]);
   await assert.rejects(
     adapter.run(request({ policy: { write: true, sandbox: false } })),
     (error) => error.details?.kind === "policy" && /sandbox=false/.test(error.message),
@@ -198,7 +237,7 @@ test("Cursor emits explicit plan and sandbox flags without force", async () => {
     adapter.run(request({ policy: { tools: { deny: ["Read"] } } })),
     (error) => error.details?.kind === "policy" && /policy.tools/.test(error.message),
   );
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 6);
 });
 
 test("Cursor rejects a successful envelope that explicitly says every tool call was blocked", async () => {

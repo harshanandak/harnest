@@ -6,6 +6,12 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 
 ### Added
 
+- `execution.addDirs` passes approved extra directories to Claude, Codex, Cursor, and Gemini.
+- `execution.attachments` sends bounded local images or files to targets with native input support.
+- `execution.instructions` appends per-run system instructions in Claude and Pi.
+- `execution.sessionAction` selects native resume or fork on supported targets.
+- `execution.maxTurns` caps Claude print-mode agentic turns.
+
 - Durable handoffs to OpenCode, Pi, Cursor, Claude Code, Codex, Gemini CLI, and Amp, plus a generic ACP route for approved write work with trusted local registrations.
 - Dependency graphs and JavaScript workflows with durable status, bounded traces, cancellation, and recovery.
 - A shared per-user daemon with loopback HTTP, a stdio bridge, and login startup on Windows, macOS, and Linux. The CI budget for the daemon plus 10 clients is ≤ 320 MiB. The shared-daemon measurements were 237 MiB on Ubuntu and 214 MiB on Windows.
@@ -14,6 +20,11 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 - [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. Each preset has CI fixture coverage only, with no live CLI testing.
 - `bun run setup remove <host>` for the nine automatic ACP presets, Gemini CLI, Amp, and Cursor. It backs up the user config and removes only the Harnest MCP entry. Fresh setup prints this reverse path.
 - Per-phase agent counts, reported token totals, and elapsed time for JavaScript workflows, plus a runnable bounded verification-loop example.
+- Native service tier selection for Codex one-shot handoffs and fast mode for Claude one-shot handoffs.
+- Model selection for registered ACP agents that advertise model choices.
+- Session mode and validated config option selection for registered ACP agents.
+- Native Codex config profile selection for one-shot handoffs.
+- Named Claude Code agents for one-shot handoffs.
 - Explicit tool allow and deny lists for Claude print and Gemini, and exact deny lists for Pi and local OpenCode V1.
 - Cursor print can request read-only plan mode and enable the native shell sandbox independently of write approval.
 

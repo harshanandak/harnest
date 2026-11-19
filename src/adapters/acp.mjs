@@ -1,9 +1,11 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { attachmentMimeType, executionError, readAttachment, validateAdapterExecution } from "../execution-controls.mjs";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import { resolveAcpAgent } from "../acp-registry.mjs";
 import { boundedProviderText, classifyProviderFailure, mergeProcessEnv, redactSecrets } from "../process.mjs";
-import { hasToolPolicy } from "../protocol.mjs";
+import { ACP_ROUTE_FIELDS, hasToolPolicy, normalizeRoute } from "../protocol.mjs";
 import { structuredResult } from "../result.mjs";
 import { AcpRpcError, AcpTransport } from "./acp-transport.mjs";
 
@@ -16,7 +18,7 @@ export const ACP_CAPABILITIES = Object.freeze({
   resume: "negotiated",
   authentication: "native",
   readOnly: false,
-  modelSelection: false,
+  modelSelection: "negotiated",
   liveMessages: false,
   liveReroute: false,
   usage: "context-and-session-cost-only",
@@ -114,10 +116,79 @@ function assertPolicy(request) {
     });
   }
   for (const [field, value] of Object.entries(request?.route ?? {})) {
-    if (["agent", "harness"].includes(field) || value === undefined || value === null || value === "") continue;
-    throw adapterError(`Generic ACP cannot verify route.${field}; only route.agent is supported`, "policy", {
-        field: `route.${field}`,
+    if (field === "harness" || ACP_ROUTE_FIELDS.includes(field) || value === undefined) continue;
+    throw adapterError(`Generic ACP does not support route.${field}`, "policy", {
+      field: `route.${field}`,
     });
+  }
+  const { harness, ...route } = request.route;
+  try {
+    normalizeRoute(route);
+  } catch (error) {
+    throw adapterError(error.message, "policy");
+  }
+}
+
+function selectValues(option) {
+  if (option?.type !== "select" || !Array.isArray(option.options)) return [];
+  return option.options.flatMap((entry) => Array.isArray(entry?.options) && typeof entry.group === "string"
+    ? entry.options.map((item) => item?.value) : [entry?.value]);
+}
+
+async function applySessionRoute(transport, sessionId, session, route, rpcOptions) {
+  let config = Array.isArray(session?.configOptions) ? session.configOptions : [];
+  const applied = new Map();
+  const fail = (field, reason) => adapterError(`ACP ${field} ${reason}`, "policy", { field });
+  const set = async (method, parameters, field) => {
+    try {
+      return await transport.request(method, { sessionId, ...parameters }, rpcOptions);
+    } catch (error) {
+      if (!(error instanceof AcpRpcError)) throw error;
+      throw fail(field, `was rejected by ${method} (RPC code ${error.code})`);
+    }
+  };
+  const setOption = async (option, value, field) => {
+    const boolean = option?.type === "boolean" && typeof value === "boolean";
+    if (!option || typeof option.id !== "string" ||
+        !(boolean || typeof value === "string" && selectValues(option).includes(value))) {
+      throw fail(field, "is not an advertised ACP configuration choice");
+    }
+    if (applied.has(option.id)) throw fail(field, "duplicates a dedicated route control");
+    const response = await set("session/set_config_option", {
+      configId: option.id, ...(boolean ? { type: "boolean" } : {}), value,
+    }, field);
+    if (!Array.isArray(response?.configOptions)) throw fail(field, "was not confirmed by the agent");
+    config = response.configOptions;
+    applied.set(option.id, { field, value });
+  };
+  const setSelection = async (field, category, value, advertised, advertisedIdKey, parameterIdKey, method) => {
+    if (value === undefined) return;
+    const option = config.find((item) => item?.category === category);
+    if (option) {
+      await setOption(option, value, field);
+    } else if (Array.isArray(advertised) && advertised.some((entry) => entry?.[advertisedIdKey] === value)) {
+      if (!isObject(await set(method, { [parameterIdKey]: value }, field))) {
+        throw fail(field, "was not acknowledged by the agent");
+      }
+    } else {
+      throw fail(field, "is not advertised by this ACP session");
+    }
+  };
+  // ACP config options supersede the legacy mode API and can affect later option choices.
+  await setSelection("route.model", "model", route.model, session?.models?.availableModels, "modelId", "modelId", "session/set_model");
+  await setSelection("route.variant", "mode", route.variant, session?.modes?.availableModes, "id", "modeId", "session/set_mode");
+  for (const [id, value] of Object.entries(route.options ?? {})) {
+    const option = config.find((item) => item?.id === id);
+    if ((option?.category === "model" && route.model !== undefined) ||
+        (option?.category === "mode" && route.variant !== undefined)) {
+      throw fail("route.options", "duplicates a dedicated route control");
+    }
+    await setOption(option, value, "route.options");
+  }
+  for (const [id, { field, value }] of applied) {
+    if (config.find((option) => option?.id === id)?.currentValue !== value) {
+      throw fail(field, "was not confirmed by the agent");
+    }
   }
 }
 
@@ -543,7 +614,7 @@ function normalizedError(error, { state, deadline, agentId } = {}) {
   if (deadline?.timedOut && result?.details?.kind === "abort") {
     result = adapterError("ACP execution timed out", "timeout", { timedOut: true, aborted: false });
   }
-  if (!(result instanceof AcpAdapterError)) {
+  if (!(result instanceof AcpAdapterError) && result?.details?.kind !== "validation") {
     if (result instanceof AcpRpcError) {
       const classification = classifyProviderFailure({ message: result.message, status: result.data?.status ?? null });
       result = classification
@@ -625,6 +696,7 @@ export class ACPAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "acp");
     assertPolicy(request);
     const requestedResumeId = request.execution?.sessionId;
     const resumeId = requestedResumeId === undefined || requestedResumeId === null || requestedResumeId === ""
@@ -760,6 +832,19 @@ export class ACPAdapter {
       }
       if (requestedVersion === 2 && negotiatedVersion === 1) fallbackWithoutServices = true;
       capabilities = agentCapabilities(negotiatedVersion, initializeResult);
+      const attachments = request.execution.attachments ?? [];
+      const supported = negotiatedVersion === 2 ? capabilities.session?.prompt : capabilities.promptCapabilities;
+      for (const { type } of attachments) {
+        const capability = type === "image" ? "image" : "embeddedContext";
+        if (!(negotiatedVersion === 2 ? isObject(supported?.[capability]) : supported?.[capability] === true)) {
+          throw executionError("attachments", `ACP agent did not advertise ${capability}`);
+        }
+      }
+      const content = await Promise.all(attachments.map(async ({ type, path }) => {
+        const data = (await readAttachment(path)).toString("base64");
+        if (type === "image") return { type, mimeType: attachmentMimeType(path), data };
+        return { type: "resource", resource: { uri: pathToFileURL(path).href, blob: data } };
+      }));
       identity = agentInfo(negotiatedVersion, initializeResult);
       if (negotiatedVersion === 2 && (!isObject(initializeResult?.info)
         || !hasText(initializeResult.info.name) || !hasText(initializeResult.info.version))) {
@@ -814,6 +899,7 @@ export class ACPAdapter {
         },
       });
 
+      let session;
       if (resumeId) {
         if (!resumeSupported(negotiatedVersion, capabilities)) {
           throw adapterError(
@@ -825,34 +911,37 @@ export class ACPAdapter {
         cleanupSessionId = resumeId;
         state.setSession(resumeId);
         if (negotiatedVersion === 1) {
-          await transport.request("session/load", {
+          session = await transport.request("session/load", {
             sessionId: resumeId,
             cwd: request.cwd,
             mcpServers: [],
           }, { signal: deadline.signal, timeoutMs: this.startupTimeoutMs });
         } else {
-          await transport.request("session/resume", {
+          session = await transport.request("session/resume", {
             sessionId: resumeId,
             cwd: request.cwd,
             mcpServers: [],
           }, { signal: deadline.signal, timeoutMs: this.startupTimeoutMs });
         }
       } else {
-        const created = await transport.request("session/new", {
+        session = await transport.request("session/new", {
           cwd: request.cwd,
           mcpServers: [],
         }, { signal: deadline.signal, timeoutMs: this.startupTimeoutMs });
-        if (typeof created?.sessionId === "string" && created.sessionId.length > 0) cleanupSessionId = created.sessionId;
-        state.setSession(created?.sessionId);
+        if (typeof session?.sessionId === "string" && session.sessionId.length > 0) cleanupSessionId = session.sessionId;
+        state.setSession(session?.sessionId);
       }
 
+      await applySessionRoute(transport, state.sessionId, session, request.route, {
+        signal: deadline.signal, timeoutMs: this.startupTimeoutMs,
+      });
       state.beginTurn();
       this.active = { transport, state, registration };
       const executionTimeoutMs = request.execution?.timeoutMs ?? this.timeoutMs;
       const promptTimeoutMs = Math.min(2_147_483_647, executionTimeoutMs + this.cancelTimeoutMs + 1_000);
       promptPromise = transport.request("session/prompt", {
         sessionId: state.sessionId,
-        prompt: [{ type: "text", text: promptText(request) }],
+        prompt: [{ type: "text", text: promptText(request) }, ...content],
       }, { timeoutMs: promptTimeoutMs });
       terminalAbort = abortFailure(deadline.signal);
       promptResponse = await Promise.race([

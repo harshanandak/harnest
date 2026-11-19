@@ -10,6 +10,7 @@ import { inspectDynamicInvocation } from "../src/dynamic-inspect.mjs";
 import { completionWait, DynamicWorkflowRunner } from "../src/dynamic-runner.mjs";
 import { invocationFingerprint, normalizeAgentOptions, normalizeDynamicSpec, runIdFor } from "../src/dynamic-protocol.mjs";
 import { dynamicToolDefinitions } from "../src/dynamic-tools.mjs";
+import { createRouteResolver } from "../src/routing.mjs";
 import * as fixtureEngine from "../scripts/fixtures/dynamic-runner-engine.mjs";
 import * as realEngine from "../src/dynamic-engine.mjs";
 
@@ -295,6 +296,32 @@ test("automatic dynamic routing accepts a variant-only Amp route", async (t) => 
   const result = await f.runner.start(f.spec([call("Amp", { target: "auto" })], { target: "auto", route: {}, policy: { write: true } }));
   assert.equal(result.state, "completed", JSON.stringify(result.error));
   assert.deepEqual(seen, [{ variant: "low" }]);
+});
+
+test("automatic dynamic validation accepts a Claude tool allow list and execution rejects incompatible routes", async (t) => {
+  const routeResolver = createRouteResolver({
+    config: { routing: { global: { candidates: [{ id: "pi-only", target: "pi", route: { model: "fixture/model" } }] } } },
+    env: {},
+    userPolicy: {},
+  });
+  const f = await fixture(t, async () => assert.fail("incompatible routes must not launch an agent"), { companion: { routeResolver } });
+  const dispatched = [];
+  f.companion.start = async (request) => { dispatched.push(request); assert.fail("incompatible routes must not dispatch"); };
+  const workflow = f.spec([call("Review the change")], {
+    target: "auto", route: {}, policy: { tools: { allow: ["Read"] } },
+  });
+  const validate = dynamicToolDefinitions(f.runner).find(({ name }) => name === "handoff_dynamic_validate");
+  const validation = await validate.run(validate.inputSchema.parse({ workflow }));
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.policy.tools, { allow: ["Read"] });
+
+  const result = await f.runner.start(workflow);
+  assert.equal(result.state, "partial");
+  assert.equal(result.invocations.length, 1);
+  assert.equal(result.invocations[0].state, "failed");
+  assert.equal(result.invocations[0].error.details.kind, "policy");
+  assert.match(result.invocations[0].error.message, /Pi does not support granular policy\.tools/);
+  assert.deepEqual(dispatched, []);
 });
 
 test("dynamic resume refuses an ACP call whose owned-process cleanup is unverified", async (t) => {

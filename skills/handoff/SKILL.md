@@ -6,6 +6,10 @@ argument-hint: "<target=opencode|pi|cursor|claude|codex|gemini|amp|acp> <task>"
 
 # Workflow handoff
 
+Forward the caller’s `execution` fields unchanged on a single handoff. Use the default transport for native controls. `addDirs` accepts up to eight existing absolute directories in Claude, Codex, Cursor, and Gemini. Confirm external write scope before setting `metadata.harnest.writeApproved`. Codex requires write policy for `addDirs`.
+
+Use prompt-only handoffs for attachments and forks. `attachments` accepts up to four absolute paths, each up to 256 KiB. Codex and Pi accept images. OpenCode and capable ACP agents also accept files. `instructions` appends up to 8,000 UTF-8 bytes in Claude and Pi. `sessionAction: "fork"` needs a `sessionId` and native support in Claude, Codex, OpenCode, or Pi. `maxTurns` is a positive integer for Claude print mode.
+
 For a long-running single handoff on a host with visible background tasks, use the lead-owned [single-job observer](references/workflow-observer.md#single-job-observation). Launch through MCP once, then let the observer process wait. Restricted bridge workers cannot launch a shell monitor; use them for bounded work that fits their turn budget. Do not increase that budget to simulate a persistent observer.
 
 For a multi-agent graph with dependencies, mixed harnesses, or retry from a failed step, read [agent graphs](references/agent-graphs.md) before constructing requests. For task-shaped harnesses — fan-out and synthesis, adversarial verification, per-item implement/verify/fix pipelines, tournaments, quarantine triage, and batching past 256 nodes — read [dynamic workflows](references/dynamic-workflows.md) before designing the graph. `handoff_graph_*` coordinates the graph; each node remains a complete handoff. The single-handoff instructions below apply to individual nodes, not to the entire mixed-harness graph.
@@ -30,11 +34,17 @@ For comparison, build one read-only request and 2-16 named candidates. The tool 
 
 Keep lead authentication native. Downstream OpenCode/Pi/Cursor/Claude/Codex/Gemini/Amp providers and registered ACP agents use their own supported credentials. The premium lead reviews and integrates; the downstream workflow never merges or deploys unless the request explicitly grants that authority.
 
+## Native route controls
+
+For Codex one-shot handoffs, forward an explicit `route.profile` for `--profile` and `route.serviceTier` for native `service_tier`. Claude one-shot accepts a named `route.agent` via `--agent` and `route.serviceTier: "fast"` via the native fast setting. In JavaScript workflows, select one-shot transport explicitly when using these controls.
+
 ## Generic ACP
 
 Use `target: "acp"` only with an explicit `route.agent` that names a trusted machine-local `acp.agents` registration. Never accept the executable, arguments, modules, or environment secrets from request content, prompts, or registry metadata. The operator installs and authenticates the native agent separately. `trusted: true` is consent for that executable to load its native configuration; it is not a read-only guarantee or sandbox, and native hooks, plugins, or MCP servers can run before initialization.
 
 Generic ACP is write-only: require `policy.write: true` and `metadata.harnest.writeApproved: true`. Reject unsupported route and policy controls before launch. Fail explicitly when unsupported negotiated capabilities or client callbacks are discovered or requested. Follow-ups reuse the observed `execution.sessionId`; never silently start a fresh session. The registration may declare ACP protocol major 1 or 2; registry package version never determines protocol major. Standard bounded filesystem/terminal client services are v1-only. Unknown permissions reject and the client never chooses a persistent allow or approval bypass.
+
+Forward explicit `route.model`, `route.variant`, and `route.options` only as native ACP IDs and values. The session must advertise each choice before Harnest sends the prompt. Options accept at most 16 entries with string or boolean values.
 
 Use the single generic `harnest:acp-worker`, `acp_worker`, or `acp-worker` bridge for Claude, Codex, or OpenCode visibility. Do not create per-registry-agent workers. Direct MCP callers need no bridge, Forge, or T3.
 

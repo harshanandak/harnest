@@ -57,6 +57,65 @@ function request(overrides = {}) {
   });
 }
 
+test("Claude combines a named fast agent with extra directories, instructions, fork, and max turns", async () => {
+  const cwd = await realpath(process.cwd());
+  const calls = [];
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      calls.push(args);
+      if (args[0] === "--version") return new FakeChild({ stdout: "2.1.219 (Claude Code)\n" });
+      if (args[0] === "--help") return new FakeChild({ stdout: [
+        "  --add-dir <directories...>", "  --tools <tools...>", "  --strict-mcp-config",
+        "  --append-system-prompt <prompt>", "  --fork-session",
+      ].join("\n") });
+      if (args.length === 1 && args[0] === "--max-turns") {
+        return new FakeChild({ code: 1, stderr: "error: option '--max-turns <turns>' argument missing\n" });
+      }
+      return new FakeChild({ stdout: streamJsonResult("forked", "claude-new", { fast_mode_state: "on" }) });
+    },
+  });
+  const output = await adapter.run(request({
+    route: { agent: "reviewer", serviceTier: "fast" },
+    execution: { addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3 },
+  }));
+  assert.equal(output.sessionId, "claude-new");
+  assert.deepEqual(calls.slice(0, 3), [["--version"], ["--help"], ["--max-turns"]]);
+  assert.deepEqual(calls[3].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
+  assert.deepEqual(calls[3].slice(-15), [
+    "--permission-mode", "plan", "--agent", "reviewer", "--settings", '{"fastMode":true}',
+    "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
+    "--tools", "Read,Glob,Grep", "--strict-mcp-config", "--add-dir", cwd,
+  ]);
+  calls.length = 0;
+  const filtered = await adapter.run(request({
+    route: { agent: "reviewer", serviceTier: "fast" },
+    execution: { addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3 },
+    policy: { tools: { allow: ["Read", "Glob"], deny: ["Glob", "Bash"] } },
+  }));
+  assert.equal(filtered.sessionId, "claude-new");
+  assert.deepEqual(calls.slice(0, 3), [["--version"], ["--help"], ["--max-turns"]]);
+  assert.deepEqual(calls[3].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
+  assert.deepEqual(calls[3].slice(5), [
+    "--output-format", "stream-json", "--verbose", "--permission-prompts", "none",
+    "--permission-mode", "plan", "--agent", "reviewer", "--settings", '{"fastMode":true}',
+    "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
+    "--tools", "Read", "--allowedTools", "Read", "--disallowedTools", "Glob,Bash,mcp__*",
+    "--strict-mcp-config", "--add-dir", cwd,
+  ]);
+});
+
+test("Claude rejects maxTurns when its parser does not recognize the flag", async () => {
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      assert.deepEqual(args, ["--max-turns"]);
+      return new FakeChild({ code: 1, stderr: "error: unknown option '--max-turns'\n" });
+    },
+  });
+  await assert.rejects(adapter.run(request({ execution: { maxTurns: 2 } })), /execution\.maxTurns requires --max-turns/);
+});
+
 async function fakeCliOnPath(t, { includeInstall = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "harnest-native-path-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -98,6 +157,53 @@ test("Claude reports an actionable launch failure when only the handoff decoy ex
 test("createAdapter supports claude target", () => {
   const adapter = createAdapter("claude", { claude: { command: "fake-claude" } });
   assert.ok(adapter instanceof ClaudeAdapter);
+});
+
+test("Claude sends the named agent and noninteractive fast-mode settings as native argv", async () => {
+  const calls = [];
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: args[0] === "--version"
+        ? "2.1.322 (Claude Code)\n"
+        : streamJsonResult("ok", "fast-session", { fast_mode_state: "on" }) });
+    },
+  });
+  const route = { agent: "review-plugin:reviewer", serviceTier: "fast" };
+  const output = await adapter.run(request({ route }));
+  assert.deepEqual(calls, [
+    ["--version"],
+    ["-p", calls[1][1], "--output-format", "stream-json", "--verbose", "--permission-prompts",
+      "none", "--permission-mode", "plan", "--agent", "review-plugin:reviewer", "--settings", '{"fastMode":true}'],
+  ]);
+  assert.equal(output.route.agent, route.agent);
+  assert.equal(output.route.serviceTier, route.serviceTier);
+});
+
+test("Claude rejects older fast-mode CLIs, native fallback, and missing named agents", async () => {
+  const cases = [
+    [{ serviceTier: "fast" }, "2.1.204 (Claude Code)\n", {}, /route\.serviceTier requires Claude Code 2\.1\.219/],
+    [{ serviceTier: "fast" }, "2.1.322 (Claude Code)\n", {}, /did not confirm route\.serviceTier/],
+    [{ serviceTier: "fast" }, "2.1.322 (Claude Code)\n", { fast_mode_state: "cooldown" }, /did not confirm route\.serviceTier/],
+    [{ agent: "missing" }, null, {}, /could not resolve route\.agent/],
+  ];
+  for (const [route, version, extra, expected] of cases) {
+    const calls = [];
+    const adapter = new ClaudeAdapter({
+      command: "fake-claude",
+      spawnFn(_command, args) {
+        calls.push(args);
+        if (args[0] === "--version") return new FakeChild({ stdout: version });
+        return new FakeChild({
+          stdout: streamJsonResult("standard answer", "fallback-session", extra),
+          stderr: route.agent ? 'Warning: agent "missing" no longer exists' : "",
+        });
+      },
+    });
+    await assert.rejects(adapter.run(request({ route })), expected);
+    if (version?.startsWith("2.1.204")) assert.deepEqual(calls, [["--version"]]);
+  }
 });
 
 test("Claude adapter maps route.thinking to --effort and drops levels Claude lacks", async () => {

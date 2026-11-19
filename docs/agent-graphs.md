@@ -34,7 +34,9 @@ This version is an agent-callable DAG runner. Visual drag-and-drop editing, dyna
 - `handoff_graph_cancel({graphId})` requests cancellation.
 - `handoff_graph_resume({graphId,commandId,nodeIds?,approveWrites?,background?})` explicitly retries unsuccessful nodes; the caller-owned command ID makes retries idempotent.
 
-Graph input: `{requestId,cwd,task?,context?,policy?,metadata?,execution?,nodes,outputs?}`. Execution contains `background` (default true), `timeoutMs`, and `maxConcurrency` (default 4, maximum 6). A graph holds 1 to 256 nodes; larger work batches across runs. Nodes contain `{id,target,task,dependsOn?,route?,cwd?,context?,policy?,metadata?,execution?}`; node execution can set a timeout. Nodes are prompt-only handoffs and run natively in the chosen harness. When a harness should execute its own compatibility workflow instead, use an explicit Taskflow handoff with `workflow.spec` (optional package required).
+Graph input: `{requestId,cwd,task?,context?,policy?,metadata?,execution?,nodes,outputs?}`. Graph execution contains `background` (default true), `timeoutMs`, and `maxConcurrency` (default 4, maximum 6). A graph holds 1 to 256 nodes. Batch larger workloads across runs.
+
+Nodes contain `{id,target,task,dependsOn?,route?,cwd?,context?,policy?,metadata?,execution?}` and run as prompt-only handoffs in the chosen harness. Node execution accepts `timeoutMs`, `sessionId`, and the [native execution controls](users/mcp-usage.md#native-execution-controls) supported by the resolved target. Overlapping directories, including `addDirs`, serialize when either node can write. A retry resumes the forked session once the harness has reported its ID. To run a harness's own compatibility workflow, use an explicit Taskflow handoff with `workflow.spec` (optional package required).
 
 For task-aware routing, a node can be:
 

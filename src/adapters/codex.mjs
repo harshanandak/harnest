@@ -1,12 +1,14 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { CODEX_QUOTA_SOURCE, probeCodexQuota } from "../codex-quota.mjs";
+import { executionError, stageAttachments, validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext, hasToolPolicy } from "../protocol.mjs";
+import { digestContext, hasToolPolicy, routeControlError } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -17,6 +19,7 @@ import {
 } from "../process.mjs";
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
+import { requireRouteVersion } from "./route-version.mjs";
 
 export const CODEX_SUPPORTED_POLICY_HELP = "codex exec maps read-only policy to --sandbox read-only and write policy to --sandbox workspace-write. Danger-full-access and --dangerously-bypass-approvals are never used. Granular policy.tools and policy.maxCostUsd have no CLI equivalent and are rejected rather than silently weakened.";
 
@@ -108,7 +111,7 @@ function quotaWarning(quota) {
 function buildArgs(request, launchArgs, outFile) {
   const args = [...launchArgs, "exec"];
   const policy = request.policy || {};
-  const sessionId = request.execution?.sessionId;
+  const { sessionId, sessionAction, addDirs, attachments } = request.execution;
   args.push("-C", request.cwd);
   args.push("-s", policy.write ? "workspace-write" : "read-only");
   const model = resolvedModel(request.route || {});
@@ -116,10 +119,45 @@ function buildArgs(request, launchArgs, outFile) {
   // Preserve the caller's effort as a native Codex config override.
   const thinking = resolvedThinking(request.route || {});
   if (thinking) args.push("-c", `model_reasoning_effort="${thinking}"`);
+  const { profile, serviceTier } = request.route || {};
+  if (profile) args.push("--profile", profile);
+  if (serviceTier) args.push("--strict-config", "-c", `service_tier="${serviceTier}"`);
+  if (serviceTier === "fast" || serviceTier === "priority") args.push("--enable", "fast_mode");
   args.push("--json", "-o", outFile);
-  if (sessionId) args.push("resume", String(sessionId));
+  for (const dir of addDirs ?? []) args.push("--add-dir", dir);
+  // Profile and directory flags belong to exec. Continue with subcommand-local image flags.
+  if (sessionId) args.push(sessionAction === "fork" ? "fork" : "resume");
+  for (const { path } of attachments ?? []) args.push("-i", path);
+  if (sessionId) args.push(String(sessionId));
+  // Root exec's image option is variadic. End it before the stdin prompt.
+  else if (attachments?.length) args.push("--");
   args.push("-");
   return args;
+}
+
+async function verifyRouteControls(command, launchArgs, route, options) {
+  const { profile, serviceTier } = route;
+  if (!profile && !serviceTier) return;
+  const field = profile ? "route.profile" : "route.serviceTier";
+  // Codex 0.170.0 defines the profile overlay and the documented service tier IDs.
+  await requireRouteVersion(command, launchArgs, options, "codex-cli ", [0, 170, 0], field);
+  if (profile) {
+    const configuredHome = options.env.CODEX_HOME;
+    const userHome = options.env[process.platform === "win32" ? "USERPROFILE" : "HOME"] || homedir();
+    const codexHome = configuredHome ? resolve(options.cwd, configuredHome) : join(userHome, ".codex");
+    const profileFile = await stat(join(codexHome, `${profile}.config.toml`)).catch(() => null);
+    if (!profileFile?.isFile()) throw adapterError(`Codex route.profile "${profile}" has no native config file`, "policy", { field });
+  }
+  if (serviceTier === "fast" || serviceTier === "priority") {
+    // Codex drops priority when fast_mode is disabled. Use the same run-level
+    // feature override in the probe and exec so profile defaults cannot mask it.
+    const { stdout } = await runProcess(command, [
+      ...launchArgs, "features", "--enable", "fast_mode", "list",
+    ], { ...options, timeoutMs: 5_000 });
+    if (!/^fast_mode\s+\S+\s+true\s*$/m.test(stdout)) {
+      throw adapterError("Codex route.serviceTier requires the native fast_mode feature", "policy", { field: "route.serviceTier" });
+    }
+  }
 }
 
 function executionSignal(parentSignal, timeoutMs) {
@@ -354,6 +392,11 @@ export class CodexAdapter {
     assertPromptOnlyWorkflow("codex", request?.workflow);
     assertNoClaudeRoute("codex", request?.route);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    const controlError = routeControlError("codex", request.route, request.execution?.transport);
+    if (controlError) throw adapterError(controlError, "policy");
+    request = validateAdapterExecution(request, "codex");
+    const { sessionId, sessionAction, addDirs, attachments } = request.execution;
+    const fork = sessionAction === "fork";
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Codex policy not supported: ${policyCheck.reason} — ${CODEX_SUPPORTED_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
@@ -361,7 +404,7 @@ export class CodexAdapter {
     const execution = executionSignal(signal, request.execution?.timeoutMs);
     let scratch = null;
     let outFile = null;
-    const found = { sessionId: request.execution?.sessionId || null, deltaCount: 0, toolCount: 0, usage: null };
+    const found = { sessionId: fork ? null : sessionId || null, deltaCount: 0, toolCount: 0, usage: null, turnFailed: false };
     let quota = unknownQuota("not-probed");
     let quotaEventCount = 0;
     let streamError = null;
@@ -377,6 +420,25 @@ export class CodexAdapter {
         timeoutMs: request.execution?.timeoutMs,
         spawnFn: this.gitSpawnFn,
       });
+      const launchArgs = Array.isArray(this.launch.args) ? this.launch.args : [];
+      const processOptions = {
+        cwd: request.cwd,
+        env: mergeProcessEnv({ ...(this.launch.env || {}), ...this.env }),
+        spawnFn: this.spawnFn || spawnNativeCommand,
+        signal: execution.signal,
+      };
+      await verifyRouteControls(this.launch.command, launchArgs, request.route || {}, processOptions);
+      const probe = { launch: this.launch, request, env: processOptions.env, spawnFn: this.spawnFn, signal: execution.signal };
+      await requireExecutionFlags(probe, ["exec"], [
+        ...(addDirs?.length ? [["addDirs", "--add-dir"]] : []),
+        ...(!sessionId && attachments?.length ? [["attachments", "--image"]] : []),
+      ]);
+      if (sessionId) {
+        await requireExecutionFlags(probe, ["exec", fork ? "fork" : "resume"], [
+          ...(fork ? [["sessionAction", "--json"]] : []),
+          ...(attachments?.length ? [["attachments", "--image"]] : []),
+        ], fork ? /^Usage: codex exec fork\s/m : undefined);
+      }
       try {
         quota = await this.quotaProbeFn({
           launch: this.launch,
@@ -402,17 +464,11 @@ export class CodexAdapter {
       }
       scratch = await mkdtemp(join(tmpdir(), "harnest-codex-"));
       outFile = join(scratch, "final.txt");
-      const launchArgs = Array.isArray(this.launch.args) ? this.launch.args : [];
-      const args = buildArgs(request, launchArgs, outFile);
-      // Explicit merge, not replacement: a read-only sandbox changes what the
-      // run may write, never whether codex can authenticate. Credential and
-      // profile values are inherited and never logged.
-      const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
+      request = validateAdapterExecution(request, "codex");
+      const staged = await stageAttachments(request.execution.attachments, scratch);
+      const args = buildArgs({ ...request, execution: { ...request.execution, attachments: staged } }, launchArgs, outFile);
       const result = await runProcess(this.launch.command, args, {
-        cwd: request.cwd,
-        env,
-        spawnFn: this.spawnFn || spawnNativeCommand,
-        signal: execution.signal,
+        ...processOptions,
         timeoutMs: request.execution?.timeoutMs,
         stdinLines: [promptFor(request)],
         onStdoutLine: (line) => {
@@ -423,6 +479,7 @@ export class CodexAdapter {
           const toolEvent = codexToolEvent(event, event.item);
           if (toolEvent) found.toolCount += 1;
           if (event.type === "error" || event.type === "turn.failed" || event.error) {
+            if (event.type === "turn.failed") found.turnFailed = true;
             const failure = providerFailureFromCodexOutput({ event });
             if (!streamError || failure) streamError = failure || adapterError("Codex stream reported an error", "downstream", {
               providerError: providerErrorFromEvent(event),
@@ -437,6 +494,7 @@ export class CodexAdapter {
       });
       const diagnostics = codexStderrDiagnostics(result.stderr);
       const finalText = String(await readFile(outFile, "utf8").catch(() => "")).trim();
+      if (request.route?.serviceTier && found.turnFailed) throw withWarnings(streamError, diagnostics.warnings);
       if (!finalText) {
         const providerFailure = (streamError?.details.kind !== "downstream" ? streamError : null)
           || providerFailureFromCodexOutput({ stderr: diagnostics.stderr });
@@ -448,6 +506,9 @@ export class CodexAdapter {
           stdout: String(result.stdout || "").slice(0, 4000),
           ...warningDetails(diagnostics.warnings),
         });
+      }
+      if (fork && (!found.sessionId || found.sessionId === sessionId)) {
+        throw executionError("sessionAction", "Codex did not report a new session ID for the fork");
       }
       if (onProgress) {
         await reportProgress(onProgress, { type: "codex_stdout", text: finalText.slice(0, 2000) });
@@ -462,6 +523,8 @@ export class CodexAdapter {
           model: typeof route.model === "string" && route.model ? route.model : "default",
           variant: null,
           thinking: resolvedThinking(route),
+          ...(route.profile ? { profile: route.profile } : {}),
+          ...(route.serviceTier ? { serviceTier: route.serviceTier } : {}),
           requested: route,
         },
         result: structuredResult(finalText, {
@@ -476,7 +539,7 @@ export class CodexAdapter {
         usageSummary: summarizeUsage("codex", found.usage),
       };
     } catch (error) {
-      if (error instanceof NativeLaunchError || error?.name === "CodexAdapterError") throw error;
+      if (error instanceof NativeLaunchError || error?.name === "CodexAdapterError" || error?.details?.kind === "validation") throw error;
       const aborted = Boolean(error?.details?.aborted || execution.state.aborted);
       const timedOut = Boolean(error?.details?.timedOut || execution.state.timedOut);
       const diagnostics = codexStderrDiagnostics(error?.details?.stderr);

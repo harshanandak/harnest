@@ -381,12 +381,10 @@ export class DynamicWorkflowRunner {
   }
 
   #probeLeaf(spec) {
-    if (!spec.target && !Object.keys(spec.route).length) return;
-    const defaultTarget = spec.policy.mode !== undefined || spec.policy.sandbox !== undefined ? "cursor" : "pi";
-    const requested = spec.target === "auto" || spec.target === null ? defaultTarget : spec.target;
+    if (!spec.target || spec.target === "auto") return;
     const request = normalizeRequest({
       requestId: `${runIdFor(spec.requestId)}-probe`,
-      target: requested,
+      target: spec.target,
       task: "validate",
       cwd: spec.cwd,
       context: spec.context,
@@ -1750,7 +1748,7 @@ export class DynamicWorkflowRunner {
     if (resolved.cwd !== base.cwd) throw dynamicError("validation", "route resolver changed the prevalidated cwd");
     if (resolved.execution.timeoutMs !== base.execution.timeoutMs) throw dynamicError("validation", "route resolver changed the requested timeout");
     if (!automatic && resolved.target !== base.target) throw dynamicError("routing", "route resolver changed an explicit target");
-    for (const [key, value] of Object.entries(base.route)) if (resolved.route[key] !== value) throw dynamicError("routing", `route resolver changed an explicit route.${key}`);
+    for (const [key, value] of Object.entries(base.route)) if (stableJson(resolved.route[key]) !== stableJson(value)) throw dynamicError("routing", `route resolver changed an explicit route.${key}`);
     if (automatic && resolved.target === "acp" && !resolved.route.agent) throw dynamicError("routing", "automatic call has no usable agent route");
     if (automatic && !["acp", "amp"].includes(resolved.target) && !resolved.route.model) throw dynamicError("routing", "automatic call has no usable model route");
     assertDynamicLeaf(resolved);

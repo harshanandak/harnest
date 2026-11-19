@@ -1,7 +1,9 @@
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
+import { executionError, validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext, normalizePolicyControls } from "../protocol.mjs";
+import { digestContext, normalizePolicyControls, routeControlError } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -13,6 +15,7 @@ import {
 } from "../process.mjs";
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
+import { requireRouteVersion } from "./route-version.mjs";
 
 export const CLAUDE_SUPPORTED_POLICY_HELP = "Claude print mode supports exact native names in policy.tools.deny and Read, Glob, or Grep in policy.tools.allow. Legacy tool lists are unsupported. Write permission and budget are independent of the tool filter.";
 const ALLOW_TOOLS = new Set(["Read", "Glob", "Grep"]);
@@ -103,23 +106,38 @@ function resolvedEffort(route = {}) {
 function buildArgs(request, launchArgs) {
   const args = [...launchArgs];
   const policy = request.policy || {};
-  const sessionId = request.execution?.sessionId;
+  const { sessionId, sessionAction, addDirs, instructions, maxTurns } = request.execution;
   if (sessionId) args.push("--resume", String(sessionId));
+  if (sessionAction === "fork") args.push("--fork-session");
   args.push("-p", promptFor(request));
   args.push("--output-format", "stream-json", "--verbose", "--permission-prompts", "none");
   args.push("--permission-mode", policy.write ? "acceptEdits" : "plan");
   const model = resolvedModel(request.route || {});
   if (model) args.push("--model", model);
+  const { agent, serviceTier } = request.route || {};
+  if (agent) args.push("--agent", agent);
+  // Claude Code documents --settings fastMode as the print-mode opt-in.
+  if (serviceTier === "fast") args.push("--settings", '{"fastMode":true}');
   const effort = resolvedEffort(request.route || {});
   if (effort) args.push("--effort", effort);
   if (policy.maxCostUsd != null) args.push("--max-budget-usd", String(policy.maxCostUsd));
+  if (instructions !== undefined) args.push("--append-system-prompt", instructions);
+  if (maxTurns !== undefined) args.push("--max-turns", String(maxTurns));
   const { allow, deny } = policy.tools ?? {};
+  const namedAllow = Boolean(agent && allow !== undefined);
   if (allow !== undefined) {
     const available = allow.filter((tool) => !deny?.includes(tool));
-    args.push("--safe-mode", "--tools", available.join(","));
+    // Safe mode also disables the named custom agent.
+    if (!namedAllow) args.push("--safe-mode");
+    args.push("--tools", available.join(","));
     if (available.length) args.push("--allowedTools", available.join(","));
+  } else if (addDirs?.length && !policy.write) {
+    args.push("--tools", "Read,Glob,Grep");
   }
-  if (deny?.length) args.push("--disallowedTools", deny.join(","));
+  const denied = namedAllow ? [...(deny ?? []), "mcp__*"] : deny;
+  if (denied?.length) args.push("--disallowedTools", denied.join(","));
+  if (namedAllow || (addDirs?.length && !policy.write)) args.push("--strict-mcp-config");
+  if (addDirs?.length) args.push("--add-dir", ...addDirs);
   return args;
 }
 
@@ -297,6 +315,12 @@ export class ClaudeAdapter {
   async run(request, { signal, onProgress } = {}) {
     assertPromptOnlyWorkflow("claude", request?.workflow);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    const route = request.route || {};
+    const controlError = routeControlError("claude", route, request.execution?.transport);
+    if (controlError) throw adapterError(controlError, "policy");
+    request = validateAdapterExecution(request, "claude");
+    const { addDirs, sessionAction, instructions, maxTurns } = request.execution;
+    const fork = sessionAction === "fork";
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Claude policy not supported: ${policyCheck.reason} — ${CLAUDE_SUPPORTED_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
@@ -305,15 +329,18 @@ export class ClaudeAdapter {
     let terminal = null;
     let terminalError = null;
     let streamError = null;
-    let sessionId = request.execution?.sessionId || null;
+    let sessionId = fork ? null : request.execution.sessionId || null;
     let usage = null;
     let deltaCount = 0;
+    let fastFallback = false;
     const observe = (event) => {
       if (!event || typeof event !== "object") return;
       const priorSession = sessionId;
       if (typeof event.session_id === "string" && event.session_id) sessionId = event.session_id;
       const nextUsage = observedUsage(event);
       if (nextUsage) usage = nextUsage;
+      if (route.serviceTier === "fast" && event.type === "system" && event.subtype === "notification"
+          && /fast mode (?:disabled|paused)|standard speed/i.test(event.message ?? "")) fastFallback = true;
       if (event.type === "result") {
         terminal = event;
         const failure = terminalFailure(event);
@@ -364,16 +391,44 @@ export class ClaudeAdapter {
         });
       }
       const launchArgs = Array.isArray(this.launch.args) ? this.launch.args : [];
-      const args = buildArgs(request, launchArgs);
       // Explicit merge, not replacement: a read-only policy changes what the run
       // may write, never whether Claude Code can authenticate. Credential and
       // profile values are inherited and never logged.
       const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
-      const result = await runProcess(this.launch.command, args, {
+      const processOptions = {
         cwd: request.cwd,
         env,
         spawnFn: this.spawnFn || spawnNativeCommand,
         signal: execution.signal,
+      };
+      // 2.1.219 added the fast-mode state needed to detect a standard-speed fallback.
+      if (route.serviceTier === "fast") {
+        await requireRouteVersion(this.launch.command, launchArgs, processOptions, "", [2, 1, 219], "route.serviceTier");
+      }
+      await requireExecutionFlags({ launch: this.launch, request, env, spawnFn: this.spawnFn, signal: execution.signal }, [], [
+        ...(addDirs?.length ? [["addDirs", "--add-dir"]] : []),
+        ...(addDirs?.length && !request.policy?.write ? [["addDirs", "--tools"], ["addDirs", "--strict-mcp-config"]] : []),
+        ...(instructions !== undefined ? [["instructions", "--append-system-prompt"]] : []),
+        ...(fork ? [["sessionAction", "--fork-session"]] : []),
+      ]);
+      if (maxTurns !== undefined) {
+        // The documented flag is hidden from help in some releases. An omitted
+        // argument lets the native parser prove support without starting a turn.
+        let supported = false;
+        try {
+          await runProcess(this.launch.command, [...launchArgs, "--max-turns"], {
+            ...processOptions,
+            timeoutMs: Math.min(5_000, request.execution.timeoutMs ?? 5_000),
+          });
+        } catch (error) {
+          if (execution.signal.aborted) throw error;
+          supported = /option ['"]--max-turns <[^>]+>['"] argument missing/i.test(error?.details?.stderr ?? "");
+        }
+        if (!supported) throw executionError("maxTurns", "requires --max-turns support in the installed Claude CLI");
+      }
+      const args = buildArgs(validateAdapterExecution(request, "claude"), launchArgs);
+      const result = await runProcess(this.launch.command, args, {
+        ...processOptions,
         timeoutMs: request.execution?.timeoutMs,
         onStdoutLine: (line) => observe(parseJsonLine(line)),
       });
@@ -387,6 +442,15 @@ export class ClaudeAdapter {
           stdout: stdoutText.slice(0, 4000),
         });
       }
+      if (route.serviceTier === "fast" && (fastFallback || terminal.fast_mode_state !== "on" || terminal.fast_mode_disabled_reason)) {
+        throw adapterError("Claude did not confirm route.serviceTier fast", "policy", {
+          field: "route.serviceTier",
+          reason: boundedProviderText(terminal.fast_mode_disabled_reason || terminal.fast_mode_state || "unreported", 100),
+        });
+      }
+      if (route.agent && /agent[^\r\n]*(?:not found|no longer exists|does not exist)/i.test(result.stderr || "")) {
+        throw adapterError("Claude could not resolve route.agent", "policy", { field: "route.agent" });
+      }
       const finalText = typeof terminal.result === "string" ? terminal.result.trim() : "";
       if (!finalText) {
         throw adapterError(`Claude completed with an empty result (subtype=${terminal.subtype || "unknown"})`, "downstream", {
@@ -395,10 +459,12 @@ export class ClaudeAdapter {
           stderr: String(result.stderr || "").slice(0, 4000),
         });
       }
+      if (fork && (!sessionId || sessionId === request.execution.sessionId)) {
+        throw executionError("sessionAction", "Claude did not report a new session ID for the fork");
+      }
       if (onProgress) {
         await reportProgress(onProgress, { type: "claude_stdout", text: finalText.slice(0, 2000) });
       }
-      const route = request.route || {};
       return {
         sessionId,
         workflowRunId: `claude:${request.requestId}`,
@@ -408,6 +474,8 @@ export class ClaudeAdapter {
           model: typeof route.model === "string" && route.model ? route.model : "default",
           variant: null,
           thinking: resolvedEffort(route),
+          ...(route.agent ? { agent: route.agent } : {}),
+          ...(route.serviceTier ? { serviceTier: route.serviceTier } : {}),
           requested: route,
         },
         result: structuredResult(finalText, {
@@ -417,7 +485,7 @@ export class ClaudeAdapter {
         usageSummary: summarizeUsage("claude", usage),
       };
     } catch (error) {
-      if (error instanceof NativeLaunchError || error?.name === "ClaudeAdapterError") throw error;
+      if (error instanceof NativeLaunchError || error?.name === "ClaudeAdapterError" || error?.details?.kind === "validation") throw error;
       const aborted = Boolean(error?.details?.aborted || execution.state.aborted);
       const timedOut = Boolean(error?.details?.timedOut || execution.state.timedOut);
       if (!aborted && !timedOut && !["transport", "output-limit"].includes(error?.details?.kind)) {

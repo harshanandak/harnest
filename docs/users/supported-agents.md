@@ -2,6 +2,21 @@
 
 The lead client is the application connected to Harnest through MCP. The downstream target is the agent that executes a handoff. They are independent choices: a Codex lead can hand work to Pi, for example.
 
+## Per-run execution controls
+
+| Target | Extra directories | Attachments | System instructions | Session fork | Turn limit |
+| --- | --- | --- | --- | --- | --- |
+| Claude | `--add-dir` | | `--append-system-prompt` | `--resume` and `--fork-session` | `--max-turns` |
+| Codex | `--add-dir` with write policy | `-i` images | | `exec fork` | |
+| Cursor | `--add-dir` | | | | |
+| Gemini | `--include-directories` | | | | |
+| OpenCode | | `--file` images and files | | `--session` and `--fork` | |
+| Pi | | RPC `prompt.images` | `--append-system-prompt` | `--fork` with a session ID | |
+| ACP | | Advertised image and embedded resource blocks | | | |
+| Amp | | | | | |
+
+Blank cells indicate unsupported controls. The [MCP usage guide](mcp-usage.md#native-execution-controls) describes validation, write approval, and transport requirements.
+
 ## Named downstream targets
 
 | Target value | Agent | Supported shape | Main boundary |
@@ -9,8 +24,8 @@ The lead client is the application connected to Harnest through MCP. The downstr
 | `opencode` | OpenCode | Read or approved write prompt handoffs; optional Taskflow; attached live controls | Taskflow needs the optional dependencies. OpenCode V2 is required for current live steer and reroute behavior. |
 | `pi` | Pi | Read or approved write prompt handoffs; optional Taskflow; attached live controls | Pi keeps native authentication. Its bounded status and trace are the portable operator view. |
 | `cursor` | Cursor | Read or approved write handoffs, one-shot resume, and optional session transport | Cursor UI subagents do not automatically inherit UI MCP servers. |
-| `claude` | Claude Code | Read or approved write handoffs, one-shot resume, and optional session transport | One-shot live message and reroute are unsupported; use the acknowledged session transport when those controls are needed. |
-| `codex` | Codex | Read-only sandbox or approved workspace-write handoffs, one-shot resume, and optional session transport | Write mode uses `workspace-write`; Harnest does not select `danger-full-access`. |
+| `claude` | Claude Code | Read or approved write handoffs, one-shot resume, and optional session transport | One-shot supports named agents and fast mode when the native CLI confirms it. Live message and reroute require session transport. |
+| `codex` | Codex | Read-only sandbox or approved workspace-write handoffs, one-shot resume, and optional session transport | One-shot supports native config profiles and service tiers on CLI 0.170.0 or later. Write mode uses `workspace-write`. |
 | `gemini` | Gemini CLI | Prompt-only read or approved write handoffs with native-session follow-up | This target requires Gemini CLI v0.62.0. Inherited include directories mean its read policy is not a filesystem sandbox. Session transport and live controls are unsupported. |
 | `amp` | Amp | Approved write-only prompt handoffs with native-session follow-up | Downstream execution needs native Linux/macOS or the entire Harnest MCP server inside WSL. Native Windows downstream launch rejects before inference. Read-only, session transport, and live controls are unsupported. |
 
@@ -20,10 +35,10 @@ DeepSeek is a model choice through Pi or OpenCode, not a separate downstream tar
 
 | Target | Controls and limits |
 |---|---|
-| Claude Code print | `policy.tools.allow` accepts `Read`, `Glob`, and `Grep`. Harnest restricts the available tools with `--tools` and uses `--allowedTools` for the selected read tools. `policy.tools.deny` passes exact native tool names to `--disallowedTools`. Claude session transport rejects tool lists. |
+| Claude Code print | `policy.tools.allow` accepts `Read`, `Glob`, and `Grep`. Harnest restricts the available tools with `--tools` and uses `--allowedTools` for the selected read tools. `policy.tools.deny` passes exact native tool names to `--disallowedTools`. Print resumes and forks receive the same flags. Claude session transport rejects tool lists. |
 | Gemini CLI v0.62.0 | `policy.tools.allow` and `policy.tools.deny` narrow the native admin policy. Read tools are `glob`, `grep_search`, `list_directory`, `read_file`, `read_many_files`, `get_internal_docs`, `google_web_search`, and `web_fetch`. Approved write policy also permits `write_file`, `replace`, and `run_shell_command`. |
-| Pi | `policy.tools.deny` removes names from `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. Pi must expose `--exclude-tools`, `--no-tools`, `--no-extensions`, and `--no-mcp`. Filtered runs disable extensions and MCP and reject Taskflow. |
-| OpenCode V1.18.18 | `policy.tools.deny` removes `read`, `grep`, `glob`, or `list` from the Harnest default tool set using native agent permissions. Use a fresh local prompt handoff without an explicit agent, server URL, session ID, or Taskflow. OpenCode V2 rejects explicit denies because its server owns tool permissions. |
+| Pi | `policy.tools.deny` removes names from `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. Pi must expose `--exclude-tools`, `--no-tools`, `--no-extensions`, and `--no-mcp`. Filtered runs disable extensions and MCP and reject Taskflow. Resume and fork launches apply the same tool selection. |
+| OpenCode V1.18.18 | `policy.tools.deny` removes `read`, `grep`, `glob`, or `list` from the Harnest default tool set using native agent permissions. Use a fresh local prompt handoff without an explicit agent, server URL, session ID, or Taskflow. Attachments are supported on fresh runs. Attached runs, resumes, and forks cannot enforce explicit denies. OpenCode V2 rejects explicit denies because its server owns tool permissions. |
 | Cursor print | `policy.mode: "plan"` uses `--mode plan`. `policy.sandbox: true` uses `--sandbox enabled` for shell commands. Both omit `--force`. Cursor rejects granular tools, sandbox disablement, and these controls on ACP session transport. |
 | Codex, Amp, registered ACP | Granular tool policy is unsupported. |
 
@@ -61,6 +76,8 @@ Explicit `policy.mode` and `policy.sandbox` are available only on Cursor print. 
 ## Generic ACP agents
 
 The separate `acp` target calls a machine-local ACP executable that the operator has installed, authenticated, inspected, and explicitly trusted. A request must select the registration through `route.agent` and must be write-capable with explicit approval.
+
+ACP model, mode, and config choices vary by agent. Use the IDs and values the native session advertises in `route.model`, `route.variant`, and `route.options`. See the [MCP route controls](mcp-usage.md#native-route-controls) for field limits and CLI version requirements.
 
 `trusted: true` consents to that executable loading its native configuration. It does not create a read-only boundary or sandbox, and it does not establish that native hooks, plugins, or MCP servers are inert. Unsupported route controls, policy controls, negotiated capabilities, and callbacks fail explicitly.
 

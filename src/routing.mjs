@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { pluginRoot, readLocalConfig } from "./config.mjs";
-import { normalizeRequest } from "./protocol.mjs";
+import { hasNativeRouteControls, normalizeRequest } from "./protocol.mjs";
 import { attachRoutingDecision, resolvePolicyRoute, validatePolicyScopes } from "./routing-policy.mjs";
 import { expandUserPolicy } from "./routing-presets.mjs";
 import { hasModelFamily, isLatestAlias, selectLatestModel } from "./model-selection.mjs";
@@ -297,13 +297,14 @@ export function createRouteResolver(options = {}) {
       failures = 0;
       openUntil = 0;
       if (!decision) return appendResolverExplanation(routed, { applied: false, status: "no-decision" });
+      const pinned = hasNativeRouteControls(request.target, request.route)
+        || (request.route.model || request.route.provider) && !["auto", "prefer"].includes(request.metadata?.routing?.mode);
       const resolved = normalizeRequest({
         ...routed,
-        target: (request.route.model || request.route.provider) && !["auto", "prefer"].includes(request.metadata?.routing?.mode)
-          ? request.target : decision.target ?? routed.target,
+        target: pinned ? request.target : decision.target ?? routed.target,
         route: {
           ...routed.route, ...decision.route,
-          ...((request.route.model || request.route.provider) && !["auto", "prefer"].includes(request.metadata?.routing?.mode) ? request.route : {}),
+          ...(pinned ? request.route : {}),
           ...(request.route.thinking != null ? { thinking: request.route.thinking } : {}),
         },
       });
@@ -331,6 +332,7 @@ export function createRouteResolver(options = {}) {
   const resolveRoute = async (input) => {
     const resolved = await resolveOnce(input);
     assertAdapterRoute(resolved.target, resolved.route);
+    if (resolved.target === "acp") return resolved;
     const model = resolved?.route?.model;
     const mode = resolved.metadata?.harnest?.routingDecision?.modelVersion ?? "latest";
     if (!model) {

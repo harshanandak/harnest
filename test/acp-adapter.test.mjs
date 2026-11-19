@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { ACPAdapter, AcpAdapterError } from "../src/adapters/acp.mjs";
 import { createFakeAcpSpawn } from "./fixtures/acp-process.mjs";
@@ -70,6 +74,51 @@ function startV2Foreground(child, sessionId, messageId) {
     update: { sessionUpdate: "state_update", state: "running" },
   });
 }
+
+test("ACP v1 embeds both advertised attachment types in the native prompt", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-acp-controls-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const image = join(cwd, "input.png");
+  const file = join(cwd, "input.txt");
+  await Promise.all([writeFile(image, "image bytes"), writeFile(file, "file bytes")]);
+  const fake = createFakeAcpSpawn((message, child) => {
+    if (message.method === "initialize") {
+      child.respond(message, initializeResult(1, { promptCapabilities: { image: true, embeddedContext: true } }));
+    } else if (message.method === "session/new") {
+      child.respond(message, { sessionId: "acp-session" });
+    } else if (message.method === "session/prompt") {
+      child.notify("session/update", {
+        sessionId: "acp-session",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "received" } },
+      });
+      child.respond(message, { stopReason: "end_turn" });
+    }
+  });
+  const adapter = new ACPAdapter(adapterOptions(fake, { protocolVersion: 1 }));
+  const output = await adapter.run(request({
+    cwd, execution: { attachments: [{ type: "image", path: image }, { type: "file", path: file }] },
+  }));
+  assert.equal(output.result.finalText, "received");
+  const prompt = fake.children[0].received.find((item) => item.method === "session/prompt").params.prompt;
+  assert.equal(prompt[0].type, "text");
+  assert.deepEqual(prompt.slice(1), [
+    { type: "image", mimeType: "image/png", data: Buffer.from("image bytes").toString("base64") },
+    { type: "resource", resource: { uri: pathToFileURL(await realpath(file)).href, blob: Buffer.from("file bytes").toString("base64") } },
+  ]);
+});
+
+test("ACP v2 rejects attachment types its agent did not advertise before creating a session", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-acp-capabilities-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const path = join(cwd, "input.txt");
+  await writeFile(path, "file bytes");
+  const fake = createFakeAcpSpawn((message, child) => {
+    if (message.method === "initialize") child.respond(message, initializeResult(2, { session: { prompt: { image: {} } } }));
+  });
+  const adapter = new ACPAdapter(adapterOptions(fake));
+  await assert.rejects(adapter.run(request({ cwd, execution: { attachments: [{ type: "file", path }] } })), /did not advertise embeddedContext/);
+  assert.deepEqual(fake.children[0].received.map(({ method }) => method), ["initialize"]);
+});
 
 test("ACP v2 waits for idle completion, streams with backpressure, and returns native identity", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -542,9 +591,9 @@ test("unsupported fields and absent write approval reject before spawn", async (
   const cases = [
     request({ policy: { write: false } }),
     request({ metadata: {} }),
-    request({ route: { model: "explicit-model" } }),
+    request({ route: { model: "" } }),
     request({ route: { provider: "provider" } }),
-    request({ route: { variant: "high" } }),
+    request({ route: { variant: true } }),
     request({ route: { thinking: "high" } }),
     request({ route: { harnessVersion: "v2" } }),
     request({ route: { serverUrl: "http://127.0.0.1:9999" } }),
@@ -559,6 +608,99 @@ test("unsupported fields and absent write approval reject before spawn", async (
     const fake = createFakeAcpSpawn(() => {});
     await assert.rejects(new ACPAdapter(adapterOptions(fake)).run(candidate), (error) => error.details?.kind === "policy");
     assert.equal(fake.calls.length, 0);
+  }
+});
+
+function routeFixture(session, { resume = false, confirm = true, reject = false } = {}) {
+  const sessionId = "route-session";
+  let configOptions = session.configOptions;
+  return createFakeAcpSpawn((message, child) => {
+    if (message.method === "initialize") {
+      child.respond(message, initializeResult(1, { loadSession: resume }));
+    } else if (message.method === (resume ? "session/load" : "session/new")) {
+      child.respond(message, { sessionId, ...session });
+    } else if (message.method === "session/set_config_option") {
+      if (reject) {
+        child.reject(message, -32601, "method not found");
+        return;
+      }
+      const { configId, value } = message.params;
+      if (confirm) configOptions = configOptions.map((option) => option.id === configId ? { ...option, currentValue: value } : option);
+      child.respond(message, { configOptions });
+    } else if (message.method === "session/set_model" || message.method === "session/set_mode") {
+      child.respond(message, {});
+    } else if (message.method === "session/prompt") {
+      child.notify("session/update", {
+        sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "routed answer" } },
+      });
+      child.respond(message, { stopReason: "end_turn" });
+    }
+  });
+}
+
+const advertisedRouteOptions = [
+  { id: "engine", category: "model", type: "select", currentValue: "daily", options: [{ group: "pro", options: [{ value: "expert" }] }] },
+  { id: "mode", category: "mode", type: "select", currentValue: "ask", options: [{ value: "code" }] },
+  { id: "depth", type: "select", currentValue: "quick", options: [{ value: "deep" }] },
+  { id: "review", type: "boolean", currentValue: true },
+];
+
+test("ACP applies exact advertised model, mode and option choices before prompting", async () => {
+  const fake = routeFixture({
+    configOptions: advertisedRouteOptions,
+    modes: { availableModes: [{ id: "code" }] },
+  });
+  const route = { model: "expert", variant: "code", options: { depth: "deep", review: false } };
+  const result = await new ACPAdapter(adapterOptions(fake, { protocolVersion: 1 })).run(request({ route }));
+  assert.equal(result.result.finalText, "routed answer");
+  assert.equal(result.route.model, route.model);
+  assert.equal(result.route.variant, route.variant);
+  assert.deepEqual(result.route.options, route.options);
+  const messages = fake.children[0].received.filter(({ method }) => method?.startsWith("session/"));
+  assert.deepEqual(messages.map(({ method }) => method),
+    ["session/new", "session/set_config_option", "session/set_config_option", "session/set_config_option", "session/set_config_option", "session/prompt"]);
+  assert.deepEqual(messages.slice(1, 5).map(({ params }) => params), [
+    { sessionId: "route-session", configId: "engine", value: "expert" },
+    { sessionId: "route-session", configId: "mode", value: "code" },
+    { sessionId: "route-session", configId: "depth", value: "deep" },
+    { sessionId: "route-session", configId: "review", type: "boolean", value: false },
+  ]);
+});
+
+test("ACP honors advertised legacy model and mode IDs on session load", async () => {
+  const fake = routeFixture({
+    models: { currentModelId: "daily", availableModels: [{ modelId: "expert" }] },
+    modes: { currentModeId: "ask", availableModes: [{ id: "code" }] },
+  }, { resume: true });
+  await new ACPAdapter(adapterOptions(fake, { protocolVersion: 1 })).run(request({
+    route: { model: "expert", variant: "code" }, execution: { sessionId: "route-session" },
+  }));
+  const messages = fake.children[0].received.filter(({ method }) => method?.startsWith("session/"));
+  assert.deepEqual(messages.map(({ method }) => method), ["session/load", "session/set_model", "session/set_mode", "session/prompt"]);
+  assert.deepEqual(messages[1].params, { sessionId: "route-session", modelId: "expert" });
+  assert.deepEqual(messages[2].params, { sessionId: "route-session", modeId: "code" });
+});
+
+test("ACP rejects unadvertised or unconfirmed choices before sending a prompt", async () => {
+  const cases = [
+    [{ model: "explicit-model" }, {}, /route\.model.*not an advertised/],
+    [{ variant: "high" }, {}, /route\.variant.*not an advertised/],
+    [{ options: { unknown: true } }, {}, /route\.options.*not an advertised/],
+    [{ options: { depth: "unknown" } }, {}, /route\.options.*not an advertised/],
+    [{ options: { review: "false" } }, {}, /route\.options.*not an advertised/],
+    [{ model: "expert", options: { engine: "daily" } }, {}, /route\.options.*duplicates/],
+    [{ model: "expert" }, { confirm: false }, /route\.model.*not confirmed/],
+    [{ model: "expert" }, { reject: true }, /route\.model.*rejected by session\/set_config_option/],
+  ];
+  for (const [route, fixture, expected] of cases) {
+    const fake = routeFixture({ configOptions: advertisedRouteOptions }, fixture);
+    await assert.rejects(new ACPAdapter(adapterOptions(fake, { protocolVersion: 1 })).run(request({ route })), (error) => {
+      assert.equal(error.details.kind, "policy");
+      assert.match(error.message, expected);
+      return true;
+    });
+    assert.equal(fake.children[0].received.some(({ method }) => method === "session/prompt"), false);
   }
 });
 

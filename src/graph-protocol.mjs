@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
-import { digestContext, inheritPolicyControls, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRequest, POLICY_FIELDS, ROUTE_FIELDS, stableJson, TARGETS } from "./protocol.mjs";
+import { EXECUTION_CONTROLS } from "./execution-controls.mjs";
+import { digestContext, inheritPolicyControls, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRequest, normalizeRoute, POLICY_FIELDS, stableJson, TARGETS } from "./protocol.mjs";
 import { assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
 
 export const GRAPH_TERMINAL = new Set(["completed", "partial", "cancelled"]);
@@ -21,7 +22,7 @@ export function assertGraphLeaf(request) {
   // path, and OpenCode has no prompt-only budget enforcement either.
   if (target !== "claude" && policy.maxCostUsd != null) throw graphError("policy", `${target} does not enforce maxCostUsd for prompt-only graph nodes`);
   if (target === "opencode" && !route.model) throw graphError("validation", "OpenCode graph node requires explicit route.model");
-  if (route.model && !/^[a-zA-Z0-9._/[\]=,+-]+$/.test(route.model)) throw graphError("validation", `invalid ${target} route.model`);
+  if (target !== "acp" && route.model && !/^[a-zA-Z0-9._/[\]=,+-]+$/.test(route.model)) throw graphError("validation", `invalid ${target} route.model`);
   if (route.provider && !/^[a-zA-Z0-9._/-]+$/.test(route.provider)) throw graphError("validation", `invalid ${target} route.provider`);
   if (route.harnessVersion && !["v1", "v2"].includes(route.harnessVersion)) throw graphError("validation", "invalid harnessVersion");
 }
@@ -39,19 +40,6 @@ function only(value, keys, label) {
 function text(value, label) {
   if (typeof value !== "string" || !value.trim()) throw graphError("validation", `${label} is required`);
   return value.trim();
-}
-
-function route(input, label) {
-  only(input, ROUTE_FIELDS, label);
-  for (const [key, value] of Object.entries(input)) {
-    if (key === "thinking") {
-      if (typeof value === "boolean") continue;
-      if (typeof value === "string" && value.trim()) continue;
-      throw graphError("validation", `invalid ${label}.thinking`);
-    }
-    if (typeof value !== "string" || !value.trim()) throw graphError("validation", `invalid ${label}.${key}`);
-  }
-  return input;
 }
 
 function policy(input = {}, parent) {
@@ -128,10 +116,11 @@ export async function normalizeGraph(input) {
     const dependsOn = node.dependsOn ?? [];
     if (!Array.isArray(dependsOn) || dependsOn.some((v) => typeof v !== "string") || new Set(dependsOn).size !== dependsOn.length) throw graphError("validation", `invalid dependencies: ${id}`);
     if (dependsOn.length > 256) throw graphError("validation", `node ${id} has more than 256 dependencies`);
-    only(node.execution ?? {}, ["timeoutMs"], "node.execution");
-    const nodeTimeoutMs = node.execution?.timeoutMs;
+    only(node.execution ?? {}, ["timeoutMs", "sessionId", ...EXECUTION_CONTROLS], "node.execution");
+    const { timeoutMs: nodeTimeoutMs, ...nativeExecution } = node.execution ?? {};
     if (nodeTimeoutMs !== undefined && (!Number.isInteger(nodeTimeoutMs) || nodeTimeoutMs < 1 || nodeTimeoutMs > MAX_TIMEOUT_MS)) throw graphError("validation", `node ${id} execution.timeoutMs must be an integer between 1 and ${MAX_TIMEOUT_MS}`);
-    route(node.route ?? {}, "node.route");
+    if (nativeExecution.sessionId !== undefined && typeof nativeExecution.sessionId !== "string") throw graphError("validation", `node ${id} execution.sessionId must be a string`);
+    normalizeRoute(node.route ?? {}, "node.route");
     const nodePolicy = policy(node.policy, rootPolicy);
     const defaultTarget = nodePolicy.mode !== undefined || nodePolicy.sandbox !== undefined ? "cursor" : "pi";
     const request = normalizeRequest({
@@ -140,10 +129,17 @@ export async function normalizeGraph(input) {
       context: mergeData(context, object(node.context ?? {}, "node.context")),
       metadata: mergeData(metadata, object(node.metadata ?? {}, "node.metadata")),
       policy: nodePolicy, route: node.route ?? {},
-      execution: { ...node.execution, background: true },
+      execution: {
+        timeoutMs: nodeTimeoutMs,
+        ...(node.target === "auto" ? {} : nativeExecution),
+        background: true,
+      },
     });
     if (node.target === "auto") request.metadata = { ...request.metadata, routing: { ...request.metadata.routing, mode: "auto" } };
-    nodes.push({ id, dependsOn, requestedTarget: node.target, request });
+    // Retain the caller's execution options for the graph digest. Preparation
+    // separates the routing inputs from controls that need the resolved target.
+    const pendingExecution = node.target === "auto" && Object.keys(nativeExecution).length ? nativeExecution : undefined;
+    nodes.push({ id, dependsOn, requestedTarget: node.target, request, ...(pendingExecution ? { pendingExecution } : {}) });
   }
   const visiting = new Set(), visited = new Set();
   const visit = (id) => {

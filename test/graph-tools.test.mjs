@@ -17,9 +17,12 @@ test("published graph schema matches MCP input and accepts task-aware automatic 
   const schema = z.toJSONSchema(graphInputSchema);
   assert.deepEqual(Object.keys(schema.properties.policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
   assert.equal(schema.properties.policy.additionalProperties, false);
-  assert.deepEqual(Object.keys(schema.properties.nodes.items.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
+  assert.deepEqual(Object.keys(schema.properties.nodes.items.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
   assert.equal(schema.properties.nodes.items.properties.route.additionalProperties, false);
   assert.deepEqual(schema.properties.nodes.items.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"] });
+  const execution = schema.properties.nodes.items.properties.execution;
+  assert.deepEqual(Object.keys(execution.properties), ["timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns"]);
+  assert.equal(execution.additionalProperties, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, nodes: [{ ...graph.nodes[0], route: { harnessVersion: "v3" } }] }).success, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, policy: { permissions: "write" } }).success, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, nodes: [{ ...graph.nodes[0], route: { reasoningEffort: "xhigh" } }] }).success, false);
@@ -37,7 +40,7 @@ test("graph runtime errors list accepted policy and route fields", async () => {
   );
   await assert.rejects(
     normalizeGraph({ ...graph, nodes: [{ ...graph.nodes[0], route: { reasoningEffort: "xhigh" } }] }),
-    /node\.route\.reasoningEffort is unsupported; expected one of provider, model, agent, variant, thinking, harnessVersion, serverUrl/,
+    /node\.route\.reasoningEffort is unsupported; expected one of provider, model, agent, variant, thinking, harnessVersion, serverUrl, serviceTier, profile, options$/,
   );
 });
 

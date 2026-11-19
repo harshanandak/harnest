@@ -38,7 +38,16 @@
         "variant": { "type": "string" },
         "thinking": { "type": ["string", "boolean"] },
         "harnessVersion": { "type": "string", "enum": ["v1", "v2"], "description": "OpenCode version selector. Other targets may reject this field according to their adapter contract." },
-        "serverUrl": { "type": "string", "minLength": 1, "description": "OpenCode private server URL." }
+        "serverUrl": { "type": "string", "minLength": 1, "description": "OpenCode private server URL." },
+        "serviceTier": { "type": "string", "enum": ["default", "fast", "priority", "flex"], "description": "Native one-shot service tier. Claude accepts only fast." },
+        "profile": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$", "description": "Codex one-shot native config profile name." },
+        "options": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "pattern": "\\S", "maxLength": 128, "not": { "enum": ["__proto__", "prototype", "constructor"] } },
+          "additionalProperties": { "anyOf": [{ "type": "string", "maxLength": 256 }, { "type": "boolean" }] },
+          "description": "ACP session option IDs mapped to advertised values."
+        }
       }
     },
     "execution": {
@@ -48,6 +57,24 @@
         "background": { "type": "boolean" },
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
         "sessionId": { "type": "string" },
+        "addDirs": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 1024 }, "description": "Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval." },
+        "attachments": {
+          "type": "array",
+          "maxItems": 4,
+          "description": "Absolute local files up to 256 KiB each. Codex and Pi accept images. OpenCode and capable ACP agents accept images and files.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "path"],
+            "properties": {
+              "type": { "enum": ["image", "file"] },
+              "path": { "type": "string", "maxLength": 1024 }
+            }
+          }
+        },
+        "instructions": { "type": "string", "minLength": 1, "maxLength": 8000, "description": "Append up to 8000 UTF-8 bytes to the Claude or Pi system prompt." },
+        "sessionAction": { "enum": ["resume", "fork"], "description": "Requires sessionId. Resume is the default. Fork uses native support on Claude, Codex, OpenCode, or Pi." },
+        "maxTurns": { "type": "integer", "minimum": 1, "maximum": 9007199254740991, "description": "Maximum Claude print-mode agentic turns." },
         "transport": { "enum": ["oneshot", "session"], "description": "Session transport uses the native interactive protocol; unsupported controls never silently fall back to one-shot execution." }
       }
     },

@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createRuntimeServices } from "./runtime-services.mjs";
 import { runtimeInfo } from "./runtime-info.mjs";
 import { readLocalConfig } from "./config.mjs";
-import { metadataInputSchema, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
+import { metadataInputSchema, nativeExecutionInputFields, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
 import { registerDynamicTools } from "./dynamic-tools.mjs";
 import { registerRoutingTools } from "./routing-tools.mjs";
 
@@ -67,7 +67,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     execution: z.object({
       background: z.boolean().optional(),
       timeoutMs: z.number().describe("Positive integer up to 86400000; validated by the protocol for structured errors.").optional(),
-      sessionId: z.string().optional(),
+      ...nativeExecutionInputFields,
       transport: z.enum(["oneshot", "session"]).optional().describe("Session transport uses the native interactive protocol; unsupported controls never silently fall back to one-shot execution."),
     }).strict().optional(),
     policy: policyInputSchema.optional(),
@@ -124,7 +124,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     {
       title: "Hand off a complete workflow",
       description:
-        "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Generic ACP is opt-in through route.agent, write-only, and rejects model/provider pins, granular tools, cost budgets, persistent session transport, and live controls. For bounded independent work longer than one turn — not quick questions or in-session edits. Use policy.tools with explicit allow and deny names for Claude print or Gemini, and deny only for Pi or fresh local OpenCode V1. Cursor print supports policy.mode=plan and policy.sandbox=true. Use background=true for durable status/result retrieval. A foreground execution.timeoutMs above the safe MCP foreground wait (55s, below the common 60s client tool timeout) is converted to a durable background job automatically; its receipt carries execution.foregroundConverted=true and the caller polls handoff_status instead of waiting. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
+        "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is opt-in through route.agent and accepts advertised model, variant, and options controls. ACP is write-only and rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. For bounded independent work longer than one turn — not quick questions or in-session edits. Use policy.tools with explicit allow and deny names for Claude print or Gemini, and deny only for Pi or fresh local OpenCode V1. Cursor print supports policy.mode=plan and policy.sandbox=true. Use background=true for durable status/result retrieval. A foreground execution.timeoutMs above the safe MCP foreground wait (55s, below the common 60s client tool timeout) is converted to a durable background job automatically; its receipt carries execution.foregroundConverted=true and the caller polls handoff_status instead of waiting. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
       inputSchema: z.object({ request: requestSchema }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -486,12 +486,12 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
           workers: [
             { agent: "opencode-worker", target: "opencode", notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. Native policy.tools.deny requires a fresh local V1.18.18 run. Live steer/reroute requires V2." },
             { agent: "pi-worker", target: "pi", notes: "Route or profile default is fine. Supports exact built-in policy.tools.deny on prompt-only runs. Live steer/reroute supported." },
-            { agent: "cursor-worker", target: "cursor", notes: "One-shot print mode with stream-json deltas in trace. Read-only defaults to ask. Supports policy.mode=plan and policy.sandbox=true. Resume via execution.sessionId; no live message/reroute." },
-            { agent: "claude-worker", target: "claude", notes: "One-shot print mode with stream-json deltas in trace. Read-only maps to --permission-mode plan; write uses acceptEdits. Supports explicit policy.tools.allow and deny, and maxCostUsd via --max-budget-usd. Resume via execution.sessionId; no live message/reroute." },
-            { agent: "codex-worker", target: "codex", notes: "One-shot exec with JSONL events in trace. Read-only maps to --sandbox read-only; write uses workspace-write (never danger-full-access). Resume via execution.sessionId; no live message/reroute." },
+            { agent: "cursor-worker", target: "cursor", notes: "One-shot print mode with stream-json deltas in trace. Read-only defaults to ask and approved write defaults to --force unless policy controls apply. Supports policy.mode=plan and policy.sandbox=true. Resume via execution.sessionId; no live message/reroute." },
+            { agent: "claude-worker", target: "claude", notes: "One-shot print mode with stream-json deltas in trace. Read-only maps to --permission-mode plan; write uses acceptEdits. Supports route.agent, route.serviceTier fast, explicit policy.tools.allow and deny, and maxCostUsd via --max-budget-usd. Resume via execution.sessionId; no live message/reroute." },
+            { agent: "codex-worker", target: "codex", notes: "One-shot exec with JSONL events in trace. Supports route.profile and route.serviceTier. Read-only maps to --sandbox read-only; write uses workspace-write (never danger-full-access). Resume via execution.sessionId; no live message/reroute." },
             { agent: "gemini-worker", target: "gemini", notes: "Prompt-only one-shot with isolated native policy for read or approved write work. Supports explicit policy.tools.allow and deny. Rejects cost budgets, persistent session transport, and live controls." },
             { agent: "amp-worker", target: "amp", notes: "Prompt-only attached local execution on macOS or Linux, including when the whole MCP server runs inside WSL. Requires approved write policy; route.variant accepts low, medium, high, or ultra. Rejects read-only work, model/provider pins, persistent session transport, and live controls." },
-            { agent: "acp-worker", target: "acp", notes: "One generic worker for a trusted local ACP registration selected by route.agent. Requires approved write policy. Native authentication stays native; model/provider pins, automatic installation, persistent session transport, and live controls are unsupported." },
+            { agent: "acp-worker", target: "acp", notes: "One generic worker for a trusted local ACP registration selected by route.agent. Requires approved write policy. Only native advertised model, variant, and options choices are accepted. Native authentication stays native. Provider pins, automatic installation, persistent session transport, and live controls are unsupported." },
           ],
           controlSemantics: {
             acknowledged: "applied",

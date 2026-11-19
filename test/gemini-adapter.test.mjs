@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -94,6 +94,22 @@ function fakePolicy() {
     },
   };
 }
+
+test("Gemini adds canonical directories under the read-only policy", async () => {
+  const dirs = [await realpath(process.cwd()), await realpath("docs")];
+  let argv;
+  const adapter = new GeminiAdapter({
+    command: "fake-gemini",
+    policyPreparer: fakePolicy(),
+    spawnFn(_command, args) {
+      argv = args;
+      return new FakeChild({ stdout: successfulStream() });
+    },
+  });
+  const output = await adapter.run(request({ execution: { addDirs: dirs } }));
+  assert.deepEqual(argv.slice(-4), ["--include-directories", dirs[0], "--include-directories", dirs[1]]);
+  assert.equal(output.execution.effectivePolicy.write, false);
+});
 
 test("Gemini streams a native terminal result and sends the prompt through stdin", async () => {
   const calls = [];
@@ -253,6 +269,7 @@ test("Gemini rejects unsupported workflow, route, tools, budget, thinking, and s
 test("Gemini applies the same narrowed list to native settings and the admin policy", async (t) => {
   const systemPoliciesDir = await mkdtemp(join(tmpdir(), "harnest-gemini-filter-"));
   t.after(() => rm(systemPoliciesDir, { recursive: true, force: true }));
+  const extraDir = await realpath("docs");
   const calls = [];
   const adapter = new GeminiAdapter({
     command: "fake-gemini",
@@ -265,6 +282,7 @@ test("Gemini applies the same narrowed list to native settings and the admin pol
       assert.deepEqual(args, [
         "--approval-mode", "default", "--admin-policy", admin, "--policy", join(root, "user-policy"),
         "--extensions", "none", "-p", "", "--output-format", "stream-json",
+        "--include-directories", extraDir,
       ]);
       const settings = JSON.parse(readFileSync(env.GEMINI_CLI_SYSTEM_SETTINGS_PATH, "utf8"));
       const rules = readFileSync(join(admin, "harnest.toml"), "utf8");
@@ -275,7 +293,10 @@ test("Gemini applies the same narrowed list to native settings and the admin pol
       return new FakeChild({ stdout: successfulStream() });
     },
   });
-  await adapter.run(request({ policy: { write: false, tools: { allow: ["read_file", "glob", "run_shell_command", "write_file"], deny: ["glob"] } } }));
+  await adapter.run(request({
+    execution: { addDirs: [extraDir] },
+    policy: { write: false, tools: { allow: ["read_file", "glob", "run_shell_command", "write_file"], deny: ["glob"] } },
+  }));
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[0], ["--version"]);
 });

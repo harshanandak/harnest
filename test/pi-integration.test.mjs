@@ -133,13 +133,15 @@ const stubPi = (overrides = {}) => {
   return { pi, tools, commands, handlers };
 };
 
-test("Pi publishes strict route and policy contracts for single and graph handoffs", async () => {
+test("Pi publishes strict route, execution, and policy contracts for single and graph handoffs", async () => {
   const { default: extension } = await loadPiExtension();
   const { pi, tools } = stubPi();
   extension(pi);
   const request = tools.get("handoff_workflow").parameters.properties.request;
-  assert.deepEqual(Object.keys(request.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
+  assert.deepEqual(Object.keys(request.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
   assert.equal(request.properties.route.additionalProperties, false);
+  assert.deepEqual(Object.keys(request.properties.execution.properties), ["background", "timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns", "transport"]);
+  assert.equal(request.properties.execution.additionalProperties, false);
   assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"], description: "OpenCode only: v1 or v2." });
   assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"] });
   const policy = request.properties.policy;
@@ -153,8 +155,12 @@ test("Pi publishes strict route and policy contracts for single and graph handof
   assert.equal(request.properties.policy.additionalProperties, false);
   const graph = tools.get("handoff_graph_start").parameters.properties.graph;
   assert.equal(graph.properties.policy.additionalProperties, false);
-  assert.equal(graph.properties.nodes.items.properties.route.additionalProperties, false);
-  assert.equal(graph.properties.nodes.items.properties.policy.additionalProperties, false);
+  const node = graph.properties.nodes.items;
+  assert.deepEqual(Object.keys(node.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
+  assert.equal(node.properties.route.additionalProperties, false);
+  assert.deepEqual(Object.keys(node.properties.execution.properties), ["timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns"]);
+  assert.equal(node.properties.execution.additionalProperties, false);
+  assert.equal(node.properties.policy.additionalProperties, false);
   const readOnlyTargets = ["opencode", "pi", "cursor", "claude", "codex", "gemini"];
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.request.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.candidates.items.properties.target.enum, readOnlyTargets);

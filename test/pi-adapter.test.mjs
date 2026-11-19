@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -73,14 +74,14 @@ test("Pi checks the active default before sending any prompt", async () => {
   }
 });
 
-function terminalChildFactory({ finalText = "workflow output", withTaskflow = false, taskflowState = true, assistantError = null, stats = null } = {}) {
+function terminalChildFactory({ finalText = "workflow output", withTaskflow = false, taskflowState = true, assistantError = null, stats = null, model = state().model } = {}) {
   let child;
   let launch;
   const spawnFn = (command, args, _options) => {
     launch = { command, args };
     child = new FakeChild((command, instance) => {
       if (command.type === "get_state") {
-        instance.emitJson({ type: "response", id: command.id, command: "get_state", success: true, data: state() });
+        instance.emitJson({ type: "response", id: command.id, command: "get_state", success: true, data: { ...state(), model } });
       } else if (command.type === "prompt") {
         instance.emitJson({ type: "response", id: command.id, command: "prompt", success: true });
         if (withTaskflow) {
@@ -126,6 +127,66 @@ function terminalChildFactory({ finalText = "workflow output", withTaskflow = fa
   };
   return { spawnFn, get child() { return child; }, get launch() { return launch; } };
 }
+
+test("Pi forks by ID, appends literal system instructions, and sends RPC images", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-controls-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const path = join(cwd, "input.png");
+  await writeFile(path, "fixture image");
+  const fake = terminalChildFactory({ model: { ...state().model, input: ["text", "image"] } });
+  const calls = [];
+  const adapter = new PiAdapter({
+    command: "fake-pi",
+    spawnFn(command, args, options) {
+      calls.push(args);
+      if (args[0] === "--help") {
+        const child = new FakeChild(() => {});
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from("  --fork <path|id>\n  --append-system-prompt <text>\n  --exclude-tools --no-tools --no-extensions --no-mcp\n"));
+          child.emit("close", 0, null);
+        });
+        return child;
+      }
+      assert.equal(readFileSync(args.at(-1), "utf8"), "literal instructions");
+      return fake.spawnFn(command, args, options);
+    },
+  });
+  const result = await adapter.run(request(cwd, { execution: {
+    sessionAction: "fork", sessionId: "pi-source", instructions: "literal instructions",
+    attachments: [{ type: "image", path }], timeoutMs: 5000,
+  } }));
+  assert.equal(result.sessionId, "session-pi-001");
+  assert.deepEqual(calls[0], ["--help"]);
+  assert.deepEqual(calls[1].slice(0, -1), [
+    "--mode", "rpc", "--fork", "pi-source", "--tools", "read,grep,find,ls", "--append-system-prompt",
+  ]);
+  const command = fake.child.commands.find(({ type }) => type === "prompt");
+  assert.deepEqual(command.images, [{ type: "image", mimeType: "image/png", data: Buffer.from("fixture image").toString("base64") }]);
+  assert.doesNotMatch(command.message, /literal instructions/);
+
+  calls.length = 0;
+  const filtered = await adapter.run(request(cwd, {
+    execution: { sessionAction: "fork", sessionId: "pi-source", instructions: "literal instructions", timeoutMs: 5000 },
+    policy: { tools: { deny: ["grep"] } },
+  }));
+  assert.equal(filtered.sessionId, "session-pi-001");
+  assert.deepEqual(calls.slice(0, 2), [["--help"], ["--help"]]);
+  assert.deepEqual(calls[2].slice(0, -1), [
+    "--mode", "rpc", "--fork", "pi-source", "--tools", "read,find,ls",
+    "--exclude-tools", "grep", "--no-extensions", "--no-mcp", "--append-system-prompt",
+  ]);
+});
+
+test("Pi rejects image input before prompt when the active model supports text only", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-text-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const path = join(cwd, "input.png");
+  await writeFile(path, "fixture image");
+  const fake = terminalChildFactory({ model: { ...state().model, input: ["text"] } });
+  const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
+  await assert.rejects(adapter.run(request(cwd, { execution: { attachments: [{ type: "image", path }] } })), /does not advertise image input/);
+  assert.equal(fake.child.commands.some(({ type }) => type === "prompt"), false);
+});
 
 test("Pi subtracts exact denies from its authorized tools and probes the native flags", async () => {
   const help = "--tools --no-tools --exclude-tools --no-extensions --no-mcp";

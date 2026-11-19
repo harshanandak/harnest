@@ -41,6 +41,20 @@ Ask for file and line evidence in the task or acceptance criteria. Add receipt a
 
 A foreground timeout above the safe MCP wait is converted to a background job. Prefer `background: true` for work that can take more than one tool turn.
 
+## Native execution controls
+
+Set these fields in the `execution` object of a single `handoff_workflow` request. Omit fields the downstream target cannot honor. Harnest rejects unsupported combinations before sending the prompt.
+
+| Field | How to use it |
+| --- | --- |
+| `addDirs` | Pass up to eight existing, absolute directories to Claude, Codex, Cursor, or Gemini. When write policy is enabled, confirm the scope of any directory outside `cwd` and set `metadata.harnest.writeApproved: true`. With read-only policy, Claude exposes only Read, Glob, and Grep and disables configured MCP servers for this launch. Cursor keeps Ask mode and Gemini keeps its read-tool allowlist. Codex requires write policy because its native flag adds writable roots. |
+| `attachments` | Pass up to four entries such as `{"type":"image","path":"/absolute/path/to/screenshot.png"}`. Each must be a regular local file at most 256 KiB. Images use PNG, JPEG, GIF, or WebP extensions, and the selected model must support the format. Codex and Pi accept images. OpenCode accepts images and files. ACP requires the agent to advertise image or embedded resource support for the corresponding type. Use a prompt-only handoff. |
+| `instructions` | Append nonempty text up to 8,000 UTF-8 bytes to the system prompt in Claude print mode or Pi RPC. |
+| `sessionAction` | With `sessionId` set, omit this field or use `"resume"` to continue the session. Use `"fork"` with Claude, Codex, OpenCode, or Pi to start a new native session from it. Use a prompt-only handoff and read the new ID from the receipt. |
+| `maxTurns` | Set a positive integer to cap Claude agentic turns through the installed print CLI. |
+
+These native controls use the default transport. The persistent `execution.transport: "session"` path accepts ordinary resume.
+
 ## Approved write work
 
 Use one normalized policy field and include the guarded-host approval marker after the lead has confirmed the exact scope:
@@ -63,6 +77,19 @@ Use one normalized policy field and include the guarded-host approval marker aft
 
 Do not combine contradictory `write`, `readOnly`, and `allowWrites` values. Harnest validates policy before launch. A write-capable retry also needs renewed lead approval.
 
+## Native route controls
+
+Set these fields on `request.route` for the named target.
+
+| Target | Field | Native selection |
+| --- | --- | --- |
+| Codex | `serviceTier` | `default`, `fast`, `priority`, or `flex` via `-c service_tier=...`. `fast` and `priority` both request priority processing. The model and account must support the tier. |
+| Codex | `profile` | `--profile <name>` loads the named `<name>.config.toml` in the native Codex home. |
+| Claude | `serviceTier` | `fast` via `--settings '{"fastMode":true}'`. Harnest requires a native result that confirms fast mode. |
+| Claude | `agent` | `--agent <name>` selects the named Claude Code agent. Use a plugin-qualified name where needed. |
+
+These Codex and Claude settings require one-shot execution. In a JavaScript workflow, set `execution.transport` to `"oneshot"` on the agent call. Codex route controls require CLI 0.170.0 or later. Claude fast mode requires Claude Code 2.1.219 or later so Harnest can check its reported state.
+
 ## Narrow the tool policy
 
 `policy.tools` accepts an object with `allow`, `deny`, or both. Use exact native tool names. Deny wins when both lists name a tool. An empty allow list selects no tools on targets that support it. The existing array form keeps its previous behavior.
@@ -72,7 +99,7 @@ For example, a read-only Gemini handoff can use `"policy": { "write": false, "to
 Use `"policy": { "write": false, "mode": "plan", "sandbox": true }` with Cursor print to request read-only planning and enable its shell sandbox. Plan mode takes precedence over agent mode even with approved write access. Sandbox can also be enabled without selecting plan mode. Omit `sandbox` to inherit Cursor's settings. Harnest rejects `sandbox: false` because it could turn off configured isolation.
 
 These controls preserve the existing write authorization and approval checks. Unsupported targets, transports, and CLI versions fail before inference.
-For JavaScript workflows, set `execution.transport: "oneshot"` on Claude or Cursor calls using these controls.
+JavaScript workflows default to `execution.transport: "oneshot"` for these Claude and Cursor controls. Automatic validation checks the policy shape. The runner checks whether the resolved target can enforce it before dispatch.
 
 ## Generic ACP handoff
 
@@ -96,6 +123,8 @@ The generic route is selected by both `target: "acp"` and the trusted registrati
 ```
 
 The registration supplies the executable and arguments. Requests cannot supply a command, environment secrets, or registry install command. Read [the ACP trust boundary](../acp-agents.md) before using this route.
+
+Add `route.model` or `route.variant` to select a model or mode ID advertised during native session setup. Use `route.options` for up to 16 advertised configuration IDs, each up to 128 characters, mapped to a boolean or an advertised string of up to 256 characters. Use each model or mode control once. Harnest applies the selections before prompting and rejects missing, unadvertised, or unconfirmed choices.
 
 ## Multi-agent graph
 

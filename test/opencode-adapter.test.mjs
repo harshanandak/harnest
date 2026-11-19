@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import test from "node:test";
 
 import { normalizeRequest } from "../src/protocol.mjs";
@@ -116,6 +117,36 @@ function streamLines(session = "session-001", text = "final answer") {
   ];
 }
 
+test("OpenCode forwards a fork and both file input types through native argv", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-opencode-controls-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = join(root, "input.txt");
+  const image = join(root, "input.png");
+  await writeFile(file, "fixture file");
+  await writeFile(image, "fixture image");
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args) {
+      calls.push(args);
+      if (args.at(-1) === "--help") return new FakeChild(["  --fork", "  --file <file>"]);
+      const [stagedFile, stagedImage] = [args.at(-3), args.at(-1)];
+      assert.ok(isAbsolute(stagedFile) && isAbsolute(stagedImage));
+      assert.deepEqual([basename(stagedFile), basename(stagedImage)], ["0-input.txt", "1-input.png"]);
+      assert.equal(readFileSync(stagedFile, "utf8"), "fixture file");
+      assert.equal(readFileSync(stagedImage, "utf8"), "fixture image");
+      return new FakeChild(streamLines("opencode-new"));
+    },
+  });
+  const result = await adapter.run(request({ execution: {
+    sessionAction: "fork", sessionId: "opencode-old",
+    attachments: [{ type: "file", path: file }, { type: "image", path: image }],
+  } }));
+  assert.equal(result.sessionId, "opencode-new");
+  assert.deepEqual(calls[0], ["run", "--help"]);
+  assert.deepEqual(calls[1].slice(-7), ["--session", "opencode-old", "--fork", "--file", calls[1].at(-3), "--file", calls[1].at(-1)]);
+});
+
 const SERVER_URL = "http://127.0.0.1:43991";
 function healthyFetch(url) {
   if (String(url).endsWith("/global/health") || String(url).endsWith("/api/health")) {
@@ -221,25 +252,38 @@ test("runs a read-only OpenCode handoff and extracts identifiers, output, and us
   });
 });
 
-test("OpenCode V1 applies explicit denies in the selected fresh agent", async () => {
+test("OpenCode V1 applies explicit denies in the selected fresh agent with an attachment", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-opencode-deny-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = join(root, "input.txt");
+  await writeFile(file, "fixture file");
   const calls = [];
   const adapter = new OpenCodeAdapter({
     command: "fake-opencode",
     spawnFn(_command, args, options) {
       calls.push({ args, options });
-      return new FakeChild(args[0] === "--version" ? ["1.18.18"] : streamLines());
+      if (args[0] === "--version") return new FakeChild(["1.18.18"]);
+      if (args.at(-1) === "--help") return new FakeChild(["  --file <file>"]);
+      assert.equal(readFileSync(args.at(-1), "utf8"), "fixture file");
+      return new FakeChild(streamLines());
     },
   });
-  const req = request({ route: { model: "openai/gpt-test" }, policy: { write: true, tools: { deny: ["read", "list"] } } });
+  const req = request({
+    route: { model: "openai/gpt-test" },
+    execution: { attachments: [{ type: "file", path: file }] },
+    policy: { write: true, tools: { deny: ["read", "list"] } },
+  });
   await adapter.run(req);
   assert.deepEqual(calls[0].args, ["--version"]);
-  const { args, options } = calls[1];
+  assert.deepEqual(calls[1].args, ["run", "--help"]);
+  const { args, options } = calls[2];
   const { agent, permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
   const [scopedAgent] = Object.keys(agent);
-  assert.deepEqual(args, ["run", args[1], "--format", "json", "--pure", "--dir", req.cwd, "--model", "openai/gpt-test", "--agent", scopedAgent]);
+  assert.deepEqual(args, ["run", args[1], "--format", "json", "--pure", "--dir", req.cwd, "--model", "openai/gpt-test", "--agent", scopedAgent, "--file", args.at(-1)]);
+  assert.equal(basename(args.at(-1)), "0-input.txt");
   assert.deepEqual(permission, { "*": "deny", grep: "allow", glob: "allow", read: "deny", list: "deny" });
   assert.deepEqual(agent[scopedAgent], { mode: "primary", permission: { read: "deny", list: "deny" } });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
 });
 
 test("OpenCode rejects denies it cannot enforce before running a prompt", async () => {
@@ -260,6 +304,7 @@ test("OpenCode rejects denies it cannot enforce before running a prompt", async 
     [{ route: { ...route, serverUrl: "http://127.0.0.1:4096" } }, /fresh local V1/],
     [{ route: { ...route, agent: "reviewer" } }, /fresh local V1/],
     [{ execution: { sessionId: "previous" } }, /fresh local V1/],
+    [{ execution: { sessionId: "previous", sessionAction: "fork" } }, /fresh local V1/],
     [{ workflow: { spec: {} } }, /fresh local V1/],
     [{}, /version 1\.18\.18/],
   ]) {

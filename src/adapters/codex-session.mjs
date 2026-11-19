@@ -9,11 +9,13 @@
 // transport below is a bounded request map plus an incremental line framer so a
 // wedged peer cannot grow memory without limit.
 
+import { validateAdapterExecution } from "../execution-controls.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { resolve as resolvePath } from "node:path";
 
 import { harnessLaunch } from "../config.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
+import { routeControlError } from "../protocol.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 import { digestContext, hasToolPolicy } from "../protocol.mjs";
 import {
@@ -1553,11 +1555,14 @@ export class CodexSessionAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "codex", "session");
     if (!request || typeof request !== "object" || Array.isArray(request)) {
       throw new TypeError("request must be an object");
     }
     assertPromptOnlyWorkflow("codex", request.workflow);
     assertNoClaudeRoute("codex", request.route);
+    const controlError = routeControlError("codex", request.route, "session");
+    if (controlError) throw sessionError(controlError, "policy");
     const support = isPolicySupported(request.policy || {});
     if (!support.supported) {
       throw sessionError(`Codex policy not supported: ${support.reason} — ${CODEX_SESSION_SUPPORTED_POLICY_HELP}`, "policy", { reason: support.reason });

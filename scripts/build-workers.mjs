@@ -118,7 +118,7 @@ const TARGETS = {
   claude: {
     role: "Claude Code print-mode run",
     request: (c) => `Build one durable Harnest request with target "claude", a caller-owned request ID, the exact cwd, context, timeout, and the downstream task. Start it in the background and retain the returned job ID and context digest.`,
-    mechanics: `Claude print mode is one-shot (claude -p --output-format stream-json). It has no Taskflow graph and no live message/reroute controls: handoff_message/handoff_reroute fail closed as unsupported-control. Resume a follow-up with execution.sessionId set to the receipt's Claude sessionId. Read-only requests map to --permission-mode plan; write requests map to acceptEdits, both with --permission-prompts none. route.thinking maps to claude --effort (low, medium, high, xhigh, max; off and minimal are dropped because Claude has no equivalent). policy.maxCostUsd maps to --max-budget-usd (a client-side estimate). Leave route.model unset unless the parent explicitly names a Claude model alias or full ID (e.g. sonnet, opus, claude-opus-5); the adapter passes it as --model verbatim and the actual model is verified from modelUsage after the run. Claude print supports policy.tools.allow for Read, Glob, and Grep, and policy.tools.deny for exact native tool names. Claude session transport rejects both lists.`,
+    mechanics: `Claude print mode is one-shot (claude -p --output-format stream-json). It has no Taskflow graph and no live message/reroute controls: handoff_message/handoff_reroute fail closed as unsupported-control. Resume a follow-up with execution.sessionId set to the receipt's Claude sessionId. Read-only requests map to --permission-mode plan; write requests map to acceptEdits, both with --permission-prompts none. route.thinking maps to claude --effort (low, medium, high, xhigh, max; off and minimal are dropped because Claude has no equivalent). policy.maxCostUsd maps to --max-budget-usd (a client-side estimate). Leave route.model unset unless the parent explicitly names a Claude model alias or full ID (e.g. sonnet, opus, claude-opus-5); the adapter passes it as --model verbatim and the actual model is verified from modelUsage after the run. Forward route.agent for a named Claude agent via --agent. Forward route.serviceTier fast when requested. It uses the native print-mode fast setting and requires the CLI to confirm fast mode. Claude print supports policy.tools.allow for Read, Glob, and Grep, and policy.tools.deny for exact native tool names. Claude session transport rejects both lists.`,
     ladder: `File-edit ladder: read-only review uses policy.write false (plan mode); fixes use policy.write true only with explicit parent authorization.`,
     steering: (c) => `When the parent steers this child mid-run, do not message the one-shot run — resume it as a follow-up with execution.sessionId set to the receipt's Claude sessionId once it settles, or record the guidance for the parent.`,
     verify: (c) => `At terminal state, call ${c("handoff_result")}, verify request ID, context digest, resolved route, Claude session/workflow identity, final text, and usage (including totalCostUsd when a budget was set), then return the complete receipt to the parent verbatim.`,
@@ -139,7 +139,7 @@ const TARGETS = {
   codex: {
     role: "Codex CLI exec run",
     request: (c) => `Build one durable Harnest request with target "codex", a caller-owned request ID, the exact cwd, context, timeout, and the downstream task. Start it in the background and retain the returned job ID and context digest.`,
-    mechanics: `Codex exec is one-shot (codex exec --json -o <last-message-file>). It has no Taskflow graph and no live message/reroute controls: handoff_message/handoff_reroute fail closed as unsupported-control. Resume a follow-up with execution.sessionId set to the receipt's Codex sessionId (codex exec resume). Read-only requests map to --sandbox read-only; write requests map to workspace-write (never danger-full-access, never --dangerously-bypass-approvals). Forward the parent's route unchanged. Leave route.model absent if the parent omitted it. Never weaken policy: granular tools lists and maxCostUsd budgets are rejected rather than silently ignored.`,
+    mechanics: `Codex exec is one-shot (codex exec --json -o <last-message-file>). It has no Taskflow graph and no live message/reroute controls: handoff_message/handoff_reroute fail closed as unsupported-control. Resume a follow-up with execution.sessionId set to the receipt's Codex sessionId (codex exec resume). Read-only requests map to --sandbox read-only; write requests map to workspace-write (never danger-full-access, never --dangerously-bypass-approvals). Forward the parent's route unchanged, including route.profile for --profile and route.serviceTier for native service_tier. Leave route.model absent if the parent omitted it. Never weaken policy: granular tools lists and maxCostUsd budgets are rejected rather than silently ignored.`,
     ladder: `File-edit ladder: read-only review uses policy.write false (read-only sandbox); fixes use policy.write true only with explicit parent authorization.`,
     steering: (c) => `When the parent steers this child mid-run, do not message the one-shot run — resume it as a follow-up with execution.sessionId set to the receipt's Codex sessionId once it settles, or record the guidance for the parent.`,
     verify: (c) => `At terminal state, call ${c("handoff_result")}, verify request ID, context digest, resolved route, Codex session/workflow identity, final text, and usage, then return the complete receipt to the parent verbatim.`,
@@ -201,7 +201,7 @@ const TARGETS = {
   acp: {
     role: "trusted machine-local ACP agent session",
     request: (c) => `Build one durable Harnest request with target "acp", route.agent set to the operator-selected local registration, a caller-owned request ID, the exact cwd, context, timeout, and the downstream task. Preserve the parent's explicit authorization for the write scope, then set policy.write=true and metadata.harnest.writeApproved=true only for that approved work. Start it in the background and retain the returned job ID and context digest.`,
-    mechanics: `Generic ACP is an explicitly trusted, write-only route. route.agent selects one machine-local registration from acp.agents; never accept executable commands, arguments, modules, or environment secrets from the request, registry metadata, or prompt. A registration's trusted:true is consent to native configuration imports, not a read-only guarantee or sandbox: native hooks, plugins, and MCP configuration can run before ACP initialization. Native authentication remains native and must never be read, copied, or forwarded. Read-only requests, structured Taskflow, persistent session transport, live message/reroute controls, arbitrary provider/variant/thinking fields, unverified model pins, granular tool policy, and budgets fail before launch. Unsupported negotiated capabilities or client callbacks fail explicitly when discovered or requested. Follow-ups require execution.sessionId so the adapter can load or resume the observed native ACP session; never silently start a fresh session.`,
+    mechanics: `Generic ACP is an explicitly trusted, write-only route. route.agent selects one machine-local registration from acp.agents; never accept executable commands, arguments, modules, or environment secrets from the request, registry metadata, or prompt. A registration's trusted:true is consent to native configuration imports, not a read-only guarantee or sandbox: native hooks, plugins, and MCP configuration can run before ACP initialization. Native authentication remains native and must never be read, copied, or forwarded. Read-only requests, structured Taskflow, persistent session transport, live message/reroute controls, provider and thinking fields, granular tool policy, and budgets fail before launch. Forward route.model, route.variant, and route.options when requested. The session must advertise the model ID, mode ID, and option IDs and values before Harnest can use them. Unsupported negotiated capabilities or client callbacks fail explicitly when discovered or requested. Follow-ups require execution.sessionId so the adapter can load or resume the observed native ACP session; never silently start a fresh session.`,
     transport: `This target supports only the attached generic ACP transport; execution.transport=session is unsupported. JavaScript scripts belong to the parent's handoff_dynamic tools, not this single-handoff bridge.`,
     ladder: `ACP accepts write-capable work only: preserve the parent's explicit authorization, then set policy.write=true and metadata.harnest.writeApproved=true only for that approved work; never synthesize either approval signal. Registry trust allows the named local executable to load its native configuration; it does not constrain that configuration to the request cwd.`,
     steering: (c) => `When the parent steers this child mid-run, do not message the active ACP prompt — resume it as a follow-up with execution.sessionId set to the receipt's native session ID once it settles, or record the guidance for the parent. handoff_message/handoff_reroute fail closed as unsupported-control.`,
@@ -222,6 +222,16 @@ const TARGETS = {
   },
 };
 
+const executionControls = {
+  claude: 'Forward supported execution fields in print mode: addDirs, instructions, maxTurns, and sessionAction: "fork" with a sessionId. Confirm the write scope of any external directories.',
+  codex: 'Forward supported execution fields in one-shot mode: image attachments, sessionAction: "fork" with a sessionId, and addDirs with approved write scope.',
+  cursor: 'Forward execution.addDirs in print mode. Confirm the write scope of any external directories.',
+  gemini: 'Forward execution.addDirs when requested. Confirm the write scope of any external directories.',
+  opencode: 'Forward execution.attachments and sessionAction: "fork" with a sessionId in prompt-only handoffs. Omit the workflow for these controls.',
+  pi: 'Forward execution.instructions, image attachments, and sessionAction: "fork" with a sessionId. Use a prompt-only handoff for images and forks.',
+  acp: 'Forward execution.attachments when requested. The registered agent must advertise support for each attachment type.',
+};
+
 function workerBody(shell, key, target) {
   const c = (name) => code(shell, name);
   const owner = shell === "claude" ? "Claude's" : shell === "opencode" ? "this OpenCode session's" : "Codex's";
@@ -235,6 +245,7 @@ function workerBody(shell, key, target) {
     `You are ${owner} native bridge to exactly one ${target.role}. ${thread} is the operator-visible child session; do not perform the delegated repository work yourself. You are a thin forwarder, not an orchestrator: make exactly one ${c("handoff_workflow")} call, then poll, then return the receipt verbatim with no paraphrase of machine fields.`,
     ``,
     target.request(c),
+    ...(executionControls[key] ? [``, executionControls[key]] : []),
     ``,
     announceFirst(shell),
     ``,
@@ -301,7 +312,7 @@ function rescueBody(shell) {
     ``,
     announceFirst(shell),
     ``,
-    `Default to background execution so the queued receipt and job ID persist before downstream model work begins. Preserve the task, context, acceptance criteria, cwd, target harness, route, policy, and workflow graph. Perform no repository investigation or implementation yourself.`,
+    `Default to background execution so the queued receipt and job ID persist before downstream model work begins. Preserve the task, context, acceptance criteria, cwd, target harness, route, policy, workflow graph, and explicitly requested execution controls. Perform no repository investigation or implementation yourself.`,
     ``,
     `Translate explicit completion requirements into context.requiredResultFields and exact canaries into context.requiredText. A downstream response that omits either is not a successful handoff.`,
     ``,
