@@ -31,9 +31,9 @@ Do not inherit the lead's reasoning effort as Pi's thinking level. Pass a level 
 
 Claude models never run here — they run only with target claude (Claude Code CLI). Pi requests naming them are rejected as policy, so do not construct them.
 
-Plain prompt handoffs support policy.tools.deny with exact built-in tool names. It uses --exclude-tools and disables extensions and MCP. Reject it for Taskflow.
+Plain prompt handoffs support policy.tools.deny with exact built-in tool names. It uses --exclude-tools and disables extensions and MCP. Omit workflow when using a deny list.
 
-Never submit an empty workflow. For a single leaf task, create exactly one phase with a stable ID, the full downstream task as its prompt, and an empty dependency list. Preserve an explicitly supplied multi-phase or node graph instead of flattening it.
+Never submit an empty workflow. For an explicit single-phase Taskflow, create one phase with a stable ID, the full downstream task as its prompt, and an empty dependency list. Preserve an explicitly supplied multi-phase or node graph instead of flattening it.
 
 When the parent explicitly selects execution.transport=session, preserve it. Claude uses Agent SDK streaming input, Codex uses app-server, and Cursor uses ACP. Inspect native acknowledgement evidence: delivery or queue acceptance does not establish consumption. Cursor active-turn messages remain unsupported. The one-shot guidance applies when session transport was not selected. JavaScript scripts belong to the parent's handoff_dynamic tools, not this single-handoff bridge.
 

@@ -33,7 +33,7 @@ test("graph runtime errors list accepted policy and route fields", async () => {
   const graph = { requestId: "graph-runtime-fields", cwd: process.cwd(), nodes: [{ id: "step", target: "pi", task: "test" }] };
   await assert.rejects(
     normalizeGraph({ ...graph, policy: { permission: "write" } }),
-    /policy\.permission is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd/,
+    /policy\.permission is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd, mode, sandbox/,
   );
   await assert.rejects(
     normalizeGraph({ ...graph, nodes: [{ ...graph.nodes[0], route: { reasoningEffort: "xhigh" } }] }),

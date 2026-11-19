@@ -95,7 +95,7 @@ test("normalization rejects unsupported route and policy keys with the accepted 
   );
   assert.throws(
     () => normalizeRequest({ ...base, policy: { permissions: "write" } }),
-    /policy\.permissions is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd/,
+    /policy\.permissions is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd, mode, sandbox/,
   );
 });
 
