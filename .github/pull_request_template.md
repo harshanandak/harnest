@@ -8,7 +8,7 @@
 
 ## Verification
 
-<!-- How did you check it? CI runs the full suite on Linux and Windows for pull requests, and on macOS after merge. -->
+<!-- How did you check it? CI runs the full suite on Linux, Windows, and macOS. -->
 
 ## Checklist
 

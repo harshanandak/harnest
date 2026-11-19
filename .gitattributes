@@ -26,3 +26,5 @@ scripts/vendor/codex-plugin-validator/* text eol=lf
 /scripts/*-memory*.mjs export-ignore
 /scripts/model-freshness.mjs export-ignore
 /scripts/smoke-*.mjs export-ignore
+# User docs tell people to run bun run smoke:mcp, so keep its script.
+/scripts/smoke-mcp.mjs -export-ignore
