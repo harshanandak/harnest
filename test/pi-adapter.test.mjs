@@ -142,7 +142,7 @@ test("Pi forks by ID, appends literal system instructions, and sends RPC images"
       if (args[0] === "--help") {
         const child = new FakeChild(() => {});
         queueMicrotask(() => {
-          child.stdout.emit("data", Buffer.from("  --fork <path|id>\n  --append-system-prompt <text>\n"));
+          child.stdout.emit("data", Buffer.from("  --fork <path|id>\n  --append-system-prompt <text>\n  --exclude-tools --no-tools --no-extensions --no-mcp\n"));
           child.emit("close", 0, null);
         });
         return child;
@@ -163,6 +163,18 @@ test("Pi forks by ID, appends literal system instructions, and sends RPC images"
   const command = fake.child.commands.find(({ type }) => type === "prompt");
   assert.deepEqual(command.images, [{ type: "image", mimeType: "image/png", data: Buffer.from("fixture image").toString("base64") }]);
   assert.doesNotMatch(command.message, /literal instructions/);
+
+  calls.length = 0;
+  const filtered = await adapter.run(request(cwd, {
+    execution: { sessionAction: "fork", sessionId: "pi-source", instructions: "literal instructions", timeoutMs: 5000 },
+    policy: { tools: { deny: ["grep"] } },
+  }));
+  assert.equal(filtered.sessionId, "session-pi-001");
+  assert.deepEqual(calls.slice(0, 2), [["--help"], ["--help"]]);
+  assert.deepEqual(calls[2].slice(0, -1), [
+    "--mode", "rpc", "--fork", "pi-source", "--tools", "read,find,ls",
+    "--exclude-tools", "grep", "--no-extensions", "--no-mcp", "--append-system-prompt",
+  ]);
 });
 
 test("Pi rejects image input before prompt when the active model supports text only", async (t) => {
@@ -174,6 +186,61 @@ test("Pi rejects image input before prompt when the active model supports text o
   const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
   await assert.rejects(adapter.run(request(cwd, { execution: { attachments: [{ type: "image", path }] } })), /does not advertise image input/);
   assert.equal(fake.child.commands.some(({ type }) => type === "prompt"), false);
+});
+
+test("Pi subtracts exact denies from its authorized tools and probes the native flags", async () => {
+  const help = "--tools --no-tools --exclude-tools --no-extensions --no-mcp";
+  for (const { write, deny, selection } of [
+    { write: false, deny: ["grep", "bash"], selection: ["--tools", "read,find,ls"] },
+    { write: true, deny: ["edit", "write"], selection: ["--tools", "read,grep,find,ls,bash"] },
+    { write: false, deny: ["read", "grep", "find", "ls"], selection: ["--no-tools"] },
+  ]) {
+    const terminal = terminalChildFactory();
+    const calls = [];
+    const adapter = new PiAdapter({
+      command: "fake-pi",
+      spawnFn(command, args, options) {
+        calls.push(args);
+        if (args[0] !== "--help") return terminal.spawnFn(command, args, options);
+        const child = new FakeChild(() => {});
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from(help));
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    });
+    await adapter.run(request(process.cwd(), { policy: { write, tools: { deny } } }));
+    assert.deepEqual(calls, [
+      ["--help"],
+      ["--mode", "rpc", ...selection, "--exclude-tools", deny.join(","), "--no-extensions", "--no-mcp"],
+    ]);
+  }
+});
+
+test("Pi rejects unsupported tool names, allow lists, Taskflow and versions before a prompt", async () => {
+  const calls = [];
+  const adapter = new PiAdapter({
+    command: "fake-pi",
+    spawnFn(_command, args) {
+      calls.push(args);
+      const child = new FakeChild(() => {});
+      queueMicrotask(() => {
+        child.stdout.emit("data", Buffer.from("Usage: pi --tools <tools>"));
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+  });
+  for (const [overrides, reason] of [
+    [{ policy: { tools: { allow: ["read"] } } }, /deny only/],
+    [{ policy: { tools: { deny: ["unknown"] } } }, /exact built-in/],
+    [{ policy: { tools: { deny: ["read"] } }, workflow: { nodes: [] } }, /Taskflow/],
+    [{ policy: { tools: { deny: ["read"] } } }, /version cannot enforce/],
+  ]) {
+    await assert.rejects(adapter.run(request(process.cwd(), overrides)), (error) => error.details?.kind === "policy" && reason.test(error.message));
+  }
+  assert.deepEqual(calls, [["--help"]]);
 });
 
 test("surfaces the provider error instead of a missing taskflow result", async () => {

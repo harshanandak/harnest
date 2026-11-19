@@ -3,7 +3,7 @@ import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { executionError, validateAdapterExecution } from "../execution-controls.mjs";
 import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext, routeControlError } from "../protocol.mjs";
+import { digestContext, normalizePolicyControls, routeControlError } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -17,7 +17,8 @@ import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
 import { requireRouteVersion } from "./route-version.mjs";
 
-export const CLAUDE_SUPPORTED_POLICY_HELP = "Claude print mode maps read-only policy to --permission-mode plan and write policy to --permission-mode acceptEdits, both with --permission-prompts none. policy.maxCostUsd maps to --max-budget-usd (a client-side estimate, subagent spend included). Generic policy.tools lists cannot be honestly mapped to Claude tool names, so they are rejected rather than silently weakened.";
+export const CLAUDE_SUPPORTED_POLICY_HELP = "Claude print mode supports exact native names in policy.tools.deny and Read, Glob, or Grep in policy.tools.allow. Legacy tool lists are unsupported. Write permission and budget are independent of the tool filter.";
+const ALLOW_TOOLS = new Set(["Read", "Glob", "Grep"]);
 
 function adapterError(message, kind, details = {}) {
   const error = new Error(message);
@@ -40,8 +41,13 @@ function reportProgress(onProgress, event) {
 }
 
 function isPolicySupported(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
-  if (tools.length > 0) return { supported: false, reason: "policy.tools granular filtering cannot be honestly mapped to Claude tool names from a generic list; use --tools/--disallowedTools scoping outside the handoff or split the work" };
+  const { tools } = normalizePolicyControls(policy);
+  if (Array.isArray(tools) && tools.length > 0) {
+    return { supported: false, reason: "use policy.tools.allow or policy.tools.deny with exact Claude tool names" };
+  }
+  if (tools.allow?.some((tool) => !ALLOW_TOOLS.has(tool))) {
+    return { supported: false, reason: "policy.tools.allow supports only Read, Glob, and Grep because --allowedTools preapproves calls" };
+  }
   const maxCost = policy.maxCostUsd;
   if (maxCost != null && (!Number.isFinite(maxCost) || maxCost <= 0)) {
     return { supported: false, reason: "policy.maxCostUsd must be a positive number for --max-budget-usd" };
@@ -117,10 +123,21 @@ function buildArgs(request, launchArgs) {
   if (policy.maxCostUsd != null) args.push("--max-budget-usd", String(policy.maxCostUsd));
   if (instructions !== undefined) args.push("--append-system-prompt", instructions);
   if (maxTurns !== undefined) args.push("--max-turns", String(maxTurns));
-  if (addDirs?.length) {
-    if (!policy.write) args.push("--tools", "Read,Glob,Grep", "--strict-mcp-config");
-    args.push("--add-dir", ...addDirs);
+  const { allow, deny } = policy.tools ?? {};
+  const namedAllow = Boolean(agent && allow !== undefined);
+  if (allow !== undefined) {
+    const available = allow.filter((tool) => !deny?.includes(tool));
+    // Safe mode also disables the named custom agent.
+    if (!namedAllow) args.push("--safe-mode");
+    args.push("--tools", available.join(","));
+    if (available.length) args.push("--allowedTools", available.join(","));
+  } else if (addDirs?.length && !policy.write) {
+    args.push("--tools", "Read,Glob,Grep");
   }
+  const denied = namedAllow ? [...(deny ?? []), "mcp__*"] : deny;
+  if (denied?.length) args.push("--disallowedTools", denied.join(","));
+  if (namedAllow || (addDirs?.length && !policy.write)) args.push("--strict-mcp-config");
+  if (addDirs?.length) args.push("--add-dir", ...addDirs);
   return args;
 }
 

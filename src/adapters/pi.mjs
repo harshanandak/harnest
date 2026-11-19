@@ -12,14 +12,18 @@ import {
   classifyProviderFailure,
   mergeProcessEnv,
   providerErrorFromEvent,
+  runProcess,
   terminateProcessTree,
 } from "../process.mjs";
+import { normalizePolicyControls } from "../protocol.mjs";
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
 import { isClaudeRoute, assertNoClaudeWorkflow } from "../model-policy.mjs";
 export { isClaudeRoute } from "../model-policy.mjs";
 
 const DEFAULT_TIMEOUT_MS = 3_600_000;
+const READ_TOOLS = ["read", "grep", "find", "ls"];
+const WRITE_TOOLS = ["bash", "edit", "write"];
 const MAX_LINE_BYTES = 2 * 1024 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 const MAX_PROTOCOL_TEXT_CHARS = 1024 * 1024;
@@ -980,6 +984,27 @@ export class PiAdapter {
     if (isClaudeRoute(request.route)) rejectClaudeRoute(request.route);
     assertNoClaudeWorkflow("pi", request.workflow);
     const workflow = request.workflow ?? null;
+    const { tools: toolPolicy } = normalizePolicyControls(request.policy || {});
+    const { allow, deny = [] } = toolPolicy;
+    if (allow !== undefined) throw new PiAdapterError("Pi supports policy.tools.deny only for explicit tool policies", "policy");
+    if (deny.some((name) => !READ_TOOLS.includes(name) && !WRITE_TOOLS.includes(name))) {
+      throw new PiAdapterError("Pi policy.tools.deny accepts only exact built-in tool names", "policy");
+    }
+    if (deny.length && (workflow?.spec != null || workflow?.nodes != null)) {
+      throw new PiAdapterError("Pi cannot enforce policy.tools.deny inside Taskflow phases", "policy");
+    }
+    if (deny.length) {
+      const help = await runProcess(this.launch.command, [...(this.launch.args || []), "--help"], {
+        cwd: request.cwd,
+        env: mergeProcessEnv(this.env),
+        spawnFn: this.spawnFn,
+        signal: options.signal,
+        timeoutMs: Math.min(request.execution?.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
+      });
+      if (!["--exclude-tools", "--no-extensions", "--no-mcp", "--no-tools"].every((flag) => help.stdout.includes(flag))) {
+        throw new PiAdapterError("Installed Pi version cannot enforce policy.tools.deny; required CLI flags are missing", "policy");
+      }
+    }
     const specInfo = taskflowDefinition(workflow, request);
     // Explicit workflow requests need the optional Taskflow package; resolve
     // (and fail) before materializing files or spawning a paid model run.
@@ -992,15 +1017,16 @@ export class PiAdapter {
     ];
     const executable = this.launch.command;
     if (sessionId) args.push(fork ? "--fork" : "--session-id", sessionId);
-    const tools = new Set(["read", "grep", "find", "ls"]);
+    const tools = new Set(READ_TOOLS);
     if (request.policy?.write) {
-      const requested = request.policy.tools?.length
-        ? request.policy.tools
-        : ["bash", "edit", "write"];
+      const requested = Array.isArray(toolPolicy) && toolPolicy.length ? toolPolicy : WRITE_TOOLS;
       for (const tool of requested) tools.add(tool);
     }
     if (specInfo) tools.add("taskflow");
-    args.push("--tools", [...tools].join(","));
+    for (const name of deny) tools.delete(name);
+    if (tools.size) args.push("--tools", [...tools].join(","));
+    else args.push("--no-tools");
+    if (deny.length) args.push("--exclude-tools", deny.join(","), "--no-extensions", "--no-mcp");
     const slashArgs = taskflowSlashArgs(request, workflow);
     const prompt = specInfo
       ? `/tf:${specInfo.name}${slashArgs ? ` ${slashArgs}` : ""}`

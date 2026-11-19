@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, requireNativeCommand, spawnNativeCommand } from "../launch-command.mjs";
-import { digestContext, routeControlError } from "../protocol.mjs";
+import { digestContext, hasToolPolicy, routeControlError } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -154,9 +154,8 @@ function controlIdentity(command = {}) {
 }
 
 function isPolicySupported(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
-  if (tools.length > 0) {
-    return { supported: false, reason: "policy.tools granular filtering cannot be honestly mapped to Claude tool names from a generic list; scope tools with the harness settings instead" };
+  if (hasToolPolicy(policy.tools)) {
+    return { supported: false, reason: "policy.tools granular filtering requires Claude print mode" };
   }
   const maxCost = policy.maxCostUsd;
   if (maxCost != null && (!Number.isFinite(maxCost) || maxCost <= 0)) {

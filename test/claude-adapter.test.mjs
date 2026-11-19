@@ -87,6 +87,22 @@ test("Claude combines a named fast agent with extra directories, instructions, f
     "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
     "--tools", "Read,Glob,Grep", "--strict-mcp-config", "--add-dir", cwd,
   ]);
+  calls.length = 0;
+  const filtered = await adapter.run(request({
+    route: { agent: "reviewer", serviceTier: "fast" },
+    execution: { addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3 },
+    policy: { tools: { allow: ["Read", "Glob"], deny: ["Glob", "Bash"] } },
+  }));
+  assert.equal(filtered.sessionId, "claude-new");
+  assert.deepEqual(calls.slice(0, 3), [["--version"], ["--help"], ["--max-turns"]]);
+  assert.deepEqual(calls[3].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
+  assert.deepEqual(calls[3].slice(5), [
+    "--output-format", "stream-json", "--verbose", "--permission-prompts", "none",
+    "--permission-mode", "plan", "--agent", "reviewer", "--settings", '{"fastMode":true}',
+    "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
+    "--tools", "Read", "--allowedTools", "Read", "--disallowedTools", "Glob,Bash,mcp__*",
+    "--strict-mcp-config", "--add-dir", cwd,
+  ]);
 });
 
 test("Claude rejects maxTurns when its parser does not recognize the flag", async () => {
@@ -413,12 +429,45 @@ test("Claude keeps hostile task text in one argument without a command shell", a
   assert.match(calls[0].args[calls[0].args.indexOf("-p") + 1], /review & whoami \| echo/);
 });
 
-test("Claude policy rejects granular tools", async () => {
+test("Claude policy still rejects legacy tool arrays", async () => {
   const adapter = new ClaudeAdapter({ command: "fake-claude", spawnFn() { return new FakeChild({ stdout: "x" }); } });
   await assert.rejects(
     adapter.run(request({ policy: { write: false, tools: ["Read"] } })),
     (e) => e.details?.kind === "policy" && /tools/.test(e.message),
   );
+});
+
+test("Claude restricts available tools and keeps permission mode independent of tool lists", async () => {
+  const calls = [];
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: streamJsonResult("reviewed") });
+    },
+  });
+  await adapter.run(request({ route: {}, policy: { write: false, tools: { allow: ["Read", "Glob"], deny: ["Glob", "Edit"] } } }));
+  assert.deepEqual(calls[0].slice(2), [
+    "--output-format", "stream-json", "--verbose", "--permission-prompts", "none", "--permission-mode", "plan",
+    "--safe-mode", "--tools", "Read", "--allowedTools", "Read", "--disallowedTools", "Glob,Edit",
+  ]);
+
+  await adapter.run(request({ route: {}, policy: { write: true, tools: { deny: ["Bash"] } } }));
+  assert.deepEqual(calls[1].slice(2), [
+    "--output-format", "stream-json", "--verbose", "--permission-prompts", "none", "--permission-mode", "acceptEdits",
+    "--disallowedTools", "Bash",
+  ]);
+
+  await adapter.run(request({ route: {}, policy: { tools: { allow: [] } } }));
+  assert.deepEqual(calls[2].slice(-3), ["--safe-mode", "--tools", ""]);
+  assert.ok(!calls[2].includes("--allowedTools"));
+  for (const write of [false, true]) {
+    await assert.rejects(
+      adapter.run(request({ policy: { write, tools: { allow: ["Bash"] } } })),
+      (error) => error.details?.kind === "policy" && /preapproves/.test(error.message),
+    );
+  }
+  assert.equal(calls.length, 3);
 });
 
 test("Claude control fails closed as unsupported-control", async () => {

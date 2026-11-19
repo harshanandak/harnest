@@ -16,9 +16,9 @@ import {
 } from "../process.mjs";
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
-import { createGeminiPolicyPreparer } from "./gemini-policy.mjs";
+import { createGeminiPolicyPreparer, geminiTools } from "./gemini-policy.mjs";
 
-export const GEMINI_SUPPORTED_POLICY_HELP = "Gemini runs only with an isolated, native policy prepared before launch. Harnest never uses --yolo, approval-mode yolo, or plan mode. Granular policy.tools, maxCostUsd, persistent session transport, and live controls are not supported.";
+export const GEMINI_SUPPORTED_POLICY_HELP = "Gemini runs with an isolated native policy. policy.tools.allow and policy.tools.deny can narrow its verified native tool set. maxCostUsd, persistent session transport, and live controls are unsupported.";
 
 const MAX_ASSISTANT_CHARS = 1024 * 1024;
 
@@ -46,12 +46,7 @@ function reportProgress(onProgress, event) {
 }
 
 function validatePolicy(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
-  if (tools.length) {
-    throw adapterError(`Gemini policy.tools is unsupported; generic tool names cannot be mapped to native Gemini policy without weakening the request. ${GEMINI_SUPPORTED_POLICY_HELP}`, "policy", {
-      reason: "unsupported-tools",
-    });
-  }
+  geminiTools(policy);
   if (policy.maxCostUsd != null) {
     throw adapterError(`Gemini policy.maxCostUsd is unsupported because Gemini CLI exposes no per-run native cost ceiling. ${GEMINI_SUPPORTED_POLICY_HELP}`, "policy", {
       reason: "unsupported-budget",

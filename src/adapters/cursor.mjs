@@ -4,7 +4,7 @@ import { validateAdapterExecution } from "../execution-controls.mjs";
 import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, hasToolPolicy, normalizePolicyControls } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -16,7 +16,7 @@ import {
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
 
-export const CURSOR_SUPPORTED_POLICY_HELP = "cursor-agent print mode has no per-tool CLI filter; only policy.write with empty tools and no maxCostUsd can be honestly supported without silently weakening policy. Read-only maps to --mode ask; write maps to default agent mode with --force.";
+export const CURSOR_SUPPORTED_POLICY_HELP = "Cursor print mode supports policy.mode=plan and policy.sandbox=true. Read-only defaults to --mode ask. Approved write work uses --force only in agent mode. Granular tools, budgets, and disabling the sandbox are unsupported.";
 
 function adapterError(message, kind, details = {}) {
   const error = new Error(message);
@@ -39,9 +39,10 @@ function reportProgress(onProgress, event) {
 }
 
 function isPolicySupported(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
+  const { tools, sandbox } = normalizePolicyControls(policy);
   const maxCost = policy.maxCostUsd;
-  if (tools.length > 0) return { supported: false, reason: "policy.tools granular filtering is not supported by cursor-agent print mode; no per-tool CLI flag exists" };
+  if (hasToolPolicy(tools)) return { supported: false, reason: "policy.tools granular filtering is not supported by cursor-agent print mode; no per-tool CLI flag exists" };
+  if (sandbox === false) return { supported: false, reason: "policy.sandbox=false could disable isolation required by Cursor configuration; omit the field to inherit it" };
   if (maxCost != null) return { supported: false, reason: "policy.maxCostUsd budget enforcement is not supported by cursor-agent CLI" };
   return { supported: true };
 }
@@ -98,16 +99,21 @@ function buildArgs(request, launchArgs) {
   const sessionId = request.execution?.sessionId;
   if (sessionId) args.push("--resume", String(sessionId));
   args.push("--trust", "-p", "--output-format", "stream-json", "--stream-partial-output");
-  if (!policy.write) {
-    args.push("--mode", "ask");
-  } else {
-    args.push("--force");
-  }
+  args.push(...cursorPolicyFlags(policy));
   if (model) args.push("--model", model);
   args.push("--workspace", request.cwd);
   for (const dir of request.execution?.addDirs ?? []) args.push("--add-dir", dir);
   args.push(promptFor(request));
   return args;
+}
+
+function cursorPolicyFlags(policy) {
+  const mode = policy.mode ?? (policy.write ? "agent" : "ask");
+  const flags = mode === "agent" ? [] : ["--mode", mode];
+  // Force can approve commands that Cursor would otherwise reject outside its sandbox.
+  if (policy.sandbox === true) flags.push("--sandbox", "enabled");
+  else if (mode === "agent") flags.push("--force");
+  return flags;
 }
 
 function launchDiagnostics(request) {
@@ -116,12 +122,15 @@ function launchDiagnostics(request) {
   const flags = [];
   if (request.execution?.sessionId) flags.push("--resume");
   flags.push("--trust", "-p", "--output-format", "stream-json", "--stream-partial-output");
-  if (policy.write) flags.push("--force");
-  else flags.push("--mode", "ask");
+  flags.push(...cursorPolicyFlags(policy));
   if (model) flags.push("--model");
   flags.push("--workspace");
   return {
-    effectivePolicy: { write: Boolean(policy.write), mode: policy.write ? "agent" : "ask" },
+    effectivePolicy: {
+      write: Boolean(policy.write) && policy.mode !== "plan",
+      mode: policy.mode ?? (policy.write ? "agent" : "ask"),
+      ...(policy.sandbox === true ? { sandbox: true } : {}),
+    },
     launchFlags: flags,
   };
 }

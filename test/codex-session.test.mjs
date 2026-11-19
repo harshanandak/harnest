@@ -875,6 +875,10 @@ test("policy rejections happen before any process is spawned", async () => {
     (error) => error.details?.kind === "policy" && /tools/.test(error.message),
   );
   await assert.rejects(
+    adapter.run(request({ policy: { write: false, tools: { deny: ["read"] } } })),
+    (error) => error.details?.kind === "policy" && /tools/.test(error.message),
+  );
+  await assert.rejects(
     adapter.run(request({ policy: { write: true, maxCostUsd: 5 } })),
     (error) => error.details?.kind === "policy" && /maxCostUsd/.test(error.message),
   );

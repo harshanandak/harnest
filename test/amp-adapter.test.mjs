@@ -193,6 +193,7 @@ test("Amp rejects unsupported tools, budget, route controls, and session transpo
   unsupportedTransport.execution = { transport: "session" };
   const cases = [
     request({ policy: { write: true, tools: ["read"], maxCostUsd: null } }),
+    request({ policy: { write: true, tools: { deny: ["read"] }, maxCostUsd: null } }),
     request({ policy: { write: true, tools: [], maxCostUsd: 1 } }),
     request({ route: { model: "some-model" } }),
     request({ route: { provider: "amp" } }),

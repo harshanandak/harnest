@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import { EXECUTION_CONTROLS } from "./execution-controls.mjs";
-import { digestContext, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRequest, normalizeRoute, POLICY_FIELDS, stableJson, TARGETS } from "./protocol.mjs";
+import { digestContext, inheritPolicyControls, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRequest, normalizeRoute, POLICY_FIELDS, stableJson, TARGETS } from "./protocol.mjs";
 import { assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
 
 export const GRAPH_TERMINAL = new Set(["completed", "partial", "cancelled"]);
@@ -17,8 +17,7 @@ export const bytes = (value) => Buffer.byteLength(stableJson(value), "utf8");
 export function assertGraphLeaf(request) {
   const { target, route, policy } = request;
   assertAdapterRoute(target, route);
-  assertAdapterPolicy(target, policy);
-  if (["claude", "codex", "cursor", "gemini", "amp", "acp"].includes(target) && policy.tools.length) throw graphError("policy", `${target} does not support granular policy.tools`);
+  assertAdapterPolicy(target, policy, request.execution);
   // Graph nodes are prompt-only. Pi's Taskflow budget is not enforced on this
   // path, and OpenCode has no prompt-only budget enforcement either.
   if (target !== "claude" && policy.maxCostUsd != null) throw graphError("policy", `${target} does not enforce maxCostUsd for prompt-only graph nodes`);
@@ -48,11 +47,13 @@ function policy(input = {}, parent) {
   const aliases = [input.write, input.readOnly === undefined ? undefined : !input.readOnly, input.allowWrites].filter((v) => v !== undefined);
   for (const key of ["write", "readOnly", "allowWrites"]) if (input[key] !== undefined && typeof input[key] !== "boolean") throw graphError("validation", `policy.${key} must be boolean`);
   if (aliases.some((v) => v !== aliases[0])) throw graphError("policy", "contradictory write policy aliases");
-  const result = { write: aliases[0] ?? parent?.write ?? false, tools: input.tools ?? parent?.tools ?? [], maxCostUsd: input.maxCostUsd ?? parent?.maxCostUsd ?? null };
-  if (!Array.isArray(result.tools) || result.tools.some((v) => typeof v !== "string" || !v.trim())) throw graphError("validation", "policy.tools must be an array of tool names");
+  const result = {
+    write: aliases[0] ?? parent?.write ?? false,
+    ...inheritPolicyControls(input, parent, (message) => graphError("policy", message)),
+    maxCostUsd: input.maxCostUsd ?? parent?.maxCostUsd ?? null,
+  };
   if (result.maxCostUsd !== null && (!Number.isFinite(result.maxCostUsd) || result.maxCostUsd <= 0)) throw graphError("validation", "policy.maxCostUsd must be positive");
   if (parent && result.write && !parent.write) throw graphError("policy", "node cannot escalate graph write policy");
-  if (parent?.tools.length && (!result.tools.length || result.tools.some((tool) => !parent.tools.includes(tool)))) throw graphError("policy", "node cannot widen allowed tools");
   if (parent?.maxCostUsd != null && result.maxCostUsd > parent.maxCostUsd) throw graphError("policy", "node cannot increase cost ceiling");
   return result;
 }
@@ -120,12 +121,14 @@ export async function normalizeGraph(input) {
     if (nodeTimeoutMs !== undefined && (!Number.isInteger(nodeTimeoutMs) || nodeTimeoutMs < 1 || nodeTimeoutMs > MAX_TIMEOUT_MS)) throw graphError("validation", `node ${id} execution.timeoutMs must be an integer between 1 and ${MAX_TIMEOUT_MS}`);
     if (nativeExecution.sessionId !== undefined && typeof nativeExecution.sessionId !== "string") throw graphError("validation", `node ${id} execution.sessionId must be a string`);
     normalizeRoute(node.route ?? {}, "node.route");
+    const nodePolicy = policy(node.policy, rootPolicy);
+    const defaultTarget = nodePolicy.mode !== undefined || nodePolicy.sandbox !== undefined ? "cursor" : "pi";
     const request = normalizeRequest({
-      requestId: childIdFor(graphIdFor(requestId), id, 1), target: node.target === "auto" ? "pi" : node.target, task: node.task,
+      requestId: childIdFor(graphIdFor(requestId), id, 1), target: node.target === "auto" ? defaultTarget : node.target, task: node.task,
       cwd: node.cwd === undefined ? cwd : await directory(node.cwd),
       context: mergeData(context, object(node.context ?? {}, "node.context")),
       metadata: mergeData(metadata, object(node.metadata ?? {}, "node.metadata")),
-      policy: policy(node.policy, rootPolicy), route: node.route ?? {},
+      policy: nodePolicy, route: node.route ?? {},
       execution: {
         timeoutMs: nodeTimeoutMs,
         ...(node.target === "auto" ? {} : nativeExecution),

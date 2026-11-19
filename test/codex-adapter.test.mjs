@@ -645,6 +645,10 @@ test("Codex policy rejects granular tools and budgets", async () => {
     adapter.run(request({ policy: { write: true, maxCostUsd: 5 } })),
     (e) => e.details?.kind === "policy" && /maxCostUsd/.test(e.message),
   );
+  await assert.rejects(
+    adapter.run(request({ policy: { tools: { deny: ["Read"] } } })),
+    (error) => error.details?.kind === "policy" && /tools/.test(error.message),
+  );
 });
 
 test("Codex control fails closed as unsupported-control", async () => {

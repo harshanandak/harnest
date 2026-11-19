@@ -10,6 +10,7 @@ import { inspectDynamicInvocation } from "../src/dynamic-inspect.mjs";
 import { completionWait, DynamicWorkflowRunner } from "../src/dynamic-runner.mjs";
 import { invocationFingerprint, normalizeAgentOptions, normalizeDynamicSpec, runIdFor } from "../src/dynamic-protocol.mjs";
 import { dynamicToolDefinitions } from "../src/dynamic-tools.mjs";
+import { createRouteResolver } from "../src/routing.mjs";
 import * as fixtureEngine from "../scripts/fixtures/dynamic-runner-engine.mjs";
 import * as realEngine from "../src/dynamic-engine.mjs";
 
@@ -295,6 +296,32 @@ test("automatic dynamic routing accepts a variant-only Amp route", async (t) => 
   const result = await f.runner.start(f.spec([call("Amp", { target: "auto" })], { target: "auto", route: {}, policy: { write: true } }));
   assert.equal(result.state, "completed", JSON.stringify(result.error));
   assert.deepEqual(seen, [{ variant: "low" }]);
+});
+
+test("automatic dynamic validation accepts a Claude tool allow list and execution rejects incompatible routes", async (t) => {
+  const routeResolver = createRouteResolver({
+    config: { routing: { global: { candidates: [{ id: "pi-only", target: "pi", route: { model: "fixture/model" } }] } } },
+    env: {},
+    userPolicy: {},
+  });
+  const f = await fixture(t, async () => assert.fail("incompatible routes must not launch an agent"), { companion: { routeResolver } });
+  const dispatched = [];
+  f.companion.start = async (request) => { dispatched.push(request); assert.fail("incompatible routes must not dispatch"); };
+  const workflow = f.spec([call("Review the change")], {
+    target: "auto", route: {}, policy: { tools: { allow: ["Read"] } },
+  });
+  const validate = dynamicToolDefinitions(f.runner).find(({ name }) => name === "handoff_dynamic_validate");
+  const validation = await validate.run(validate.inputSchema.parse({ workflow }));
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.policy.tools, { allow: ["Read"] });
+
+  const result = await f.runner.start(workflow);
+  assert.equal(result.state, "partial");
+  assert.equal(result.invocations.length, 1);
+  assert.equal(result.invocations[0].state, "failed");
+  assert.equal(result.invocations[0].error.details.kind, "policy");
+  assert.match(result.invocations[0].error.message, /Pi does not support granular policy\.tools/);
+  assert.deepEqual(dispatched, []);
 });
 
 test("dynamic resume refuses an ACP call whose owned-process cleanup is unverified", async (t) => {
@@ -1525,6 +1552,61 @@ test("dynamic children default to session transport for interactive harnesses", 
   const rooted = await f.runner.start(f.spec([call("rooted", { target: "claude" })], { requestId: "transport-root", execution: { transport: "oneshot" } }));
   assert.equal(rooted.state, "completed");
   assert.deepEqual(boundary, [{ target: "claude", transport: "oneshot" }]);
+});
+
+for (const [name, options, target] of [
+  ["Cursor plan mode", { policy: { mode: "plan" } }, "cursor"],
+  ["Cursor sandbox", { target: "cursor", policy: { sandbox: true } }, "cursor"],
+  ["Claude tool filters", { target: "claude", policy: { tools: { allow: ["Read"], deny: ["Bash"] } } }, "claude"],
+  ["automatically routed Claude tool filters", { target: "auto", policy: { tools: { allow: ["Read"] } } }, "claude"],
+]) {
+  test(`dynamic children use oneshot for ${name}`, async (t) => {
+    const routed = [];
+    const launched = [];
+    const f = await fixture(t, async (request) => {
+      launched.push({ target: request.target, transport: request.execution.transport, policy: request.policy });
+      return { result: { finalText: "reviewed" } };
+    }, {
+      runner: { engine: realEngine },
+      companion: { routeResolver: async (request) => {
+        routed.push(request.execution.transport);
+        return options.target === "auto" ? { ...request, target } : request;
+      } },
+    });
+    const source = `return (await agent("Review this", ${JSON.stringify(options)})).finalText;`;
+    const result = await f.runner.start(f.spec(source));
+
+    assert.deepEqual(routed, ["oneshot"]);
+    assert.equal(result.state, "completed");
+    assert.equal(result.output, "reviewed");
+    assert.deepEqual(launched, [{
+      target, transport: "oneshot", policy: { write: false, tools: [], maxCostUsd: null, ...options.policy },
+    }]);
+  });
+}
+
+test("dynamic children reject explicit session transport for print-only policy before routing", async (t) => {
+  const routed = [];
+  const launched = [];
+  const f = await fixture(t, async (request) => {
+    launched.push(request.target);
+    return { result: { finalText: "reviewed" } };
+  }, { companion: { routeResolver: async (request) => {
+    routed.push(request.target);
+    return request;
+  } } });
+  const execution = { transport: "session" };
+  const result = await f.runner.start(f.spec([
+    call("cursor", { target: "cursor", policy: { mode: "plan" }, execution }),
+    call("claude", { target: "claude", policy: { tools: { deny: [] } }, execution }),
+  ]));
+
+  assert.equal(result.state, "partial");
+  assert.deepEqual(result.invocations.map(({ state }) => state), ["failed", "failed"]);
+  assert.match(result.invocations[0].error.message, /policy\.mode.*Cursor print mode/);
+  assert.match(result.invocations[1].error.message, /policy\.tools.*Claude print mode/);
+  assert.deepEqual(routed, []);
+  assert.deepEqual(launched, []);
 });
 
 test("restarting a write invocation requires approveWrites and then replays it", { timeout: 120_000 }, async (t) => {

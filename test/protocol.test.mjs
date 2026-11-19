@@ -114,6 +114,31 @@ test("legacy aliases are not silently ignored to read-only", () => {
   assert.equal(withAlias.policy.write, true, "allowWrites:true must not normalize to read-only");
 });
 
+test("explicit tool lists retain their meaning through request normalization", () => {
+  const base = { requestId: "policy-tools", target: "claude", task: "test", cwd: process.cwd() };
+  const tools = { allow: ["Read", "Glob"], deny: ["Glob", "mcp__server__Tool"] };
+  assert.deepEqual(normalizeRequest({ ...base, policy: { tools } }).policy, { write: false, tools, maxCostUsd: null });
+  assert.deepEqual(normalizeRequest({ ...base, policy: { tools: { allow: [] } } }).policy.tools, { allow: [] });
+  for (const invalidTools of [{}, { allowed: ["Read"] }, { deny: null }, { allow: "Read" }, { deny: ["Bash(*)"] }, { deny: ["Read,Write"] }, { allow: ["--force"] }]) {
+    assert.throws(() => normalizeRequest({ ...base, policy: { tools: invalidTools } }), /policy\.tools/);
+  }
+});
+
+test("Cursor policy controls have strict shapes and reject other targets or session transport", () => {
+  const base = { requestId: "cursor-controls", target: "cursor", task: "test", cwd: process.cwd() };
+  assert.deepEqual(normalizeRequest({ ...base, policy: { readOnly: true, mode: "plan", sandbox: true } }).policy, {
+    write: false, tools: [], mode: "plan", sandbox: true, maxCostUsd: null,
+  });
+  assert.throws(() => normalizeRequest({ ...base, policy: { mode: "agent" } }), /policy\.mode must be plan/);
+  assert.throws(() => normalizeRequest({ ...base, policy: { sandbox: "enabled" } }), /policy\.sandbox must be a boolean/);
+  for (const policy of [{ mode: "plan" }, { sandbox: true }]) {
+    for (const target of ["claude", "codex", "pi", "opencode", "gemini", "amp", "acp"]) {
+      assert.throws(() => normalizeRequest({ ...base, target, policy }), /only by Cursor print mode/);
+    }
+    assert.throws(() => normalizeRequest({ ...base, execution: { transport: "session" }, policy }), /only by Cursor print mode/);
+  }
+});
+
 test("normalization rejects unsupported route and policy keys with the accepted contract", () => {
   const base = { requestId: "strict-request-fields", target: "pi", task: "test", cwd: process.cwd() };
   assert.throws(
@@ -122,7 +147,7 @@ test("normalization rejects unsupported route and policy keys with the accepted 
   );
   assert.throws(
     () => normalizeRequest({ ...base, policy: { permissions: "write" } }),
-    /policy\.permissions is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd/,
+    /policy\.permissions is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd, mode, sandbox/,
   );
 });
 

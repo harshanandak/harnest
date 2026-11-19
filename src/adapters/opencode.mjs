@@ -3,10 +3,11 @@
 // Taskflow packages installed. The core is the same taskflow_run
 // implementation and lets this adapter supply the injected executable/spawn
 // seam required by the companion contract.
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, normalizePolicyControls } from "../protocol.mjs";
 import {
   ProcessError,
   boundedProviderText,
@@ -26,6 +27,7 @@ import { OpenCodeControl } from "./opencode-control.mjs";
 import { assertNoClaudeRoute, assertNoClaudeWorkflow } from "../model-policy.mjs";
 
 const BASELINE_READ_TOOLS = ["read", "grep", "glob", "list"];
+const SCOPED_V1_VERSION = "1.18.18";
 const TOOL_ALIASES = { find: "glob", ls: "list" };
 const MAX_PROTOCOL_TEXT_CHARS = 1024 * 1024;
 const MAX_FINAL_TEXT_CHARS = 64_000;
@@ -72,7 +74,7 @@ function observeEventSummary(state, event) {
   if (state.eventSummary.types.length > 20) state.eventSummary.types.shift();
 }
 
-function policyConfig(policy = {}, inlineConfig) {
+function policyConfig(policy = {}, inlineConfig, scopedAgent) {
   let base = {};
   if (inlineConfig) {
     try {
@@ -83,11 +85,19 @@ function policyConfig(policy = {}, inlineConfig) {
   }
   const allowed = new Set(BASELINE_READ_TOOLS);
   if (policy.write) {
-    for (const tool of policy.tools || []) allowed.add(TOOL_ALIASES[tool] || tool);
+    for (const tool of Array.isArray(policy.tools) ? policy.tools : []) allowed.add(TOOL_ALIASES[tool] || tool);
+  }
+  const denied = policy.tools?.deny ?? [];
+  for (const tool of denied) allowed.delete(tool);
+  const denyRules = denied.map((tool) => [tool, "deny"]);
+  const permission = Object.fromEntries([["*", "deny"], ...[...allowed].map((tool) => [tool, "allow"]), ...denyRules]);
+  if (scopedAgent) {
+    // V1 applies agent rules last. Add only denies at that layer.
+    base.agent = { ...base.agent, [scopedAgent]: { mode: "primary", permission: Object.fromEntries(denyRules) } };
   }
   return JSON.stringify({
     ...base,
-    permission: Object.fromEntries([["*", "deny"], ...[...allowed].map((tool) => [tool, "allow"])]),
+    permission,
   });
 }
 
@@ -249,7 +259,7 @@ function resolvedVariant(route, thinking, variant) {
   return undefined;
 }
 
-function buildArgs(request, { model, agent, thinking, variant, sessionId, prompt, serverUrl, harnessVersion } = {}) {
+function buildArgs(request, { model, agent, thinking, variant, sessionId, prompt, serverUrl, harnessVersion, scopedAgent } = {}) {
   const route = request.route || {};
   const version = harnessVersion === "v2" ? "v2" : "v1";
   const args = ["run"];
@@ -264,7 +274,7 @@ function buildArgs(request, { model, agent, thinking, variant, sessionId, prompt
   const effectiveVariant = resolvedVariant(route, thinking, variant);
   args.push("--model", version === "v2" && effectiveVariant ? `${effectiveModel}#${effectiveVariant}` : effectiveModel);
   const effectiveAgent = route.agent || agent;
-  if (effectiveAgent && route.agent) args.push("--agent", String(effectiveAgent));
+  if (scopedAgent || (effectiveAgent && route.agent)) args.push("--agent", scopedAgent ?? String(effectiveAgent));
   if (version === "v1" && effectiveVariant) args.push("--variant", effectiveVariant);
   else if (route.thinking === true) args.push("--thinking");
   if (sessionId) args.push("--session", sessionId);
@@ -523,6 +533,30 @@ export class OpenCodeAdapter {
     if (!resolvedModel(request.route, request.route?.model)) {
       throw new TypeError("OpenCode handoff requires an explicit route.model");
     }
+    const { tools } = normalizePolicyControls(request.policy || {});
+    const { allow, deny = [] } = tools;
+    if (allow !== undefined) throw adapterError("OpenCode supports policy.tools.deny only for explicit tool policies", "policy");
+    if (deny.some((name) => !BASELINE_READ_TOOLS.includes(name))) {
+      throw adapterError("OpenCode policy.tools.deny accepts only exact default tool names: read, grep, glob, list", "policy");
+    }
+    let scopedAgent;
+    if (deny.length) {
+      if (harnessVersion !== "v1" || this.options.serverUrl || request.route?.serverUrl || request.route?.agent
+        || request.execution?.sessionId || request.workflow != null) {
+        throw adapterError("OpenCode policy.tools.deny requires a fresh local V1 run with its default agent and no Taskflow", "policy");
+      }
+      const version = await runProcess(this.launch.command, [...(this.launch.args || []), "--version"], {
+        cwd: request.cwd,
+        env: openCodeEnvironment(harnessVersion, mergeProcessEnv(this.env)),
+        spawnFn: this.spawnFn || spawnNativeCommand,
+        signal,
+        timeoutMs: Math.min(request.execution?.timeoutMs ?? 10_000, 10_000),
+      });
+      if (version.stdout.trim() !== SCOPED_V1_VERSION) {
+        throw adapterError(`OpenCode policy.tools.deny requires CLI version ${SCOPED_V1_VERSION}`, "policy");
+      }
+      scopedAgent = `harnest-${randomUUID()}`;
+    }
     // A workflow.nodes request must not silently degrade into a plain prompt:
     // node-to-flow translation currently lives in Pi, so fail before any
     // process or control server starts.
@@ -546,6 +580,7 @@ export class OpenCodeAdapter {
       eventSummary: { count: 0, types: [] },
       eventTypes: new Set(),
       lastFailure: null,
+      scopedAgent,
     };
     const graphNode = Boolean(request.context?.graph?.graphId);
     // Graph nodes attach to the OpenCode background service by default, so each
@@ -650,11 +685,12 @@ export class OpenCodeAdapter {
       prompt,
       serverUrl: this.controlRuntime?.serverUrl,
       harnessVersion: request.route?.harnessVersion,
+      scopedAgent: state.scopedAgent,
     });
     const activeLaunch = request.route?.harnessVersion === "v2" ? this.launchV2 : this.launch;
     const launchArgs = Array.isArray(activeLaunch.args) ? activeLaunch.args : [];
     const env = openCodeEnvironment(request.route?.harnessVersion, mergeProcessEnv(this.env));
-    env.OPENCODE_CONFIG_CONTENT = policyConfig(request.policy, env.OPENCODE_CONFIG_CONTENT);
+    env.OPENCODE_CONFIG_CONTENT = policyConfig(request.policy, env.OPENCODE_CONFIG_CONTENT, state.scopedAgent);
     if (this.controlRuntime?.serverPassword) {
       env.OPENCODE_SERVER_PASSWORD = this.controlRuntime.serverPassword;
       env.OPENCODE_SERVER_USERNAME = this.controlRuntime.serverUsername;
@@ -765,13 +801,15 @@ export class OpenCodeAdapter {
     // rendered root prompt into `task` while also supplying `context` in the
     // same envelope shipped two full copies to every phase process.
     const rootTask = request.task;
+    // Only legacy lists and empty deny policies can reach Taskflow.
+    const tools = Array.isArray(request.policy?.tools) ? request.policy.tools : [];
+    const authorizedTools = new Set(tools);
     const runner = {
       usageAccounting: "available",
       runTask: async (defaultCwd, agents, agentName, task, opts, globalThinking) => {
         const agent = agents.find((candidate) => candidate.name === agentName) || {};
         const phaseTask = `${rootTask}\n\nPhase task:\n${task}`;
         const phaseTools = opts?.tools ?? agent.tools;
-        const authorizedTools = new Set(request.policy?.tools || []);
         const phaseRequest = {
           ...request,
           cwd: opts?.cwd ?? defaultCwd ?? request.cwd,
@@ -779,7 +817,7 @@ export class OpenCodeAdapter {
             ...request.policy,
             tools: phaseTools
               ? phaseTools.filter((tool) => authorizedTools.has(tool))
-              : request.policy?.tools || [],
+              : tools,
           },
         };
         try {

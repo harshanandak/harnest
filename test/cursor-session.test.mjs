@@ -720,6 +720,9 @@ test("policy rejections happen before any transport is started", async () => {
   let created = 0;
   adapter.createTransport = () => { created += 1; return wireHandshake(new FakeTransport()); };
   await assert.rejects(adapter.run(baseRequest({ policy: { tools: ["read"] } })), (error) => error.details?.kind === "policy");
+  for (const policy of [{ tools: { deny: ["Read"] } }, { mode: "plan" }, { sandbox: true }]) {
+    await assert.rejects(adapter.run(baseRequest({ policy })), (error) => error.details?.kind === "policy");
+  }
   await assert.rejects(adapter.run(baseRequest({ policy: { write: true, maxCostUsd: 5 } })), (error) => error.details?.kind === "policy");
   await assert.rejects(adapter.run(baseRequest({ route: { model: "gpt-5.4", thinking: "high" } })), (error) => error.details?.kind === "policy");
   assert.equal(created, 0);

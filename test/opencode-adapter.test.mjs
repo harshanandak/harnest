@@ -252,6 +252,67 @@ test("runs a read-only OpenCode handoff and extracts identifiers, output, and us
   });
 });
 
+test("OpenCode V1 applies explicit denies in the selected fresh agent with an attachment", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-opencode-deny-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = join(root, "input.txt");
+  await writeFile(file, "fixture file");
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args, options) {
+      calls.push({ args, options });
+      if (args[0] === "--version") return new FakeChild(["1.18.18"]);
+      if (args.at(-1) === "--help") return new FakeChild(["  --file <file>"]);
+      assert.equal(readFileSync(args.at(-1), "utf8"), "fixture file");
+      return new FakeChild(streamLines());
+    },
+  });
+  const req = request({
+    route: { model: "openai/gpt-test" },
+    execution: { attachments: [{ type: "file", path: file }] },
+    policy: { write: true, tools: { deny: ["read", "list"] } },
+  });
+  await adapter.run(req);
+  assert.deepEqual(calls[0].args, ["--version"]);
+  assert.deepEqual(calls[1].args, ["run", "--help"]);
+  const { args, options } = calls[2];
+  const { agent, permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
+  const [scopedAgent] = Object.keys(agent);
+  assert.deepEqual(args, ["run", args[1], "--format", "json", "--pure", "--dir", req.cwd, "--model", "openai/gpt-test", "--agent", scopedAgent, "--file", args.at(-1)]);
+  assert.equal(basename(args.at(-1)), "0-input.txt");
+  assert.deepEqual(permission, { "*": "deny", grep: "allow", glob: "allow", read: "deny", list: "deny" });
+  assert.deepEqual(agent[scopedAgent], { mode: "primary", permission: { read: "deny", list: "deny" } });
+  assert.equal(calls.length, 3);
+});
+
+test("OpenCode rejects denies it cannot enforce before running a prompt", async () => {
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild(["2.2.1"]);
+    },
+  });
+  const route = { model: "openai/gpt-test" };
+  const policy = { tools: { deny: ["read"] } };
+  for (const [overrides, reason] of [
+    [{ policy: { tools: { allow: ["read"] } } }, /deny only/],
+    [{ policy: { tools: { deny: ["unknown"] } } }, /exact default/],
+    [{ route: { ...route, harnessVersion: "v2" } }, /fresh local V1/],
+    [{ route: { ...route, serverUrl: "http://127.0.0.1:4096" } }, /fresh local V1/],
+    [{ route: { ...route, agent: "reviewer" } }, /fresh local V1/],
+    [{ execution: { sessionId: "previous" } }, /fresh local V1/],
+    [{ execution: { sessionId: "previous", sessionAction: "fork" } }, /fresh local V1/],
+    [{ workflow: { spec: {} } }, /fresh local V1/],
+    [{}, /version 1\.18\.18/],
+  ]) {
+    await assert.rejects(adapter.run(request({ route, policy, ...overrides })), (error) => error.details?.kind === "policy" && reason.test(error.message));
+  }
+  assert.deepEqual(calls, [["--version"]]);
+});
+
 test("foldOpenCodeEvent reports only the usage keys an event actually supplied", () => {
   const state = {
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
@@ -386,6 +447,40 @@ test("executes a FlowSpec through the pinned taskflow handler with fake phase pr
     cacheWriteTokens: 2,
     costUsd: 0.02,
   });
+});
+
+test("OpenCode Taskflow treats an empty deny policy as an empty phase tool list", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-empty-deny-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args, options) {
+      calls.push({ args, options });
+      return new FakeChild(streamLines(`phase-session-${calls.length}`, "phase result"));
+    },
+  });
+  const output = await adapter.run(request({
+    cwd,
+    route: { model: "openai/gpt-test" },
+    policy: { write: true, tools: { deny: [] } },
+    workflow: { spec: {
+      name: "empty-deny-flow",
+      phases: [
+        { id: "inspect", type: "agent", task: "Inspect.", tools: ["read", "write"] },
+        { id: "final", type: "agent", task: "Return the result.", from: ["inspect"], final: true },
+      ],
+    } },
+  }));
+
+  assert.equal(output.result.finalText, "phase result");
+  assert.equal(calls.length, 2);
+  for (const { args, options } of calls) {
+    assert.match(args[1], /"policy":\{"write":true,"tools":\[\]/);
+    const { permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
+    assert.equal(permission.read, "allow");
+    assert.equal(permission.write, undefined);
+  }
 });
 
 test("a workflow phase carries the shared context once with identifiers after the stable prefix", async (t) => {

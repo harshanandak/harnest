@@ -381,11 +381,10 @@ export class DynamicWorkflowRunner {
   }
 
   #probeLeaf(spec) {
-    if (!spec.target && !Object.keys(spec.route).length) return;
-    const requested = spec.target === "auto" || spec.target === null ? "pi" : spec.target;
+    if (!spec.target || spec.target === "auto") return;
     const request = normalizeRequest({
       requestId: `${runIdFor(spec.requestId)}-probe`,
-      target: requested,
+      target: spec.target,
       task: "validate",
       cwd: spec.cwd,
       context: spec.context,
@@ -1709,7 +1708,17 @@ export class DynamicWorkflowRunner {
     const spec = active.spec;
     const requested = effective.target ?? spec.target;
     const automatic = requested === null || requested === "auto";
-    const baseTarget = automatic ? "pi" : requested;
+    const { policy } = effective;
+    const cursorPrintMode = policy.mode !== undefined || policy.sandbox !== undefined;
+    const baseTarget = automatic ? (cursorPrintMode ? "cursor" : "pi") : requested;
+    // Automatic routing can select Claude for explicit tool filters.
+    const claudeToolFilters = (automatic || baseTarget === "claude") && !Array.isArray(policy.tools);
+    let transport = effective.execution.transport;
+    if (transport === "session" && claudeToolFilters) {
+      throw dynamicError("policy", "policy.tools requires Claude print mode (execution.transport: oneshot)");
+    }
+    if (transport == null && (cursorPrintMode || claudeToolFilters)) transport = "oneshot";
+    if (transport == null && !automatic && SESSION_TARGETS.has(baseTarget)) transport = "session";
     const remaining = Math.max(1, (active.record.deadlineAt ?? this.clock() + 60_000) - this.clock());
     const timeoutMs = Math.max(1, Math.min(effective.execution.timeoutMs ?? remaining, remaining));
     const context = { ...effective.context, dynamic: {
@@ -1723,12 +1732,18 @@ export class DynamicWorkflowRunner {
       cwd: effective.cwd,
       context,
       metadata: effective.metadata,
-      policy: effective.policy,
+      policy,
       route: effective.route,
-      execution: { background: true, timeoutMs, ...(effective.execution?.transport ? { transport: effective.execution.transport } : {}) },
+      execution: { background: true, timeoutMs, ...(transport ? { transport } : {}) },
     });
     if (automatic) base.metadata = { ...base.metadata, routing: { ...base.metadata.routing, mode: "auto" } };
-    const resolved = normalizeRequest(await this.companion.routeResolver(base));
+    const routed = await this.companion.routeResolver(base);
+    // An automatic call with no transport pin or print-only policy depends on the selected target.
+    transport ??= SESSION_TARGETS.has(routed.target) ? "session" : undefined;
+    const resolved = normalizeRequest({
+      ...routed,
+      execution: { ...routed.execution, ...(transport ? { transport } : {}) },
+    });
     if (resolved.requestId !== base.requestId || resolved.contextDigest !== base.contextDigest || resolved.task !== base.task) throw dynamicError("identity", "route resolver changed request identity");
     if (resolved.cwd !== base.cwd) throw dynamicError("validation", "route resolver changed the prevalidated cwd");
     if (resolved.execution.timeoutMs !== base.execution.timeoutMs) throw dynamicError("validation", "route resolver changed the requested timeout");
@@ -1739,15 +1754,6 @@ export class DynamicWorkflowRunner {
     assertDynamicLeaf(resolved);
     if (resolved.workflow != null) throw dynamicError("policy", "route resolver added a workflow");
     if (stablePolicy(resolved.policy) !== stablePolicy(base.policy)) throw dynamicError("policy", "route resolver changed the call policy");
-    // Session transport: dynamic children targeting an interactive-capable
-    // harness request the session mode unless the call pinned one-shot. The
-    // core selects/pools the native session; the runner only carries the flag.
-    const requestedTransport = effective.execution?.transport;
-    const transport = requestedTransport ?? (SESSION_TARGETS.has(resolved.target) ? "session" : null);
-    if (transport) {
-      base.execution = { ...base.execution, transport };
-      resolved.execution = { ...resolved.execution, transport };
-    }
     return { base: resolved, target: resolved.target, route: resolved.route };
   }
 

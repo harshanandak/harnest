@@ -90,6 +90,17 @@ Set these fields on `request.route` for the named target.
 
 These Codex and Claude settings require one-shot execution. In a JavaScript workflow, set `execution.transport` to `"oneshot"` on the agent call. Codex route controls require CLI 0.170.0 or later. Claude fast mode requires Claude Code 2.1.219 or later so Harnest can check its reported state.
 
+## Narrow the tool policy
+
+`policy.tools` accepts an object with `allow`, `deny`, or both. Use exact native tool names. Deny wins when both lists name a tool. An empty allow list selects no tools on targets that support it. The existing array form keeps its previous behavior.
+
+For example, a read-only Gemini handoff can use `"policy": { "write": false, "tools": { "allow": ["read_file", "glob"], "deny": ["glob"] } }` to keep only `read_file`. Claude print also supports both lists, with `allow` limited to `Read`, `Glob`, and `Grep`. Pi and fresh local OpenCode V1 runs accept `deny` only. See the [per-target tool names and limits](supported-agents.md#per-run-policy-controls).
+
+Use `"policy": { "write": false, "mode": "plan", "sandbox": true }` with Cursor print to request read-only planning and enable its shell sandbox. Plan mode takes precedence over agent mode even with approved write access. Sandbox can also be enabled without selecting plan mode. Omit `sandbox` to inherit Cursor's settings. Harnest rejects `sandbox: false` because it could turn off configured isolation.
+
+These controls preserve the existing write authorization and approval checks. Unsupported targets, transports, and CLI versions fail before inference.
+JavaScript workflows default to `execution.transport: "oneshot"` for these Claude and Cursor controls. Automatic validation checks the policy shape. The runner checks whether the resolved target can enforce it before dispatch.
+
 ## Generic ACP handoff
 
 The generic route is selected by both `target: "acp"` and the trusted registration ID in `route.agent`:

@@ -3,6 +3,7 @@ import { MAX_ADD_DIRS, MAX_ATTACHMENTS, MAX_INSTRUCTIONS_BYTES } from "./executi
 import {
   CODEX_PROFILE_PATTERN,
   CODEX_SERVICE_TIERS,
+  EXACT_TOOL_NAME,
   MAX_ROUTE_OPTIONS,
   MAX_ROUTE_OPTION_ID,
   MAX_ROUTE_OPTION_VALUE,
@@ -13,6 +14,7 @@ const target = z.enum(["auto", "pi", "claude", "codex", "opencode", "cursor", "g
 const nodeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
 const object = z.record(z.string(), z.unknown());
 const nonEmpty = z.string().trim().min(1);
+const toolNames = z.array(z.string().regex(EXACT_TOOL_NAME));
 
 export const routeInputSchema = z.object({
   provider: nonEmpty.optional(),
@@ -46,7 +48,12 @@ export const policyInputSchema = z.object({
   write: z.boolean().describe("Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true.").optional(),
   readOnly: z.boolean().describe("Legacy alias for !write; must not contradict write or allowWrites.").optional(),
   allowWrites: z.boolean().describe("Legacy alias for write; must not contradict write or readOnly.").optional(),
-  tools: z.array(nonEmpty).optional(),
+  tools: z.union([
+    z.array(nonEmpty),
+    z.object({ allow: toolNames.optional(), deny: toolNames.optional() }).strict(),
+  ]).describe("Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi and local OpenCode V1 support deny only.").optional(),
+  mode: z.literal("plan").describe("Cursor print only. Selects read-only plan mode regardless of write authorization.").optional(),
+  sandbox: z.boolean().describe("Cursor print only. True enables native isolation. False is rejected.").optional(),
   maxCostUsd: z.number().nonnegative().optional(),
 }).strict();
 
