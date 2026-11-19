@@ -10,11 +10,10 @@ import { installIntegration, openCodeConfigDir } from "./install-opencode-integr
 import { installPiIntegration } from "./install-pi-integration.mjs";
 import { manualBridgeConfig, manualBridgeHosts, presetBridgeHosts } from "./preset-lead-hosts.mjs";
 
-const bridgeHosts = ["gemini", "amp", ...Object.keys(presetBridgeHosts)];
+const bridgeHosts = ["amp", ...Object.keys(presetBridgeHosts)];
 export const namedHosts = ["claude", "codex", "opencode", "cursor", "pi", ...bridgeHosts, ...manualBridgeHosts];
 
 export function bridgeHostConfig(host, home = homedir(), env = process.env, platform = process.platform) {
-  if (host === "gemini") return { path: join(env.GEMINI_CLI_HOME || home, ".gemini", "settings.json"), key: "mcpServers" };
   if (host === "amp") return { path: join(env.XDG_CONFIG_HOME || join(home, ".config"), "amp", "settings.json"), key: "amp.mcpServers" };
   if (!Object.hasOwn(presetBridgeHosts, host)) return null;
   const preset = presetBridgeHosts[host];
@@ -25,12 +24,11 @@ export async function installBridgeHost(host, options = {}) {
   const { path, key, format } = bridgeHostConfig(host, options.home, options.env, options.platform);
   const bridge = bridgeEntry();
   const entry = presetBridgeHosts[host]?.entry?.(bridge) ?? bridge;
-  if (host === "gemini") entry.trust = false;
   return installJsonServer(path, key, entry, { format });
 }
 
 const setupUsage = "Usage: bun run setup " + [...namedHosts, "other"].join("|") +
-  " [--no-autostart] [--project DIR for claude/cursor | --http-config FILE for other]\n" +
+  " [--no-autostart] [--project DIR for cursor | --http-config FILE for other]\n" +
   "       bun run setup remove <host>\n" +
   "Removal supports cursor (user config), " + bridgeHosts.join(", ") + ".\n" +
   "Manual MCP configuration: " + manualBridgeHosts.join(", ") + ".";
@@ -65,7 +63,7 @@ async function setup(args) {
   }
   if (!namedHosts.includes(host) && host !== "other") throw new Error(setupUsage);
   const positional = flags.filter((flag) => flag !== "--no-autostart");
-  const project = ["claude", "cursor"].includes(host) && positional[0] === "--project" &&
+  const project = host === "cursor" && positional[0] === "--project" &&
     positional.length === 2 && positional[1] && !positional[1].startsWith("--") ? resolve(positional[1]) : null;
   const http = host === "other" && positional[0] === "--http-config" && positional.length === 2 && !positional[1].startsWith("--");
   if (positional.length && !project && !http) throw new Error("Unsupported setup option for " + host);
@@ -86,7 +84,7 @@ async function setup(args) {
   switch (host) {
     case "claude":
     case "codex":
-      await installPluginHost(host, { project: project ?? process.cwd() });
+      await installPluginHost(host);
       break;
     case "opencode":
       result = await installIntegration(openCodeConfigDir(), { prepareDaemon });
@@ -109,7 +107,6 @@ async function setup(args) {
       break;
   }
   if (result) console.log(JSON.stringify(result, null, 2));
-  if (host === "gemini") console.log("Legacy Gemini target. Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the antigravity ACP preset.");
   if (host === "amp") console.log("If Amp requests approval, run: amp mcp approve harnest");
   if (host === "kiro") console.log("In Kiro, run /mcp to check Harnest. For custom agents, enable includeMcpJson to load user-level servers.");
   console.log("Restart or reload the host to use Harnest.");

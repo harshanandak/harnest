@@ -36,7 +36,6 @@ Within each scope, defaults apply first. Matching rules apply in ascending `prio
   "capabilities": {
     "readOnly": true,
     "write": true,
-    "taskflow": true,
     "liveControl": true,
     "maxContextTokens": 256000
   },
@@ -59,13 +58,12 @@ Scores are bounded to 0–10. `health.status: open` rejects the route until nume
   "when": {
     "taskAny": ["security", "audit"],
     "write": false,
-    "hasWorkflow": true,
     "minContextTokens": 10000,
     "metadata": { "risk": "high" }
   },
   "apply": {
     "weights": { "quality": 10, "speed": 1 },
-    "require": { "taskflow": true, "liveControl": true },
+    "require": { "liveControl": true },
     "prefer": { "tags": ["deep"] },
     "avoid": { "providers": ["untrusted-gateway"] },
     "maxCostUsd": 2,
@@ -74,7 +72,7 @@ Scores are bounded to 0–10. `health.status: open` rejects the route until nume
 }
 ```
 
-Supported match facts are bounded: `taskAny`, `taskAll`, target, explicit route provider/model, write policy, workflow presence, session ID, context-token bounds, and exact metadata scalars. There is no request regex, expression language, path lookup, shell, or module import. A lead translates explicit natural-language intent in the prompt into request `metadata.routing`; direct prompt keywords may also match configured rules.
+Supported match facts are bounded: `taskAny`, `taskAll`, target, explicit route provider/model, write policy, session ID, context-token bounds, and exact metadata scalars. There is no request regex, expression language, path lookup, shell, or module import. A lead translates explicit natural-language intent in the prompt into request `metadata.routing`; direct prompt keywords may also match configured rules.
 
 Provider/model matches can propose legacy-route replacements when the request explicitly opts into automatic selection; pinned requests retain their original route:
 
@@ -89,7 +87,7 @@ Provider/model matches can propose legacy-route replacements when the request ex
 
 ## Selection
 
-Candidates are rejected before scoring for: unavailable/open circuit; target mismatch (against a directive target or the request's own target pin); write/read-only incompatibility; Taskflow/live-control requirement; context capacity; budget; deadline; provider requirement; and avoid lists.
+Candidates are rejected before scoring for: unavailable/open circuit; target mismatch (against a directive target or the request's own target pin); write/read-only incompatibility; live-control requirement; context capacity; budget; deadline; provider requirement; and avoid lists.
 
 Survivors score as:
 
@@ -136,7 +134,7 @@ Ties use candidate `priority`, then lexical candidate ID. Explanations contain s
 
 The catalog service caches by harness, provider and working directory, refreshes on demand after expiry, and marks failed/stale discovery. Preview and execution use the same selection code; the decision's `modelFreshness` records mode, requested/resolved model, source and status. Failed or ambiguous discovery retains the requested model with an unverified-latest warning. It never fabricates a newer ID or downgrades to an older release.
 
-`npm run check:models` remains an advisory comparison against the legacy snapshot in `src/model-families.mjs`. Runtime version selection does not depend on that snapshot or a manual refresh command.
+`bun run check:models` remains an advisory comparison against the legacy snapshot in `src/model-families.mjs`. Runtime version selection does not depend on that snapshot or a manual refresh command.
 
 ## Resolver stability
 

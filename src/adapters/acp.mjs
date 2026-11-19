@@ -107,7 +107,7 @@ function assertPolicy(request) {
   if (request?.policy?.maxCostUsd != null) {
     throw adapterError("Generic ACP cannot enforce policy.maxCostUsd", "policy", { field: "policy.maxCostUsd" });
   }
-  if (request?.workflow?.spec != null || request?.workflow?.nodes != null) {
+  if (request?.workflow != null) {
     throw adapterError("Generic ACP cannot execute structured workflows", "policy", { field: "workflow" });
   }
   if (request?.execution?.transport === "session") {

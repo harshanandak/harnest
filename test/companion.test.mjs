@@ -292,7 +292,7 @@ test("foreground handoff returns a parent-visible terminal receipt", async (t) =
   assert.equal(receipt.sessionId, "session-canary");
 });
 
-test("terminal usageSummary survives persistence and a fresh Companion result/trace for all seven targets", async (t) => {
+test("terminal usageSummary survives persistence and a fresh Companion result/trace for all six named targets", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "harnest-usage-flow-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const store = new JobStore(root);
@@ -315,10 +315,6 @@ test("terminal usageSummary survives persistence and a fresh Companion result/tr
     },
     codex: {
       raw: { input_tokens: 12, cached_input_tokens: 8, output_tokens: 4, reasoning_output_tokens: 1 },
-      reported: null,
-    },
-    gemini: {
-      raw: { input_tokens: 12, output_tokens: 4 },
       reported: null,
     },
     amp: {
@@ -350,7 +346,7 @@ test("terminal usageSummary survives persistence and a fresh Companion result/tr
       target,
       task: `run ${target}`,
       cwd: process.cwd(),
-      route: target === "amp" ? { variant: "medium" } : { model: target === "gemini" ? "gemini-fixture" : "fixture-model" },
+      route: target === "amp" ? { variant: "medium" } : { model: "fixture-model" },
       policy: { write: ["opencode", "amp"].includes(target) },
     });
   }
@@ -362,12 +358,12 @@ test("terminal usageSummary survives persistence and a fresh Companion result/tr
   });
   for (const target of Object.keys(fixtures)) {
     const receipt = receipts[target];
-    const expected = ["gemini", "amp"].includes(target)
+    const expected = target === "amp"
       ? null
       : summarizeUsage(target, fixtures[target].raw, { reported: fixtures[target].reported });
     assert.equal(receipt.state, "completed");
     assert.deepEqual(receipt.usageSummary, expected);
-    if (["gemini", "amp"].includes(target)) {
+    if (target === "amp") {
       assert.equal(receipt.usageSummary, null, `${target} stays truthful until its native usage shape is verified`);
     } else {
       assert.notEqual(receipt.usageSummary.cacheReadTokens, null, `${target} must expose a reported cache read`);

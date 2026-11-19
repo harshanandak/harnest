@@ -10,7 +10,7 @@ Install the Harnest plugin, user MCP bridge, and native workers:
 bun run setup codex
 ```
 
-The MCP config and native workers both use `CODEX_HOME` when it is set, otherwise `~/.codex`. Restart Codex and invoke the skill as `$handoff`. Its native workers cover the six external named targets plus the generic `acp_worker`. For Codex-to-Codex handoffs, call the MCP tool directly.
+The MCP config and native workers both use `CODEX_HOME` when it is set, otherwise `~/.codex`. Restart Codex and invoke the skill as `$handoff`. Its native workers cover the five external named targets plus the generic `acp_worker`. For Codex-to-Codex handoffs, call the MCP tool directly.
 
 Setup skips identical worker files and prints a backup path for each customized or retired worker it replaces or removes. Restore any such backup using the single-file command below.
 
@@ -22,7 +22,7 @@ Install the local marketplace and Harnest plugin:
 bun run setup claude
 ```
 
-Add `--project "/absolute/path/to/project"` to migrate old workspace MCP, plugin, or marketplace registrations. Without it, setup checks the current directory for those registrations. Restart Claude Code so its bundled MCP configuration, commands, skill, and worker agents reload.
+Restart Claude Code so its bundled MCP configuration, commands, skill, and worker agents reload.
 
 ## OpenCode
 
@@ -58,19 +58,7 @@ Install the user-level MCP bridge and the selected project's skill, router rule,
 bun run setup cursor --project "/absolute/path/to/project"
 ```
 
-Omit `--project` to use the Harnest checkout. Setup backs up and updates the user MCP entry and any Harnest or Agent Companion registration in the selected project. Restart Cursor. Cursor cloud agents need MCP in their own environment.
-
-## Gemini CLI as a lead client
-
-The native `gemini` target is legacy. Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the `antigravity` ACP preset. See [Google's transition announcement](https://github.com/google-gemini/gemini-cli/discussions/27274).
-
-Install the bridge in the user Gemini settings with `trust: false`:
-
-```sh
-bun run setup gemini
-```
-
-Restart Gemini CLI and verify the connection with `/mcp list`. This lead-client configuration is separate from the stricter Gemini downstream target contract.
+Omit `--project` to use the Harnest checkout. Setup backs up and updates the user MCP entry and any Harnest registration in the selected project. Restart Cursor. Cursor cloud agents need MCP in their own environment.
 
 ## Amp as a lead client
 
@@ -89,19 +77,19 @@ amp mcp doctor
 
 Amp can lead through MCP on a supported host. The downstream `amp` target runs on native Linux/macOS or when the entire Harnest MCP server runs inside WSL.
 
-## Restore an Agent Companion migration
+## Restore a host configuration
 
-Setup prints the migrated registrations and timestamped backup paths. To restore a single configuration file, use:
+Setup prints the backup path for changed configurations. To restore a single configuration file, use:
 
 ```sh
 node scripts/install-host-config.mjs --restore "/absolute/path/to/FILE.bak-harnest-..."
 ```
 
-For OpenCode, use the installer manifest command printed during setup. For a Pi extension file or directory moved out of the auto-loaded extensions directory, move it back to its printed original path. If reverting the entire installation, uninstall the new plugin or remove the newly installed extension before restoring the old registration. Restart the host after restoring and keep backups private.
+For OpenCode, use the installer manifest command printed during setup. For Pi, restore the timestamped file backups. Restart the host after restoring and keep backups private.
 
 ## Remove an MCP registration
 
-Run `bun run setup remove <host>` to disconnect Harnest from any of the nine automatic ACP presets, Gemini CLI, Amp, or Cursor's user config. Setup prints this command when it creates the user config. Run it from the Harnest repository root, with the same config path environment variables you used for setup.
+Run `bun run setup remove <host>` to disconnect Harnest from any of the nine automatic ACP presets, Amp, or Cursor's user config. Setup prints this command when it creates the user config. Run it from the Harnest repository root, with the same config path environment variables you used for setup.
 
 The command saves a private backup before removing the `harnest` MCP entry. It keeps the file, its other settings, and surrounding comments. Restart the host afterward.
 

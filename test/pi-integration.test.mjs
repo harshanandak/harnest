@@ -145,7 +145,7 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"], description: "OpenCode only: v2 or omitted." });
   assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"] });
   const policy = request.properties.policy;
-  assert.deepEqual(Object.keys(policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
+  assert.deepEqual(Object.keys(policy.properties), ["write", "tools", "mode", "sandbox", "maxCostUsd"]);
   const [legacyTools, explicitTools] = policy.properties.tools.anyOf;
   assert.equal(legacyTools.type, "array");
   assert.deepEqual(Object.keys(explicitTools.properties), ["allow", "deny"]);
@@ -161,7 +161,7 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.deepEqual(Object.keys(node.properties.execution.properties), ["timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns"]);
   assert.equal(node.properties.execution.additionalProperties, false);
   assert.equal(node.properties.policy.additionalProperties, false);
-  const readOnlyTargets = ["pi", "cursor", "claude", "codex", "gemini"];
+  const readOnlyTargets = ["pi", "cursor", "claude", "codex"];
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.request.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.candidates.items.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_review").parameters.properties.request.properties.target.enum, readOnlyTargets);

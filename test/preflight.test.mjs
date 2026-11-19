@@ -9,9 +9,9 @@ const routing = { config: { routing: {} }, env: {}, userPolicy: {
   models: { codex: "gpt-6.1-sol" }, subscriptions: { codex: { subsidy: 1 } },
 } };
 
-test("preflight resolves all seven targets with the extended user policy without adapters or job storage", async () => {
-  for (const target of ["pi", "claude", "codex", "opencode", "cursor", "gemini", "amp"]) {
-    const route = target === "amp" ? { variant: "medium" } : { model: target === "gemini" ? "gemini-synthetic" : "synthetic-model" };
+test("preflight resolves all six named targets with the extended user policy without adapters or job storage", async () => {
+  for (const target of ["pi", "claude", "codex", "opencode", "cursor", "amp"]) {
+    const route = target === "amp" ? { variant: "medium" } : { model: "synthetic-model" };
     const result = await preflight({ ...request(target), route }, { routing });
     assert.equal(result.target, target);
     for (const [key, value] of Object.entries(route)) assert.equal(result.route[key], value);

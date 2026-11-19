@@ -62,9 +62,7 @@ test("parses subscription logins and pi provider readiness", async () => {
   assert.equal(detection.codex.quota.headroom, 0.76);
   assert.equal(detection.claude.signal, "none");
   assert.equal(detection.opencode.signal, "none");
-  assert.equal(detection.gemini.signal, "none");
   assert.equal(detection.amp.signal, "none");
-  assert.match(detection.gemini.note, /unknown/);
   assert.match(detection.amp.note, /unknown/);
 });
 

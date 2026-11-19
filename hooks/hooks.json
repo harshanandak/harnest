@@ -2,13 +2,13 @@
   "hooks": {
     "SubagentStart": [
       {
-        "matcher": "opencode-worker|pi-worker|cursor-worker|claude-worker|codex-worker|gemini-worker|amp-worker|acp-worker|workflow-rescue",
+        "matcher": "opencode-worker|pi-worker|cursor-worker|claude-worker|codex-worker|amp-worker|acp-worker|workflow-rescue",
         "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-worker-start.mjs\"" }]
       }
     ],
     "SubagentStop": [
       {
-        "matcher": "opencode-worker|pi-worker|cursor-worker|claude-worker|codex-worker|gemini-worker|amp-worker|acp-worker|workflow-rescue",
+        "matcher": "opencode-worker|pi-worker|cursor-worker|claude-worker|codex-worker|amp-worker|acp-worker|workflow-rescue",
         "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-worker-stop.mjs\"" }]
       }
     ],

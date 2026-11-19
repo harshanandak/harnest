@@ -47,7 +47,7 @@ Set these fields in the `execution` object of a single `handoff_workflow` reques
 
 | Field | How to use it |
 | --- | --- |
-| `addDirs` | Pass up to eight existing, absolute directories to Claude, Codex, Cursor, or Gemini. When write policy is enabled, confirm the scope of any directory outside `cwd` and set `metadata.harnest.writeApproved: true`. With read-only policy, Claude exposes only Read, Glob, and Grep and disables configured MCP servers for this launch. Cursor keeps Ask mode and Gemini keeps its read-tool allowlist. Codex requires write policy because its native flag adds writable roots. |
+| `addDirs` | Pass up to eight existing, absolute directories to Claude, Codex, or Cursor. When write policy is enabled, confirm the scope of any directory outside `cwd` and set `metadata.harnest.writeApproved: true`. With read-only policy, Claude exposes only Read, Glob, and Grep and disables configured MCP servers for this launch. Cursor keeps Ask mode. Codex requires write policy because its native flag adds writable roots. |
 | `attachments` | Pass up to four entries such as `{"type":"image","path":"/absolute/path/to/screenshot.png"}`. Each must be a regular local file at most 256 KiB. Images use PNG, JPEG, GIF, or WebP extensions, and the selected model must support the format. Codex and Pi accept images. OpenCode accepts images and files. ACP requires the agent to advertise image or embedded resource support for the corresponding type. Use a prompt-only handoff. |
 | `instructions` | Append nonempty text up to 8,000 UTF-8 bytes to the system prompt in Claude print mode or Pi RPC. |
 | `sessionAction` | With `sessionId` set, omit this field or use `"resume"` to continue the session. Use `"fork"` with Claude, Codex, OpenCode, or Pi to start a new native session from it. Use a prompt-only handoff and read the new ID from the receipt. |
@@ -75,7 +75,7 @@ Use one normalized policy field and include the guarded-host approval marker aft
 }
 ```
 
-Do not combine contradictory `write`, `readOnly`, and `allowWrites` values. Harnest validates policy before launch. A write-capable retry also needs renewed lead approval.
+A write-capable retry needs renewed lead approval.
 
 ## Native route controls
 
@@ -94,7 +94,7 @@ These Codex and Claude settings require one-shot execution. In a JavaScript work
 
 `policy.tools` accepts an object with `allow`, `deny`, or both. Use exact native tool names. Deny wins when both lists name a tool. An empty allow list selects no tools on targets that support it. The existing array form keeps its previous behavior.
 
-For example, a read-only Gemini handoff can use `"policy": { "write": false, "tools": { "allow": ["read_file", "glob"], "deny": ["glob"] } }` to keep only `read_file`. Claude print also supports both lists, with `allow` limited to `Read`, `Glob`, and `Grep`. Pi accepts `deny` only. OpenCode V2 rejects nonempty tool lists and any explicit allow list. See the [per-target tool names and limits](supported-agents.md#per-run-policy-controls).
+Claude print accepts both lists. For example, `"policy": { "write": false, "tools": { "allow": ["Read", "Glob"], "deny": ["Glob"] } }` keeps only `Read`. The allow list accepts `Read`, `Glob`, and `Grep`. Pi accepts `deny` only. OpenCode V2 rejects nonempty tool lists and any explicit allow list. See the [per-target tool names and limits](supported-agents.md#per-run-policy-controls).
 
 Use `"policy": { "write": false, "mode": "plan", "sandbox": true }` with Cursor print to request read-only planning and enable its shell sandbox. Plan mode takes precedence over agent mode even with approved write access. Sandbox can also be enabled without selecting plan mode. Omit `sandbox` to inherit Cursor's settings. Harnest rejects `sandbox: false` because it could turn off configured isolation.
 

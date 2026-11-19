@@ -25,7 +25,7 @@ test("Amp routing metadata preview stays model-free and reports native catalog s
 });
 
 test("latest and pinned previews describe each target's supported write policy", async () => {
-  for (const target of ["opencode", "pi", "cursor", "codex", "claude", "gemini"]) {
+  for (const target of ["opencode", "pi", "cursor", "codex", "claude"]) {
     const calls = [];
     const settings = {
       async preview({ request }) {

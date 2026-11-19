@@ -12,7 +12,7 @@ export function isClaudeRoute(route) {
 
 export function assertNoClaudeRoute(target, route) {
   if (target === "claude" || target === "acp" || !isClaudeRoute(route)) return;
-  const name = ({ pi: "Pi", opencode: "OpenCode", codex: "Codex", cursor: "Cursor", gemini: "Gemini", amp: "Amp", acp: "ACP" })[target] ?? String(target || "Adapter");
+  const name = ({ pi: "Pi", opencode: "OpenCode", codex: "Codex", cursor: "Cursor", amp: "Amp", acp: "ACP" })[target] ?? String(target || "Adapter");
   throw Object.assign(new Error(`${name} cannot run Claude models; request target "claude" (Claude Code CLI) instead`), {
     name: `${name}AdapterError`,
     details: { kind: "policy", hint: 'use target "claude" with route.model naming the Claude model or alias' },
@@ -25,17 +25,6 @@ export function adapterRouteRejectionReasons(target, route) {
     reasons.push("opencode-version");
   }
   if (!["claude", "acp"].includes(target) && isClaudeRoute(route)) reasons.push("claude-model");
-  if (target === "gemini") {
-    const provider = typeof route?.provider === "string" ? route.provider.toLowerCase() : null;
-    if (provider && !["google", "gemini", "google-gemini", "google/gemini"].includes(provider)) reasons.push("gemini-provider");
-    const model = route?.model;
-    if (model != null && (typeof model !== "string" || !/^[a-zA-Z0-9._/-]+$/.test(model) || !/^gemini-/i.test(model))) {
-      reasons.push("gemini-model");
-    }
-    if (["agent", "variant", "harnessVersion", "serverUrl"].some((field) => route?.[field] != null)) {
-      reasons.push("gemini-route-control");
-    }
-  }
   if (target === "amp") {
     const unsupported = ["provider", "model", "agent", "thinking", "harnessVersion", "serverUrl"]
       .filter((field) => route?.[field] != null);
@@ -47,7 +36,7 @@ export function adapterRouteRejectionReasons(target, route) {
     if (unsupported.length || typeof route?.agent !== "string" || !route.agent.trim()) reasons.push("acp-route-control");
   }
   const thinking = route?.thinking;
-  if (["cursor", "gemini"].includes(target) && thinking != null && (typeof thinking !== "string" || thinking.trim())) {
+  if (target === "cursor" && thinking != null && (typeof thinking !== "string" || thinking.trim())) {
     reasons.push("thinking-control");
   }
   if (!reasons.includes(`${target}-route-control`) && routeControlError(target, route)) {
@@ -64,24 +53,6 @@ export function assertAdapterRoute(target, route) {
     });
   }
   assertNoClaudeRoute(target, route);
-  if (reasons.includes("gemini-provider")) {
-    throw Object.assign(new Error("Gemini route.provider must be google, gemini, google-gemini, or google/gemini"), {
-      name: "GeminiAdapterError",
-      details: { kind: "policy", hint: "omit route.provider or use the native Google/Gemini provider" },
-    });
-  }
-  if (reasons.includes("gemini-model")) {
-    throw Object.assign(new Error("Gemini route.model must be a safe native Gemini model ID beginning with gemini-"), {
-      name: "GeminiAdapterError",
-      details: { kind: "policy", hint: "use a native model ID such as gemini-3-pro" },
-    });
-  }
-  if (reasons.includes("gemini-route-control")) {
-    throw Object.assign(new Error("Gemini route supports only provider and model; agent, variant, harnessVersion, and serverUrl are unsupported"), {
-      name: "GeminiAdapterError",
-      details: { kind: "policy", hint: "remove unsupported route controls" },
-    });
-  }
   if (reasons.includes("amp-route-control")) {
     throw Object.assign(new Error("Amp route supports only route.variant; model, provider, agent, thinking, harnessVersion, and serverUrl are unsupported"), {
       name: "AmpAdapterError",
@@ -101,7 +72,7 @@ export function assertAdapterRoute(target, route) {
     });
   }
   if (reasons.includes("thinking-control")) {
-    const name = ({ cursor: "Cursor", gemini: "Gemini", amp: "Amp" })[target] ?? "Adapter";
+    const name = ({ cursor: "Cursor", amp: "Amp" })[target] ?? "Adapter";
     throw Object.assign(new Error(`${name} route.thinking is not supported by this adapter`), {
       name: `${name}AdapterError`,
       details: { kind: "policy", hint: target === "cursor" ? "set route.model to a thinking-capable model ID instead of route.thinking" : "omit route.thinking" },
@@ -116,43 +87,25 @@ export function openCodeUsesSharedService(request, serverUrl) {
   return Boolean(request.context?.graph?.graphId && !(serverUrl || request.route?.serverUrl));
 }
 
-function taskflowToolPolicyError(spec) {
-  if (!spec || typeof spec !== "object") return null;
-  const phases = Array.isArray(spec) ? spec : spec.phases ?? spec.chain ?? spec.tasks ?? [spec];
-  if (!Array.isArray(phases)) return null;
-  for (const phase of phases) {
-    if (!phase || typeof phase !== "object") continue;
-    if (Array.isArray(phase.tools)) return "OpenCode V2 does not enforce Taskflow phase tool lists";
-    if (typeof phase.def === "string" || phase.use != null || phase.shareContext === true) {
-      return `OpenCode V2 cannot check nested tool policy before launch for Taskflow phase "${phase.id ?? "(unnamed)"}"`;
-    }
-    if (phase.def?.contextSharing === true) return "OpenCode V2 does not support Taskflow's dynamic shared context";
-    const nested = taskflowToolPolicyError(phase.def);
-    if (nested) return nested;
-  }
-  return spec.contextSharing === true ? "OpenCode V2 does not support Taskflow's dynamic shared context" : null;
-}
-
-export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}, workflow) {
+export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}) {
   const reasons = [];
   if (["amp", "acp"].includes(target) && policy.write !== true) reasons.push("read-only");
   if (hasToolPolicy(policy.tools)) {
     const legacy = Array.isArray(policy.tools);
     if (["amp", "acp", "codex", "cursor"].includes(target)
-      || (["claude", "gemini"].includes(target) && (legacy || execution.transport === "session"))
+      || (target === "claude" && (legacy || execution.transport === "session"))
       || (target === "pi" && !legacy && policy.tools.allow !== undefined)
       || (target === "opencode" && (legacy || policy.tools.allow !== undefined || policy.tools.deny?.length))) reasons.push("granular-tools");
   }
-  if (target === "opencode" && taskflowToolPolicyError(workflow?.spec)) reasons.push("taskflow-tools");
   if (target === "opencode" && policy.write !== true) reasons.push("read-only");
   if (policy.mode !== undefined && (target !== "cursor" || execution.transport === "session")) reasons.push("policy.mode");
   if (policy.sandbox !== undefined && (target !== "cursor" || execution.transport === "session" || policy.sandbox === false)) reasons.push("policy.sandbox");
-  if (["gemini", "amp", "acp"].includes(target) && policy.maxCostUsd != null) reasons.push("cost-budget");
+  if (["amp", "acp"].includes(target) && policy.maxCostUsd != null) reasons.push("cost-budget");
   return reasons;
 }
 
-export function assertAdapterPolicy(target, policy = {}, execution, workflow) {
-  const reasons = adapterPolicyRejectionReasons(target, policy, execution, workflow);
+export function assertAdapterPolicy(target, policy = {}, execution) {
+  const reasons = adapterPolicyRejectionReasons(target, policy, execution);
   if (reasons.includes("read-only") && target !== "opencode") {
     const name = target === "acp" ? "ACP" : "Amp";
     throw Object.assign(new Error(`${name} cannot enforce a read-only request; set policy.write true only when workspace writes are intended`), {
@@ -172,11 +125,6 @@ export function assertAdapterPolicy(target, policy = {}, execution, workflow) {
       details: { kind: "policy", field: "policy.tools" },
     });
   }
-  if (reasons.includes("taskflow-tools")) {
-    throw Object.assign(new Error(taskflowToolPolicyError(workflow?.spec)), {
-      details: { kind: "policy", field: "workflow.spec" },
-    });
-  }
   if (reasons.includes("read-only")) {
     throw Object.assign(new Error("OpenCode V2 cannot enforce read-only execution with server-owned permissions"), {
       details: { kind: "policy", field: "policy.write", hint: "choose a read-only-capable target" },
@@ -189,23 +137,10 @@ export function assertAdapterPolicy(target, policy = {}, execution, workflow) {
     });
   }
   if (reasons.includes("cost-budget")) {
-    const name = target === "gemini" ? "Gemini" : target === "acp" ? "Acp" : "Amp";
+    const name = target === "acp" ? "Acp" : "Amp";
     throw Object.assign(new Error(`${name === "Acp" ? "ACP" : name} does not enforce policy.maxCostUsd`), {
       name: `${name}AdapterError`,
       details: { kind: "policy", hint: "omit policy.maxCostUsd or choose a target with native budget enforcement" },
     });
   }
-}
-
-export function assertNoClaudeWorkflow(target, workflow) {
-  if (!workflow || typeof workflow !== "object") return;
-  const visit = (value) => {
-    if (!value || typeof value !== "object") return;
-    if (!Array.isArray(value)) {
-      assertNoClaudeRoute(target, { model: value.model, modelId: value.modelId, provider: value.provider });
-      if (value.model && typeof value.model === "object") assertNoClaudeRoute(target, value.model);
-    }
-    for (const child of Object.values(value)) if (child && typeof child === "object") visit(child);
-  };
-  visit(workflow);
 }

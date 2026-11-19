@@ -58,7 +58,6 @@ const LAUNCH_ENV_VARS = Object.freeze({
   cursor: "HARNEST_CURSOR",
   claude: "HARNEST_CLAUDE",
   codex: "HARNEST_CODEX",
-  gemini: "HARNEST_GEMINI",
   amp: "HARNEST_AMP",
 });
 
@@ -565,7 +564,7 @@ export function createModelCatalog({
 
   async function refresh(target, route, cwd) {
     const at = new Date(now()).toISOString();
-    if (["gemini", "amp", "acp"].includes(target)) {
+    if (["amp", "acp"].includes(target)) {
       return {
         models: [], source: `${target}:native-catalog-unavailable`, at,
         status: "unavailable", reason: `${target}:native-catalog-unavailable`,

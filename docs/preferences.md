@@ -4,7 +4,7 @@
 
 ### Change routing in chat
 
-Ask your lead to **show routing**, **save a review preset**, **use a saved preset**, or **explain which model would handle a task**. The same controls are available in every connected MCP client, including Claude Code, Codex, OpenCode, Pi, Cursor, Gemini CLI, and Amp:
+Ask your lead to **show routing**, **save a review preset**, **use a saved preset**, or **explain which model would handle a task**. The same controls are available in every connected MCP client, including Claude Code, Codex, OpenCode, Pi, Cursor, and Amp:
 
 1. `handoff_routing_get` shows the active preset, base settings, named presets and revision.
 2. `handoff_routing_configure` edits the user file with that `expectedRevision`. A stale revision rejects the edit rather than losing someone else's changes.
@@ -52,7 +52,7 @@ node scripts/setup-routing.mjs
 
 ```json
 {
-  "harnessOrder": ["pi", "claude", "codex", "opencode", "cursor", "gemini", "amp"],
+  "harnessOrder": ["pi", "claude", "codex", "opencode", "cursor", "amp"],
   "tier": "balanced",
   "models": {
     "claude": "sonnet",
@@ -78,7 +78,7 @@ node scripts/setup-routing.mjs
   rules (`when: { difficulty }`). The wizard's starter rules wire
   trivial→cheap lanes and hard→depth automatically.
 - **`models`** — default model per harness. Only what you set is used:
-  Automatic selection includes OpenCode, Codex, Cursor, and Gemini only
+  Automatic selection includes OpenCode, Codex, and Cursor only
   when configured with a model. Pi and Claude can use native defaults. A
   direct Codex request without a model can also use the native default.
   The example's Codex entry is a saved model choice. For individual tasks,
@@ -145,7 +145,7 @@ and pin freshness (`models:` line).
 ## Harness topology: what earns a lane
 
 Pi is the default home for anything portable — any provider model (including
-DeepSeek and Codex-CLI-reachable work through its tools), taskflow graphs,
+DeepSeek and Codex-CLI-reachable work through its tools),
 live steering, fastest effective loop. Route elsewhere only for what Pi lacks:
 
 - **claude:** Claude models — nothing else runs them. Plus real budget
@@ -161,9 +161,6 @@ live steering, fastest effective loop. Route elsewhere only for what Pi lacks:
 - **cursor:** NAMED cheap models only (`cursor-cheap` grok lane,
   `cursor-flagship`, …). The bare Cursor default earns no auto lane — without
   a name it adds nothing over Pi.
-- **gemini:** prompt-only attached Gemini CLI execution. Named models are
-  accepted only when the adapter can pin them; mode names are not treated as
-  arbitrary model IDs. Live controls and session transport are unsupported.
 - **amp:** prompt-only attached write execution on native Linux/macOS or with the entire
   Harnest MCP server running inside WSL. Read-only is unsupported because
   workspace settings/plugins prevent a trustworthy native boundary. Only
@@ -197,8 +194,7 @@ Cursor). So the engine scores the two separately and composes them:
   spawn/hang tax (+0/-1), Claude is near-native (+1/+0), Codex sits native
   without shim tax (+1/+0, provisional). Estimates from local spawn timings,
   verified 2026-09-11.
-- **Harness features** (`capabilities.computerUse`, plus `taskflow`,
-  `liveControl`) — hard gates via `require`, never vibes. When two lanes tie
+- **Harness features** (`capabilities.computerUse` and `liveControl`) — hard gates via `require`, never vibes. When two lanes tie
   on model capability, the harness with the right features and the faster loop
   wins on the numbers, not on narrative.
 
@@ -217,7 +213,7 @@ verbatim, or documents why it cannot:
 | OpenCode | used as variant verbatim |
 | Codex | `-c model_reasoning_effort="<level>"` verbatim |
 | Cursor, Claude | recorded in the receipt; CLI passthrough unverified, so no flag is sent today |
-| Gemini, Amp | no generic thinking mapping is advertised; unsupported values reject before inference (Amp uses `route.variant` instead) |
+| Amp | no generic thinking mapping is advertised; unsupported values reject before inference (Amp uses `route.variant` instead) |
 
 Pass any effort the user names in `route.thinking`. The following rules apply
 when reasoning effort is omitted or a route declares supported levels.
@@ -300,7 +296,7 @@ delegation loop. Patterns, not viral posts:
   $0 — but prompts/completions may train Meta models, so never route private,
   customer, or unreleased work to `*-contributor` endpoints. Thinking caps at
   `xhigh` (Pi level map has no `max` for spark).
-- **Gemini Flash lanes:** fast cheap throughput for well-architected scoped
+- **Gemini Flash model lanes:** fast cheap throughput for well-architected scoped
   tasks, not an architect. Promo pricing doubles on expiry — re-check before
   trusting old cost ratings.
 
@@ -340,7 +336,7 @@ For "keep this exact version," also set `metadata.routing.modelVersion: "pin"`.
 
 Rejection runs before scoring (capability-first). A candidate is rejected for:
 unavailable/open circuit, target mismatch, write/read-only incompatibility,
-Taskflow or live-control requirement, context capacity, budget, deadline, provider
+live-control requirement, context capacity, budget, deadline, provider
 requirement, or avoid-list match.
 
 Survivors score:
@@ -355,13 +351,13 @@ quality*Wq + speed*Ws + efficiency*We + reliability*Wr
 
 Ties break on candidate `priority`, then lexical candidate ID — so `priority` is the
 deterministic ordering knob. `prefer: { ids, targets, providers, models, tags }` steers;
-`avoid` with the same shape rejects. `require: { liveControl, taskflow, provider,
+`avoid` with the same shape rejects. `require: { liveControl, provider,
 minContextTokens }` rejects anything that cannot satisfy the run.
 
 There is deliberately **no automatic failover to the next candidate** after launch for write-capable runs:
 a retry could duplicate side effects. The exception is read-only transport/timeout/task failure, which retries once on the next viable ranked route (`receipt.routingFallbacks` records the switch; opt out with `metadata.routing.fallbacks: false`). To compare or hedge, fan out with
 `handoff_compare` (2-16 read-only lanes, one receipt per lane) or retry explicitly
-after reviewing the trace. Read-only compare and review accept Pi, Cursor, Claude, Codex, and Gemini. Retrying a compare after partial failure needs a new base `requestId` — lane IDs are deterministic (`<base>:<lane>`), so the same key returns the existing lane receipts instead of rerunning. See `routing.md` deliberate limits.
+after reviewing the trace. Read-only compare and review accept Pi, Cursor, Claude, and Codex. Retrying a compare after partial failure needs a new base `requestId` — lane IDs are deterministic (`<base>:<lane>`), so the same key returns the existing lane receipts instead of rerunning. See `routing.md` deliberate limits.
 
 Generic ACP is excluded from read-only compare and review for the same reason: its downstream contract requires explicit write approval.
 
@@ -375,7 +371,6 @@ Generic ACP is excluded from read-only compare and review for the same reason: i
 | Cursor | optional | Cursor default | Passed verbatim as `cursor-agent --model`. Discover with `cursor-agent --list-models`. Only earns a lane with a NAMED cheap model (grok/composer); the bare default adds nothing over Pi. |
 | Claude | optional | config chain | Passed verbatim as `claude --model` (alias or full ID: `sonnet`, `opus`, `claude-opus-5`). Verify the actual model from `modelUsage` — org restrictions can substitute. The ONLY home for Claude models. |
 | Codex | optional | Codex default | Passes the selected model as `codex exec -m`. A named model enables an automatic lane. Resume via `exec resume`. |
-| Gemini | optional | Gemini native default | Explicit model pins are passed only through the adapter's supported native model field. Native execution modes are not model IDs. Resume with `execution.sessionId`; session transport and live controls are unsupported. |
 | Amp | rejected | Amp native selection | Use only `route.variant` `low`, `medium`, `high`, or `ultra`; arbitrary provider/model/thinking fields reject. Requires explicit write approval with empty tools and no cost budget on native Linux/macOS or with the entire MCP server inside WSL. Resume with `execution.sessionId` and omit `route.variant` because the existing thread retains its mode; session transport, live controls, read-only, and detached orbs are unsupported. |
 | DSH | — | not a target | Protocol rejects `target: "dsh"`. Run DeepSeek models via Pi or OpenCode provider routes. |
 
@@ -393,7 +388,7 @@ Follow the [user's model and effort choices](#choosing-models).
         "target": "cursor",
         "route": { "provider": "cursor", "model": "composer-2.5" },
         "scores": { "quality": 6, "speed": 10, "efficiency": 9, "reliability": 8 },
-        "capabilities": { "readOnly": true, "write": true, "taskflow": false, "liveControl": false, "maxContextTokens": 128000 },
+        "capabilities": { "readOnly": true, "write": true, "liveControl": false, "maxContextTokens": 128000 },
         "costUsd": 0.2, "latencyMs": 1000, "tags": ["fast", "cheap"], "priority": 5
       },
       {
@@ -401,7 +396,7 @@ Follow the [user's model and effort choices](#choosing-models).
         "target": "opencode",
         "route": { "provider": "your-gateway", "model": "your-strong-model", "harnessVersion": "v2" },
         "scores": { "quality": 10, "speed": 5, "efficiency": 5, "reliability": 9 },
-        "capabilities": { "readOnly": true, "write": true, "taskflow": true, "liveControl": true, "maxContextTokens": 256000 },
+        "capabilities": { "readOnly": true, "write": true, "liveControl": true, "maxContextTokens": 256000 },
         "costUsd": 1.5, "latencyMs": 5000, "tags": ["deep", "review"], "priority": 10
       }
     ],

@@ -31,7 +31,7 @@ test("installer copies handoff skill, router, worker, workflows command, and reg
   const installedSkill = await readFile(join(dir, ".cursor", "skills", "handoff", "SKILL.md"), "utf8");
   assert.match(installedSkill, /Session selection comes from .*generic ACP resume/);
   assert.match(installedSkill, /generic ACP follow-ups resume with `execution\.sessionId`/);
-  assert.match(installedSkill, /One-shot targets \(Cursor, Claude, Codex, Gemini, Amp, and generic ACP\)/);
+  assert.match(installedSkill, /One-shot targets \(Cursor, Claude, Codex, Amp, and generic ACP\)/);
   assert.match(installedSkill, /Launch the handoff.*harnest:acp-worker/);
   assert.match(installedSkill, /On Codex.*acp_worker/);
   assert.match(installedSkill, /On OpenCode.*acp-worker/);
@@ -44,11 +44,9 @@ test("installer copies handoff skill, router, worker, workflows command, and reg
   assert.ok(existsSync(join(dir, ".cursor", "agents", "cursor-worker.md")));
   const router = await readFile(join(dir, ".cursor", "rules", "harnest-router.mdc"), "utf8");
   assert.match(router, /\/workflows/);
-  assert.match(router, /Gemini/);
   assert.match(router, /Amp/);
   assert.match(router, /ACP/);
   const worker = await readFile(join(dir, ".cursor", "agents", "cursor-worker.md"), "utf8");
-  assert.match(worker, /Gemini/);
   assert.match(worker, /Amp/);
   assert.match(worker, /ACP/);
   const mcp = JSON.parse(await readFile(join(dir, ".cursor", "mcp.json"), "utf8"));

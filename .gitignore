@@ -1,6 +1,5 @@
 node_modules/
 .harnest/
-.pi/taskflows/runs/
 coverage/
 *.log
 *.tmp

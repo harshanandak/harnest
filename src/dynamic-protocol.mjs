@@ -73,13 +73,9 @@ function text(value, label, max = null) {
 export function normalizePolicy(input = {}, parent) {
   const policy = input ?? {};
   only(policy, POLICY_FIELDS, "policy");
-  for (const key of ["write", "readOnly", "allowWrites"]) {
-    if (policy[key] !== undefined && typeof policy[key] !== "boolean") throw dynamicError("validation", `policy.${key} must be boolean`);
-  }
-  const aliases = [policy.write, policy.readOnly === undefined ? undefined : !policy.readOnly, policy.allowWrites].filter((value) => value !== undefined);
-  if (aliases.some((value) => value !== aliases[0])) throw dynamicError("policy", "contradictory write policy aliases");
+  if (policy.write !== undefined && typeof policy.write !== "boolean") throw dynamicError("validation", "policy.write must be boolean");
   const result = {
-    write: aliases[0] ?? parent?.write ?? false,
+    write: policy.write ?? parent?.write ?? false,
     ...inheritPolicyControls(policy, parent, (message) => dynamicError("policy", message)),
     maxCostUsd: policy.maxCostUsd ?? parent?.maxCostUsd ?? null,
   };
@@ -101,7 +97,7 @@ async function directory(cwd, label) {
 function target(value, label) {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string" || !AGENT_TARGETS.has(value)) {
-    throw dynamicError("validation", `${label} must be opencode, pi, cursor, claude, codex, gemini, amp, acp, or auto`);
+    throw dynamicError("validation", `${label} must be opencode, pi, cursor, claude, codex, amp, acp, or auto`);
   }
   return value;
 }

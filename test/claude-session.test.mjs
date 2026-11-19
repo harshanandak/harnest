@@ -393,7 +393,7 @@ test("Claude session rejects unmappable policy and workflow graphs before launch
     (error) => error.details?.kind === "policy" && /tools/.test(error.message),
   );
   await assert.rejects(
-    adapter.run(request({ workflow: { spec: { name: "taskflow" } } })),
+    adapter.run(request({ workflow: { spec: { name: "flow" } } })),
     (error) => error.details?.kind === "policy",
   );
   await assert.rejects(

@@ -9,22 +9,22 @@ import { graphInputSchema } from "../src/graph-tools.mjs";
 import { normalizeRequest, TARGETS } from "../src/protocol.mjs";
 import { runtimeInfo } from "../src/runtime-info.mjs";
 
-const targets = ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"];
+const targets = ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"];
 const readOnlyTargets = targets.filter((target) => !["opencode", "amp", "acp"].includes(target));
 
-test("Gemini, Amp, and ACP are admitted across canonical runtime and static schema surfaces", async () => {
+test("Amp and ACP are admitted across canonical runtime and static schema surfaces", async () => {
   assert.deepEqual([...TARGETS], targets);
   assert.deepEqual(runtimeInfo().targets, targets);
 
-  for (const target of ["gemini", "amp", "acp"]) {
+  for (const target of ["amp", "acp"]) {
     const targetOptions = target === "amp" ? { route: { variant: "medium" }, policy: { write: true } }
-      : target === "acp" ? { route: { agent: "fixture" }, policy: { write: true } } : {};
+      : { route: { agent: "fixture" }, policy: { write: true } };
     const request = normalizeRequest({ requestId: `request-${target}`, target, task: "inspect", cwd: process.cwd(), ...targetOptions });
     assert.equal(request.target, target);
     assert.equal(graphInputSchema.safeParse({
       requestId: `graph-${target}`,
       cwd: process.cwd(),
-      ...(["amp", "acp"].includes(target) ? { policy: { write: true } } : {}),
+      policy: { write: true },
       nodes: [{ id: "inspect", target, task: "inspect", ...targetOptions }],
     }).success, true);
     assert.equal(dynamicInputSchema.safeParse({
@@ -53,8 +53,8 @@ test("Gemini, Amp, and ACP are admitted across canonical runtime and static sche
   const comparison = (target) => ({
     request: { requestId: `compare-${target}`, target, task: "inspect", cwd: process.cwd() },
     candidates: [
-      { name: "first", target, route: { model: target === "gemini" ? "gemini-fixture" : "fixture" } },
-      { name: "second", target, route: { model: target === "gemini" ? "gemini-fixture" : "fixture" } },
+      { name: "first", target, route: { model: "fixture" } },
+      { name: "second", target, route: { model: "fixture" } },
     ],
   });
   for (const target of readOnlyTargets) assert.equal(validateComparison(comparison(target)), true, target);
@@ -70,7 +70,7 @@ test("session transport remains exclusive to Claude, Codex and Cursor", () => {
     });
     assert.equal(request.execution.transport, "session");
   }
-  for (const target of ["opencode", "pi", "gemini", "amp", "acp"]) {
+  for (const target of ["opencode", "pi", "amp", "acp"]) {
     assert.throws(() => normalizeRequest({
       requestId: `session-${target}`, target, task: "inspect", cwd: process.cwd(), execution: { transport: "session" },
     }), /session transport.*claude, codex, or cursor/i);
@@ -79,7 +79,7 @@ test("session transport remains exclusive to Claude, Codex and Cursor", () => {
 
 test("the shared adapter factory constructs every registered target and fails closed on unsupported sessions", () => {
   for (const target of targets) assert.ok(createAdapter(target, target === "acp" ? { acp: { registrations: { fixture: { command: "fixture", args: [], trusted: true } } } } : {}), target);
-  for (const target of ["opencode", "pi", "gemini", "amp", "acp"]) {
+  for (const target of ["opencode", "pi", "amp", "acp"]) {
     assert.throws(() => createAdapter(target, {}, { execution: { transport: "session" } }), /session transport.*claude, codex, or cursor/i);
   }
 });

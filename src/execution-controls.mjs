@@ -9,7 +9,7 @@ export const MAX_INSTRUCTIONS_BYTES = 8_000;
 export const EXECUTION_CONTROLS = ["addDirs", "attachments", "instructions", "sessionAction", "maxTurns"];
 
 const targets = {
-  addDirs: ["claude", "codex", "cursor", "gemini"],
+  addDirs: ["claude", "codex", "cursor"],
   attachments: ["codex", "opencode", "pi", "acp"],
   instructions: ["claude", "pi"],
   sessionAction: ["claude", "codex", "opencode", "pi"],
@@ -53,7 +53,7 @@ const imageTypes = new Map([
 ]);
 export const attachmentMimeType = (path) => imageTypes.get(extname(path).toLowerCase());
 
-export function normalizeExecutionControls({ target, execution = {}, cwd, policy, metadata, workflow }) {
+export function normalizeExecutionControls({ target, execution = {}, cwd, policy, metadata }) {
   execution ??= {};
   const controls = {};
   for (const field of EXECUTION_CONTROLS) {
@@ -71,17 +71,11 @@ export function normalizeExecutionControls({ target, execution = {}, cwd, policy
   if (execution.sessionAction !== undefined && (typeof execution.sessionId !== "string" || !execution.sessionId.trim() || execution.sessionId.startsWith("-") || execution.sessionId.includes("\0"))) {
     throw executionError("sessionAction", "requires an explicit sessionId");
   }
-  if (controls.sessionAction === "fork" && (workflow?.spec != null || workflow?.nodes != null)) {
-    throw executionError("sessionAction", "fork is supported only for prompt-only handoffs");
-  }
   if (controls.sessionAction === "fork" && target === "pi" && /[\\/:]/.test(execution.sessionId)) {
     throw executionError("sessionAction", "Pi fork requires a session ID");
   }
   if (controls.addDirs !== undefined) {
     controls.addDirs = boundedArray(controls.addDirs, "addDirs", MAX_ADD_DIRS).map((path) => canonicalPath(path, "addDirs", true));
-    if (target === "gemini" && controls.addDirs.some((path) => path.includes(",") || path !== path.trim())) {
-      throw executionError("addDirs", "Gemini splits on commas and trims directory arguments");
-    }
     if (target === "codex" && controls.addDirs.length && policy?.write !== true) {
       throw executionError("addDirs", "Codex --add-dir grants write access and requires policy.write=true");
     }
@@ -94,7 +88,6 @@ export function normalizeExecutionControls({ target, execution = {}, cwd, policy
     }
   }
   if (controls.attachments !== undefined) {
-    if (workflow?.spec != null || workflow?.nodes != null) throw executionError("attachments", "requires a prompt-only handoff");
     controls.attachments = boundedArray(controls.attachments, "attachments", MAX_ATTACHMENTS).map((item) => {
       if (!item || !["image", "file"].includes(item.type) || Object.keys(item).some((key) => !["type", "path"].includes(key))) {
         throw executionError("attachments", "items must have an image or file type and a path");

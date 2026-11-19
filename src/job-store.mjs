@@ -180,7 +180,7 @@ function sanitizeTraceValue(value, depth = 0) {
 function progressFromRecord(previous, record) {
   const data = record?.event?.data ?? record?.event ?? {};
   if (["heartbeat", "usage"].includes(data.type)
-    || (["codex_delta", "gemini_delta", "amp_delta", "acp_update"].includes(data.type) && !compactProgressText(data.text))) return previous ?? null;
+    || (["codex_delta", "amp_delta", "acp_update"].includes(data.type) && !compactProgressText(data.text))) return previous ?? null;
   const raw = data?.event && typeof data.event === "object" ? data.event : {};
   const part = raw?.part && typeof raw.part === "object" ? raw.part : {};
   const phase = [data.phase, data.state, part?.state?.title, part.tool, data.type, record?.event?.type]

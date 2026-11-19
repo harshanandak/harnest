@@ -125,7 +125,7 @@ test("V2 default export registers host_info with JSON Schema and structured outp
   const result = JSON.parse((await info.execute({}, { sessionID: "ses-test" })).content);
   assert.equal(result.sessionID, "ses-test");
   assert.equal(result.leadHost, "opencode");
-  assert.equal(result.workers.length, 8);
+  assert.equal(result.workers.length, 7);
   assert.ok(result.workers.some((worker) => worker.agent === "acp-worker" && worker.target === "acp"));
 });
 

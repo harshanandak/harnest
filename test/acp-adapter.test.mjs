@@ -20,7 +20,6 @@ function request(overrides = {}) {
     route: { harness: "acp", agent: "fake" },
     policy: { write: true, tools: [], maxCostUsd: null },
     metadata: { harnest: { writeApproved: true } },
-    workflow: null,
     execution: {},
   };
   return {

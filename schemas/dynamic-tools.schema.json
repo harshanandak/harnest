@@ -38,7 +38,6 @@
                 "claude",
                 "codex",
                 "cursor",
-                "gemini",
                 "amp",
                 "acp"
               ]
@@ -205,7 +204,6 @@
                 "claude",
                 "codex",
                 "cursor",
-                "gemini",
                 "amp",
                 "acp"
               ]
@@ -557,7 +555,6 @@
             "claude",
             "codex",
             "cursor",
-            "gemini",
             "amp",
             "acp"
           ]

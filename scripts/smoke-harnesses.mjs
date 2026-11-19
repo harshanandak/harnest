@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { harnessLaunch, isOpenCodeV2Version } from "../src/config.mjs";
-import { resolveTaskflowExtensionPath } from "../src/adapters/pi.mjs";
 import { requireNativeCommand, spawnNativeCommand } from "../src/launch-command.mjs";
 import { terminateProcessTree } from "../src/process.mjs";
 
@@ -29,18 +28,7 @@ export function versionOf(target, { resolveLaunch = harnessLaunch, spawnSyncFn }
   return version;
 }
 
-// Optional compatibility capability: verifies the installed pi-taskflow
-// extension registers its deterministic /tf command. Ordinary Pi readiness
-// (smokePiCore) must not depend on this package being installed.
-export async function smokePiTaskflow(options = {}) {
-  return smokePiProbe({ ...options, withTaskflow: true });
-}
-
 export async function smokePiCore(options = {}) {
-  return smokePiProbe({ ...options, withTaskflow: false });
-}
-
-async function smokePiProbe(options = {}) {
   const cwd = options.cwd || await mkdtemp(join(tmpdir(), "harnest-pi-readiness-"));
   try {
     return await probePiRpc({ ...options, cwd });
@@ -49,13 +37,12 @@ async function smokePiProbe(options = {}) {
   }
 }
 
-function probePiRpc({ resolveLaunch = harnessLaunch, spawnFn = spawnNativeCommand, timeoutMs = 120_000, cleanupTimeoutMs = 5_000, cwd, withTaskflow = false }) {
+function probePiRpc({ resolveLaunch = harnessLaunch, spawnFn = spawnNativeCommand, timeoutMs = 120_000, cleanupTimeoutMs = 5_000, cwd }) {
   const launch = resolveLaunch("pi");
-  const taskflowExtensionPath = withTaskflow ? resolveTaskflowExtensionPath(undefined) : null;
   const args = [
     ...(launch.args || []),
     "--mode", "rpc",
-    ...(withTaskflow ? ["--extension", taskflowExtensionPath, "--tools", "taskflow,read"] : ["--tools", "read"]),
+    "--tools", "read",
     "--no-session",
     "--no-skills",
     "--no-prompt-templates",
@@ -117,10 +104,7 @@ function probePiRpc({ resolveLaunch = harnessLaunch, spawnFn = spawnNativeComman
         }
         if (!message || typeof message !== "object" || Array.isArray(message)) continue;
         if (message.id !== "harnest-smoke") continue;
-        const commands = message.data?.commands || message.commands || [];
-        const names = Array.isArray(commands) ? commands.map((command) => typeof command === "string" ? command : command?.name) : [];
-        const healthy = message.success !== false && (!withTaskflow || names.includes("tf"));
-        finish(healthy ? null : new Error(withTaskflow ? "Pi loaded without the /tf command" : "Pi RPC did not acknowledge get_commands"));
+        finish(message.success !== false ? null : new Error("Pi RPC did not acknowledge get_commands"));
         return;
       }
       if (stdout.length > 64 * 1024) finish(new Error("Pi RPC smoke received an oversized unterminated response"));
@@ -140,26 +124,16 @@ function probePiRpc({ resolveLaunch = harnessLaunch, spawnFn = spawnNativeComman
   });
 }
 
-export async function smokeHarnesses({ versionProbe = versionOf, piProbe = smokePiCore, piTaskflowProbe = smokePiTaskflow, report = console.log } = {}) {
+export async function smokeHarnesses({ versionProbe = versionOf, piProbe = smokePiCore, report = console.log } = {}) {
   const results = [];
-  for (const target of ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp"]) {
-    const required = !["gemini", "amp"].includes(target);
+  for (const target of ["opencode", "pi", "cursor", "claude", "codex", "amp"]) {
+    const required = target !== "amp";
     const name = target;
     try {
       const version = await versionProbe(target);
-      let taskflow = null;
-      if (target === "pi") {
-        await piProbe();
-        try {
-          await piTaskflowProbe();
-          taskflow = "tf";
-        } catch (error) {
-          taskflow = "optional-unavailable";
-          report(`HARNESS_SMOKE target=pi-taskflow required=false status=optional-unavailable reason=${error.code ? `${error.code}: ` : ""}${String(error.message).replace(/\s+/g, " ")}`);
-        }
-      }
-      results.push({ target, name, required, ok: true, version, taskflow });
-      report(`HARNESS_SMOKE target=${name} required=${required} status=ready version=${version}${target === "pi" ? ` piCore=ready piTaskflow=${taskflow}` : ""}`);
+      if (target === "pi") await piProbe();
+      results.push({ target, name, required, ok: true, version });
+      report(`HARNESS_SMOKE target=${name} required=${required} status=ready version=${version}${target === "pi" ? ` piCore=ready` : ""}`);
     } catch (error) {
       results.push({ target, name, required, ok: false, error });
       report(`HARNESS_SMOKE target=${name} required=${required} status=${required ? "failed" : "optional-unavailable"} reason=${error.code ? `${error.code}: ` : ""}${String(error.message).replace(/\s+/g, " ")}`);

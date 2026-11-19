@@ -17,7 +17,7 @@ test("host info snapshot describes the OpenCode launch path and control semantic
   assert.ok(info.tools.includes("harnest_handoff_workflow"));
   assert.deepEqual(
     info.workers.map((w) => w.agent),
-    ["opencode-worker", "pi-worker", "cursor-worker", "claude-worker", "codex-worker", "gemini-worker", "amp-worker", "acp-worker"],
+    ["opencode-worker", "pi-worker", "cursor-worker", "claude-worker", "codex-worker", "amp-worker", "acp-worker"],
   );
   assert.match(info.launchPath.nativeChild, /acp-worker/);
   assert.match(info.launchPath.nativeChild, /subagent tool.*agent ID/);
@@ -45,7 +45,7 @@ test("host info snapshot reports an unconfigured routing resolver without invent
 });
 
 test("every OpenCode worker agent is a restricted subagent with a launch description", async () => {
-  for (const name of ["opencode-worker.md", "pi-worker.md", "cursor-worker.md", "claude-worker.md", "codex-worker.md", "gemini-worker.md", "amp-worker.md", "acp-worker.md"]) {
+  for (const name of ["opencode-worker.md", "pi-worker.md", "cursor-worker.md", "claude-worker.md", "codex-worker.md", "amp-worker.md", "acp-worker.md"]) {
     const raw = await readFile(join(root, "opencode-agents", name), "utf8");
     assert.match(raw, /^---\n[\s\S]+^---/m, `${name} must carry frontmatter`);
     assert.match(raw, /^mode: subagent$/m, `${name} must be a subagent`);
@@ -60,7 +60,7 @@ test("every OpenCode worker agent is a restricted subagent with a launch descrip
 });
 
 test("the OpenCode workers keep one-shot semantics", async () => {
-  for (const name of ["cursor-worker.md", "claude-worker.md", "codex-worker.md", "gemini-worker.md", "amp-worker.md"]) {
+  for (const name of ["cursor-worker.md", "claude-worker.md", "codex-worker.md", "amp-worker.md"]) {
     const raw = await readFile(join(root, "opencode-agents", name), "utf8");
     assert.match(raw, /one-shot/, `${name} must stay one-shot`);
     assert.match(raw, /fail closed as `unsupported-control`/, `${name} must fail live controls closed`);
@@ -69,7 +69,7 @@ test("the OpenCode workers keep one-shot semantics", async () => {
 });
 
 test("the OpenCode workers share the single-builder spine: announce-first and live protocol", async () => {
-  for (const name of ["opencode-worker.md", "pi-worker.md", "cursor-worker.md", "claude-worker.md", "codex-worker.md", "gemini-worker.md", "amp-worker.md"]) {
+  for (const name of ["opencode-worker.md", "pi-worker.md", "cursor-worker.md", "claude-worker.md", "codex-worker.md", "amp-worker.md"]) {
     const raw = await readFile(join(root, "opencode-agents", name), "utf8");
     assert.match(raw, /thin forwarder/, `${name} must stay a thin forwarder`);
     assert.match(raw, /first visible message announces the job ID and request ID/, `${name} must announce first`);
@@ -90,7 +90,7 @@ test("the installer wires agents, skill, plugin, commands, and the MCP server en
   const configDir = await mkdtemp(join(tmpdir(), "harnest-opencode-wiring-"));
   t.after(() => rm(configDir, { recursive: true, force: true }));
   await installIntegration(configDir, { token: "fixture-token" });
-  for (const target of ["pi", "opencode", "cursor", "claude", "codex", "gemini", "amp"]) {
+  for (const target of ["pi", "opencode", "cursor", "claude", "codex", "amp"]) {
     assert.equal(await readFile(join(configDir, "agents", `${target}-worker.md`), "utf8"), await readFile(join(root, "opencode-agents", `${target}-worker.md`), "utf8"));
   }
   for (const artifact of ["skills/handoff/SKILL.md", "plugins/harnest/host-info.mjs", "plugins/harnest/validate-workflow.mjs", "commands/handoff.md", "commands/handoff-status.md"]) {
@@ -108,5 +108,5 @@ test("the plugin module registers handoff_host_info as a custom tool", async () 
   assert.ok(info);
   const result = await info.execute({}, { sessionID: "fixture-session" });
   assert.equal(JSON.parse(result.content).sessionID, "fixture-session");
-  assert.equal(JSON.parse(result.content).workers.length, 8);
+  assert.equal(JSON.parse(result.content).workers.length, 7);
 });

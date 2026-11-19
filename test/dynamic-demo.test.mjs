@@ -25,7 +25,7 @@ const REQUIRED_INTEGRATION = [
 ];
 const INTEGRATED = REQUIRED_INTEGRATION.every((relative) => existsSync(join(RUNNER_ROOT, relative)));
 
-const LABELS = ["plan", "work-pi", "work-opencode", "work-claude", "work-codex", "work-cursor", "work-gemini", "work-amp", "checkpoint", "after-pause"];
+const LABELS = ["plan", "work-pi", "work-opencode", "work-claude", "work-codex", "work-cursor", "work-amp", "checkpoint", "after-pause"];
 const EXPECTED_ATTEMPTS = {
   plan: 1,
   "work-pi": 1,
@@ -33,7 +33,6 @@ const EXPECTED_ATTEMPTS = {
   "work-claude": 1,
   "work-codex": 1,
   "work-cursor": 2,
-  "work-gemini": 2,
   "work-amp": 2,
   checkpoint: 2,
   "after-pause": 2,
@@ -45,7 +44,6 @@ const EXPECTED_LAUNCHES = {
   "work-claude": 2,
   "work-codex": 2,
   "work-cursor": 3,
-  "work-gemini": 3,
   "work-amp": 3,
   checkpoint: 3,
   "after-pause": 2,
@@ -108,17 +106,17 @@ test("dynamic workflow demo exercises branch, fan-out, failure, pause, resume, d
   const output = manifest.results.final.output;
   assert.equal(output.branch, "proceed");
   assert.equal(output.itemCount, 5);
-  assert.equal(output.total, 35);
+  assert.equal(output.total, 30);
   assert.deepEqual(output.failedLabels, []);
-  assert.equal(output.completedCount, 7);
-  assert.equal(output.lanes.length, 7);
+  assert.equal(output.completedCount, 6);
+  assert.equal(output.lanes.length, 6);
   assert.equal(output.checkpoint, "checkpoint");
   assert.equal(output.afterPause, "after-pause");
 
   // --- every invocation, not just the first three --------------------------
   const invocations = manifest.status.final.invocations;
   assert.deepEqual(invocations.map((call) => call.label), LABELS);
-  assert.deepEqual(invocations.map((call) => call.ordinal), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(invocations.map((call) => call.ordinal), LABELS.map((_, index) => index));
   for (const call of invocations) {
     assert.equal(call.state, "completed", call.label);
     assert.ok(call.jobId, `${call.label} jobId`);
@@ -153,7 +151,6 @@ test("dynamic workflow demo exercises branch, fan-out, failure, pause, resume, d
     "work-claude": 1,
     "work-codex": 1,
     "work-cursor": 2,
-    "work-gemini": 2,
     "work-amp": 2,
     checkpoint: 2,
     "after-pause": 1,
@@ -167,7 +164,7 @@ test("dynamic workflow demo exercises branch, fan-out, failure, pause, resume, d
   assert.match(manifest.savedWorkflow.revision, /^[a-f0-9]{64}$/);
   assert.equal(manifest.savedRerun.status.state, "completed");
   assert.equal(manifest.savedRerun.result.output.itemCount, 3);
-  assert.equal(manifest.savedRerun.result.output.total, 21);
+  assert.equal(manifest.savedRerun.result.output.total, 18);
   assert.deepEqual(manifest.savedRerun.result.output.failedLabels, []);
 
   // --- canonical CLI frames ------------------------------------------------
@@ -181,5 +178,5 @@ test("dynamic workflow demo exercises branch, fan-out, failure, pause, resume, d
   assert.equal(manifest.controllerResume.runId, runIds.initial);
   assert.equal(manifest.controllerResume.attempt, 2);
   assert.equal(manifest.controllerResume.state, "completed");
-  assert.equal(manifest.controllerResume.invocationIds.length, 10);
+  assert.equal(manifest.controllerResume.invocationIds.length, LABELS.length);
 });

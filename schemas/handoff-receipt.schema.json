@@ -9,7 +9,7 @@
     "protocolVersion": { "const": "1.0" },
     "requestId": { "type": "string" },
     "jobId": { "type": "string" },
-    "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+    "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"] },
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "state": { "enum": ["queued", "running", "completed", "failed", "cancelled", "partial"] },
     "createdAt": { "type": "string", "format": "date-time" },
@@ -75,7 +75,7 @@
         "properties": {
           "attempt": { "type": "integer", "minimum": 1 },
           "jobId": { "type": "string" },
-          "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+          "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"] },
           "route": { "type": "object" },
           "state": { "type": "string" },
           "usageReported": { "type": "boolean" },

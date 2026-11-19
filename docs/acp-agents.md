@@ -59,7 +59,7 @@ Repeat `--arg` for multiple arguments. Set `--protocol-version 1` to select the 
 
 Keep machine-specific commands in the ignored local configuration. Harnest launches the command directly without a shell. The optional registry id and version are provenance, not proof that the local executable matches that version.
 
-`npm run doctor` reports configured registration ids, trust flags, and provenance metadata only. It deliberately does not run `initialize`, `login`, `help`, `version`, or another executable health check. Use the native agent's own documentation for installation and authentication checks.
+`bun run doctor` reports configured registration ids, trust flags, and provenance metadata only. It deliberately does not run `initialize`, `login`, `help`, `version`, or another executable health check. Use the native agent's own documentation for installation and authentication checks.
 
 ## Start a handoff
 

@@ -1,4 +1,4 @@
-import { access, readdir, realpath } from "node:fs/promises";
+import { access, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -6,10 +6,10 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { clientPort, daemonAddress, readDaemonToken } from "../src/daemon-settings.mjs";
 import { assertMcpCatalog } from "./harnest-mcp-catalog.mjs";
 import { readExisting } from "./install-files.mjs";
-import { bridgeEntry, httpEntry, readJsonServers } from "./install-host-config.mjs";
+import { bridgeEntry, httpEntry, readJsonServer } from "./install-host-config.mjs";
 import { claudeConfigDir } from "./install-plugin-host.mjs";
-import { isLegacyOpenCodePlugin, openCodeConfigDir, parseConfig } from "./install-opencode-integration.mjs";
-import { isLegacyPiExtension, piConfigDir } from "./install-pi-integration.mjs";
+import { openCodeConfigDir, parseConfig } from "./install-opencode-integration.mjs";
+import { piConfigDir } from "./install-pi-integration.mjs";
 import { bridgeHostConfig, namedHosts } from "./setup.mjs";
 import { manualBridgeConfig } from "./preset-lead-hosts.mjs";
 
@@ -23,11 +23,7 @@ async function readJson(path) {
 }
 
 const exists = (path) => access(path).then(() => true, () => false);
-const legacy = (entries) => Object.hasOwn(entries ?? {}, "agent-companion");
-const fromJson = async (path, key = "mcpServers", format = "json") => {
-  const servers = await readJsonServers(path, key, format);
-  return { entry: servers?.harnest, old: legacy(servers), path };
-};
+const fromJson = async (path, key = "mcpServers", format = "json") => ({ entry: await readJsonServer(path, key, format), path });
 
 async function presetConnection(host, home) {
   const { path, key, format } = bridgeHostConfig(host, home);
@@ -64,9 +60,8 @@ async function installedConnection(host, { home, project, configPath }) {
       const path = join(dir, "config.toml");
       const raw = await readExisting(path) ?? "";
       const section = /^\s*\[\s*mcp_servers\s*\.\s*["']?harnest["']?\s*\][^\r\n]*\r?\n([\s\S]*?)(?=^\s*\[|(?![\s\S]))/m.exec(raw)?.[1];
-      const old = /^\s*\[\s*mcp_servers\s*\.\s*["']?agent-companion["']?(?:\s*\.|\s*\])|^\s*\[\s*(?:plugins|marketplaces)\s*\.[^\r\n]*\bagent-companion\b/m.test(raw);
-      return { entry: section && codexEntry(section), path, old, assets: [
-        ...["acp", "amp", "claude", "cursor", "gemini", "opencode", "pi"].map((target) => join(dir, "agents", target + "_worker.toml")),
+      return { entry: section && codexEntry(section), path, assets: [
+        ...["acp", "amp", "claude", "cursor", "opencode", "pi"].map((target) => join(dir, "agents", target + "_worker.toml")),
       ] };
     }
     case "cursor": {
@@ -74,7 +69,7 @@ async function installedConnection(host, { home, project, configPath }) {
       const global = await fromJson(join(home, ".cursor", "mcp.json"));
       const assets = ["skills/handoff/SKILL.md", "rules/harnest-router.mdc", "agents/cursor-worker.md", "commands/workflows.md"]
         .map((file) => join(project, ".cursor", file));
-      return { ...(local.entry ? local : global), old: local.old || global.old, assets };
+      return { ...(local.entry ? local : global), assets };
     }
     case "opencode": {
       const dir = openCodeConfigDir();
@@ -85,8 +80,7 @@ async function installedConnection(host, { home, project, configPath }) {
       if (raw !== null && rawc !== null) throw new Error("Both opencode.json and opencode.jsonc exist.");
       const config = parseConfig(rawc ?? raw ?? "{}");
       const servers = config.mcp?.servers;
-      const plugins = config.plugins ?? [];
-      return { entry: servers?.harnest, old: legacy(servers) || legacy(config.mcp) || plugins.some(isLegacyOpenCodePlugin), path: rawc === null ? json : jsonc,
+      return { entry: servers?.harnest, path: rawc === null ? json : jsonc,
         assets: ["plugins/harnest/package.json", "skills/handoff/SKILL.md", "agents/acp-worker.md", "commands/handoff.md"].map((file) => join(dir, file)) };
     }
     case "pi": {
@@ -95,35 +89,24 @@ async function installedConnection(host, { home, project, configPath }) {
       const extensions = (await readJson(path)).extensions ?? [];
       const matches = extensions.filter((entry) => typeof entry === "string" && /(?:^|[\\/])harnest\.mjs$/i.test(entry));
       if (matches.length > 1) throw new Error("Pi has more than one Harnest extension registration.");
-      const autoLoaded = await readdir(join(dir, "extensions")).catch((error) => {
-        if (error.code !== "ENOENT") throw error;
-        return [];
-      });
-      const old = extensions.some(isLegacyPiExtension) || autoLoaded.some(isLegacyPiExtension);
-      return { entry: matches.length ? httpEntry(await readDaemonToken()) : null, old, path,
+      return { entry: matches.length ? httpEntry(await readDaemonToken()) : null, path,
         assets: matches.map((file) => resolve(dir, file)).concat(join(dir, "skills", "handoff", "SKILL.md")) };
     }
     case "claude": {
       const dir = claudeConfigDir(home);
       const path = join(dir, "plugins", "installed_plugins.json");
       const plugins = (await readJson(path)).plugins ?? {};
-      const marketplaces = await readJson(join(dir, "plugins", "known_marketplaces.json"));
       const settings = await readJson(join(dir, "settings.json"));
       const projectSettings = await readJson(join(project, ".claude", "settings.json"));
       const localSettings = await readJson(join(project, ".claude", "settings.local.json"));
       const projectMcp = await fromJson(join(project, ".mcp.json"));
       const userMcp = await readJson(process.env.CLAUDE_CONFIG_DIR ? join(dir, ".claude.json") : join(home, ".claude.json"));
-      const old = [...Object.keys(plugins), ...Object.keys(marketplaces), ...[settings, projectSettings, localSettings].flatMap((config) => [
-        ...Object.keys(config.enabledPlugins ?? {}), ...Object.keys(config.extraKnownMarketplaces ?? {}),
-      ])]
-        .some((name) => /^agent-companion(?:-local|@.+)?$/.test(name)) || projectMcp.old || legacy(userMcp.mcpServers)
-        || Object.values(userMcp.projects ?? {}).some((record) => legacy(record?.mcpServers));
       const id = "harnest@harnest-local";
       const install = plugins[id]?.find((plugin) => plugin.scope === "user") ?? plugins[id]?.[0];
       if (!install?.installPath) {
         const direct = userMcp.projects?.[project]?.mcpServers?.harnest ?? projectMcp.entry ?? userMcp.mcpServers?.harnest;
         const entry = direct?.headersHelper?.includes("CLAUDE_PLUGIN_ROOT") ? null : direct;
-        return { entry, old, path };
+        return { entry, path };
       }
       if ((localSettings.enabledPlugins?.[id] ?? projectSettings.enabledPlugins?.[id] ?? settings.enabledPlugins?.[id]) === false) {
         throw new Error("The Harnest Claude plugin is disabled.");
@@ -133,22 +116,21 @@ async function installedConnection(host, { home, project, configPath }) {
       if (entry?.headersHelper !== 'node "\${CLAUDE_PLUGIN_ROOT}/scripts/claude-mcp-headers.mjs"') {
         throw new Error("The installed Claude plugin has an outdated MCP headers helper.");
       }
-      return { entry: { ...httpEntry(await readDaemonToken()), url: entry.url }, old, path,
+      return { entry: { ...httpEntry(await readDaemonToken()), url: entry.url }, path,
         assets: ["scripts/claude-mcp-headers.mjs", "skills/handoff/SKILL.md", "agents/acp-worker.md", "hooks/hooks.json"].map((file) => join(install.installPath, file)) };
     }
-    case "gemini":
     case "amp": {
       const { path, key } = bridgeHostConfig(host, home);
-      const local = await fromJson(join(project, host === "amp" ? ".amp" : ".gemini", "settings.json"), key);
+      const local = await fromJson(join(project, ".amp", "settings.json"), key);
       const global = await fromJson(path, key);
-      return { ...(local.entry ? local : global), old: local.old || global.old };
+      return local.entry ? local : global;
     }
     case "devin": {
       const { key, format } = bridgeHostConfig(host, home);
       const local = await fromJson(join(project, ".devin", "mcp_config.local.json"), key, format);
       const shared = await fromJson(join(project, ".devin", "mcp_config.json"), key, format);
       const global = await presetConnection(host, home);
-      return { ...(local.entry ? local : shared.entry ? shared : global), old: local.old || shared.old || global.old };
+      return local.entry ? local : shared.entry ? shared : global;
     }
     case "other":
       return fromJson(configPath);
@@ -200,8 +182,7 @@ export async function checkLeadConnections({ host, home = homedir(), project = p
         if (host) throw new Error(`Verify ${manual.path} in the host. ${manual.verify}`);
         continue;
       }
-      const { entry, path, assets = [], old } = await installedConnection(name, { home, project, configPath });
-      if (old) throw new Error("A legacy agent-companion registration remains.");
+      const { entry, path, assets = [] } = await installedConnection(name, { home, project, configPath });
       if (!entry && !host) continue;
       if (!entry) throw new Error("Harnest is not registered in " + path);
       for (const file of assets) {

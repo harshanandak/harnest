@@ -55,9 +55,9 @@ test("routing tools distinguish reads from writes and validate their public inpu
   assert.doesNotThrow(() => tools[1].inputSchema.parse({
     action: "set",
     expectedRevision: revision,
-    settings: { harnessOrder: ["pi", "opencode", "claude", "codex", "cursor", "gemini", "amp", "acp"] },
+    settings: { harnessOrder: ["pi", "opencode", "claude", "codex", "cursor", "amp", "acp"] },
   }));
-  assert.doesNotThrow(() => tools[2].inputSchema.parse({ request: { target: "gemini", task: "preview" } }));
+  assert.doesNotThrow(() => tools[2].inputSchema.parse({ request: { target: "codex", task: "preview" } }));
   assert.doesNotThrow(() => tools[2].inputSchema.parse({ request: { target: "amp", task: "preview" } }));
   assert.doesNotThrow(() => tools[2].inputSchema.parse({ request: { target: "acp", task: "preview", route: { agent: "fixture" }, policy: { write: true } } }));
 });

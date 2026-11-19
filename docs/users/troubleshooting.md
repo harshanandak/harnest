@@ -3,8 +3,8 @@
 ## The MCP client shows no Harnest tools
 
 1. Run `bun run daemon status` to verify readiness. For stdio clients, check that the command uses Node and the absolute path to `src/mcp-bridge.mjs`.
-2. Confirm Node.js is version 22.19 or newer for the default installation, or version 20 or newer for the lean installation without optional Taskflow packages.
-3. Run `npm run smoke:mcp` from the Harnest checkout.
+2. Confirm Node.js is version 20.6.0 or newer.
+3. Run `bun run smoke:mcp` from the Harnest checkout.
 4. Restart or reload the MCP client after changing its configuration.
 5. Use `harnest` as the MCP server key.
 
@@ -14,7 +14,7 @@ If the smoke passes but the client still shows no tools, inspect that client's M
 
 Install and authenticate that target's CLI through its native instructions. Make sure the executable is on the MCP server process's `PATH`. A lead client's own login is not forwarded to another downstream harness.
 
-Run `npm run doctor` for a broad machine profile, but interpret its individual checks. It can report optional hosts, workers, or registrations that a direct MCP installation does not use. For generic ACP, doctor reports registration metadata only; it does not run, initialize, authenticate, or version-probe the registered executable.
+Run `bun run doctor` for a broad machine profile, but interpret its individual checks. It can report optional hosts, workers, or registrations that a direct MCP installation does not use. For generic ACP, doctor reports registration metadata only; it does not run, initialize, authenticate, or version-probe the registered executable.
 
 ## The server appears stale after an update
 
@@ -33,21 +33,11 @@ Use one consistent policy representation. The preferred form is:
 }
 ```
 
-The approval marker belongs only on work whose exact write scope the lead has confirmed. Contradictory `write`, `readOnly`, or `allowWrites` values fail validation. Amp and generic ACP are write-only; a read-only request to either target is expected to reject.
+The approval marker belongs only on work whose exact write scope the lead has confirmed. Amp and generic ACP are write-only; a read-only request to either target is expected to reject.
 
 ## A long foreground handoff returned a job instead of a result
 
 Harnest converts foreground work beyond the safe MCP wait into a durable background job so the client does not abandon a still-running tool call. Poll `handoff_status`, page new events through `handoff_trace`, and call `handoff_result` after settlement. Prefer `execution.background: true` for substantial work.
-
-## A Taskflow request reports a missing optional dependency
-
-Run the locked default install:
-
-```powershell
-npm ci
-```
-
-`npm ci --omit=optional` supports plain prompt handoffs only. Taskflow compatibility is limited to explicit structured workflow requests for Pi and OpenCode. Use `handoff_graph_*` for cross-agent dependency graphs.
 
 ## Amp downstream execution fails on Windows
 

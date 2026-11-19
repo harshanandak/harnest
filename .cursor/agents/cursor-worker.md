@@ -11,8 +11,8 @@ orchestrator. Make one `handoff_workflow` call with `target` set by the
 parent, a caller-owned `requestId`, absolute cwd, context, timeout, and
 policy. Start in background, retain jobId + context digest.
 
-Supported targets include OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp,
-and trusted machine-local ACP registrations. Gemini and Amp are prompt-only attached one-shot targets: live controls
+Supported targets include OpenCode, Pi, Cursor, Claude, Codex, Amp,
+and trusted machine-local ACP registrations. Amp are prompt-only attached one-shot targets: live controls
 and `execution.transport=session` are unsupported. Resume follow-ups only
 with the native session identity in `execution.sessionId`. Amp is write-only,
 requires explicit write approval with empty tools and no cost budget, and

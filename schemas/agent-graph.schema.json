@@ -28,14 +28,6 @@
           "type": "boolean",
           "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true."
         },
-        "readOnly": {
-          "type": "boolean",
-          "description": "Legacy alias for !write; must not contradict write or allowWrites."
-        },
-        "allowWrites": {
-          "type": "boolean",
-          "description": "Legacy alias for write; must not contradict write or readOnly."
-        },
         "tools": {
           "anyOf": [
             {
@@ -66,7 +58,7 @@
               "additionalProperties": false
             }
           ],
-          "description": "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi supports deny only. OpenCode delegates tool permissions to its server."
+          "description": "Legacy list or exact native allow and deny names. Claude print supports both lists. Pi supports deny only. OpenCode delegates tool permissions to its server."
         },
         "mode": {
           "type": "string",
@@ -146,7 +138,6 @@
               "codex",
               "opencode",
               "cursor",
-              "gemini",
               "amp",
               "acp"
             ]
@@ -270,14 +261,6 @@
                 "type": "boolean",
                 "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true."
               },
-              "readOnly": {
-                "type": "boolean",
-                "description": "Legacy alias for !write; must not contradict write or allowWrites."
-              },
-              "allowWrites": {
-                "type": "boolean",
-                "description": "Legacy alias for write; must not contradict write or readOnly."
-              },
               "tools": {
                 "anyOf": [
                   {
@@ -308,7 +291,7 @@
                     "additionalProperties": false
                   }
                 ],
-                "description": "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi supports deny only. OpenCode delegates tool permissions to its server."
+                "description": "Legacy list or exact native allow and deny names. Claude print supports both lists. Pi supports deny only. OpenCode delegates tool permissions to its server."
               },
               "mode": {
                 "type": "string",
@@ -361,7 +344,7 @@
                 "type": "string"
               },
               "addDirs": {
-                "description": "Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval.",
+                "description": "Existing absolute directories for Claude, Codex, or Cursor. Codex requires write policy. External write roots require confirmed write approval.",
                 "maxItems": 8,
                 "type": "array",
                 "items": {

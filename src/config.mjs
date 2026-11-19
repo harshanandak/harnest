@@ -146,7 +146,6 @@ export function harnessLaunch(target, injected, { env = process.env, config } = 
     cursor: "HARNEST_CURSOR",
     claude: "HARNEST_CLAUDE",
     codex: "HARNEST_CODEX",
-    gemini: "HARNEST_GEMINI",
     amp: "HARNEST_AMP",
   }[target];
   if (!envName) throw new TypeError(`unsupported harness launch target: ${target}`);
@@ -162,7 +161,6 @@ export function harnessLaunch(target, injected, { env = process.env, config } = 
     },
     claude: "claude",
     get codex() { return windowsCodexDirectLaunch() || "codex"; },
-    get gemini() { return windowsNodePackageLaunch("gemini", ["@google", "gemini-cli", "dist", "index.js"]) || "gemini"; },
     amp: "amp",
   };
   const localKey = target === "opencode" ? "opencode2" : target;

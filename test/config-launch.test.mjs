@@ -30,7 +30,7 @@ test("trusted PATH resolution covers every native adapter default command", asyn
   const env = windows ? { Path: path, PathExt: ".CMD;.exe" } : { PATH: path };
   const commands = {
     claude: "claude", codex: "codex", cursor: "cursor-agent", opencode: "opencode",
-    pi: "pi", gemini: "gemini", amp: "amp",
+    pi: "pi", amp: "amp",
   };
   await withEnv("PATH", bin, async () => {
     for (const [target, name] of Object.entries(commands)) {
@@ -182,17 +182,7 @@ test("codex resolves to the npm node entrypoint when the layout is recognized", 
 });
 
 for (const [extension, contents] of [["ps1", "# shim\n"], ["cmd", "@ECHO off\n"]]) {
-  test(`Gemini resolves its .${extension} npm shim to the direct Node entrypoint`, { skip: process.platform !== "win32" }, async (t) => {
-    const bin = await mkdtemp(join(tmpdir(), "harnest-geminibin-"));
-    t.after(() => rm(bin, { recursive: true, force: true }));
-    await writeFile(join(bin, `gemini.${extension}`), contents);
-    const entrypoint = join(bin, "node_modules", "@google", "gemini-cli", "dist", "index.js");
-    await mkdir(join(bin, "node_modules", "@google", "gemini-cli", "dist"), { recursive: true });
-    await writeFile(entrypoint, "fake");
-    await withEnv("PATH", bin, () => withEnv("HARNEST_GEMINI", undefined, async () => {
-      assert.deepEqual(harnessLaunch("gemini"), { command: process.execPath, args: [entrypoint] });
-    }));
-  });
+
 }
 
 test("Pi resolves its npm shim to the direct Node entrypoint", { skip: process.platform !== "win32" }, async (t) => {
@@ -208,10 +198,7 @@ test("Pi resolves its npm shim to the direct Node entrypoint", { skip: process.p
   }));
 });
 
-test("Gemini and Amp honor their dedicated executable environment variables", async () => {
-  await withEnv("HARNEST_GEMINI", "fixture-gemini", async () => {
-    assert.deepEqual(harnessLaunch("gemini"), { command: "fixture-gemini", args: [] });
-  });
+test("Amp honors its dedicated executable environment variable", async () => {
   await withEnv("HARNEST_AMP", "fixture-amp", async () => {
     assert.deepEqual(harnessLaunch("amp"), { command: "fixture-amp", args: [] });
   });

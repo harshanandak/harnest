@@ -30,7 +30,7 @@ alwaysApply: false
 ---
 
 When the user asks to delegate a bounded task to another harness
-(OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a registered ACP agent), compare models, or fan out parallel
+(OpenCode, Pi, Cursor, Claude, Codex, Amp, or a registered ACP agent), compare models, or fan out parallel
 research lanes or dependency graphs, invoke the \`handoff\` skill (\`/handoff\`) and call the
 \`harnest\` MCP tools (\`handoff_workflow\`, \`handoff_status\`,
 \`handoff_trace\`, \`handoff_result\`, \`handoff_compare\`,
@@ -57,8 +57,8 @@ orchestrator. Make one \`handoff_workflow\` call with \`target\` set by the
 parent, a caller-owned \`requestId\`, absolute cwd, context, timeout, and
 policy. Start in background, retain jobId + context digest.
 
-Supported targets include OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp,
-and trusted machine-local ACP registrations. Gemini and Amp are prompt-only attached one-shot targets: live controls
+Supported targets include OpenCode, Pi, Cursor, Claude, Codex, Amp,
+and trusted machine-local ACP registrations. Amp is a prompt-only attached one-shot target. Live controls
 and \`execution.transport=session\` are unsupported. Resume follow-ups only
 with the native session identity in \`execution.sessionId\`. Amp is write-only,
 requires explicit write approval with empty tools and no cost budget, and

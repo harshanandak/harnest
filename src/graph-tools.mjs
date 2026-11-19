@@ -11,7 +11,7 @@ import {
   RESERVED_ROUTE_OPTION_IDS,
 } from "./protocol.mjs";
 
-const target = z.enum(["auto", "pi", "claude", "codex", "opencode", "cursor", "gemini", "amp", "acp"]);
+const target = z.enum(["auto", "pi", "claude", "codex", "opencode", "cursor", "amp", "acp"]);
 const nodeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
 const object = z.record(z.string(), z.unknown());
 const nonEmpty = z.string().trim().min(1);
@@ -38,7 +38,7 @@ export const routeInputSchema = z.object({
 
 export const nativeExecutionInputFields = {
   sessionId: z.string().optional(),
-  addDirs: z.array(z.string().max(1024)).max(MAX_ADD_DIRS).optional().describe("Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval."),
+  addDirs: z.array(z.string().max(1024)).max(MAX_ADD_DIRS).optional().describe("Existing absolute directories for Claude, Codex, or Cursor. Codex requires write policy. External write roots require confirmed write approval."),
   attachments: z.array(z.object({ type: z.enum(["image", "file"]), path: z.string().max(1024) }).strict()).max(MAX_ATTACHMENTS).optional().describe("Absolute local paths, up to 256 KiB each. Codex and Pi accept images. OpenCode and capable ACP agents accept images and files."),
   instructions: z.string().min(1).max(MAX_INSTRUCTIONS_BYTES).optional().describe("Append up to 8000 UTF-8 bytes to the Claude or Pi system prompt."),
   sessionAction: z.enum(["resume", "fork"]).optional().describe("Requires sessionId. Resume is the default. Fork uses native support on Claude, Codex, OpenCode, or Pi."),
@@ -47,12 +47,10 @@ export const nativeExecutionInputFields = {
 
 export const policyInputSchema = z.object({
   write: z.boolean().describe("Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true.").optional(),
-  readOnly: z.boolean().describe("Legacy alias for !write; must not contradict write or allowWrites.").optional(),
-  allowWrites: z.boolean().describe("Legacy alias for write; must not contradict write or readOnly.").optional(),
   tools: z.union([
     z.array(nonEmpty),
     z.object({ allow: toolNames.optional(), deny: toolNames.optional() }).strict(),
-  ]).describe("Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi supports deny only. OpenCode delegates tool permissions to its server.").optional(),
+  ]).describe("Legacy list or exact native allow and deny names. Claude print supports both lists. Pi supports deny only. OpenCode delegates tool permissions to its server.").optional(),
   mode: z.literal("plan").describe("Cursor print only. Selects read-only plan mode regardless of write authorization.").optional(),
   sandbox: z.boolean().describe("Cursor print only. True enables native isolation. False is rejected.").optional(),
   maxCostUsd: z.number().nonnegative().optional(),

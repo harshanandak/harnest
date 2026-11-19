@@ -34,14 +34,14 @@ flowchart LR
     lead["Lead agent<br/>Claude Code, Codex, Cursor, ..."] -->|handoff_workflow| hub(("Harnest<br/>MCP daemon"))
     hub -->|native CLI| a1["claude"]
     hub -->|native CLI| a2["codex"]
-    hub -->|native CLI| a3["opencode, pi, cursor,<br/>gemini, amp, acp"]
+    hub -->|native CLI| a3["opencode, pi, cursor,<br/>amp, acp"]
     hub <--> store[("Job store<br/>traces and receipts")]
     hub -.->|handoff_result| lead
 ```
 
 ## Quick start
 
-You need **Git**, **Bun**, and **Node.js 22.19 or newer** (for the default install with optional Taskflow packages). Install and log in to each downstream CLI through its own setup first, and keep those CLIs on `PATH`.
+You need **Git**, **Bun**, and **Node.js 20.6.0 or newer**. Install and log in to each downstream CLI through its own setup first, and keep those CLIs on `PATH`.
 
 **1. Clone and install.** Pick a directory you will keep, because host configs point at it.
 
@@ -72,7 +72,7 @@ bun run doctor --host codex
 bun run setup claude
 ```
 
-Installs the local marketplace and the Harnest plugin. Add `--project "/absolute/path/to/project"` to migrate old workspace registrations. Restart Claude Code. See [Claude Code setup](docs/users/integrations.md#claude-code).
+Installs the local marketplace and the Harnest plugin. Restart Claude Code. See [Claude Code setup](docs/users/integrations.md#claude-code).
 </details>
 
 <details>
@@ -116,14 +116,13 @@ Installs the user MCP bridge plus the project's skill, router rule, worker, and 
 </details>
 
 <details>
-<summary><b>Gemini CLI (legacy) or Amp</b></summary>
+<summary><b>Amp</b></summary>
 
 ```sh
-bun run setup gemini
 bun run setup amp
 ```
 
-Gemini gets the bridge with `trust: false`. Check it with `/mcp list`. If Amp reports `awaiting approval`, run `amp mcp approve harnest`. See [Gemini CLI](docs/users/integrations.md#gemini-cli-as-a-lead-client) and [Amp](docs/users/integrations.md#amp-as-a-lead-client).
+If Amp reports `awaiting approval`, run `amp mcp approve harnest`. See [Amp](docs/users/integrations.md#amp-as-a-lead-client).
 </details>
 
 <details>
@@ -149,7 +148,7 @@ bun run setup other
 Prints a stdio bridge snippet to paste into your client. For a direct HTTP connection, see [the HTTP setup instructions](docs/users/getting-started.md#add-the-mcp-server) and [choose a connection](#choose-a-connection).
 </details>
 
-To disconnect, run `bun run setup remove <host>` for an automatic preset, Gemini CLI, Amp, or Cursor's user config. Use the same config path overrides as setup. It backs up the file before it removes the Harnest entry. See [removing a registration](docs/users/integrations.md#remove-an-mcp-registration).
+To disconnect, run `bun run setup remove <host>` for an automatic preset, Amp, or Cursor's user config. Use the same config path overrides as setup. It backs up the file before it removes the Harnest entry. See [removing a registration](docs/users/integrations.md#remove-an-mcp-registration).
 
 ## Your first handoff
 
@@ -224,17 +223,16 @@ A **lead client** connects to Harnest through MCP. A **downstream agent** runs t
 | --- | --- | --- |
 | Claude Code | Daemon HTTP via the plugin's header helper | `claude` supports read and approved write, session resume, and live controls on session transport. |
 | Codex | Stdio bridge via the host installer | `codex` supports read-only and approved workspace-write, session resume, and live controls on session transport. Native Windows Codex setup has an upstream payload limit; see [release limits](docs/users/limits.md). |
-| OpenCode | Daemon HTTP via the integration installer | `opencode` requires OpenCode V2. It supports approved write-capable prompt handoffs, optional Taskflow, and server-attached live controls. |
-| Pi | Daemon HTTP via the extension | `pi` supports read and approved write, optional Taskflow, and live steer and reroute. |
+| OpenCode | Daemon HTTP via the integration installer | `opencode` requires OpenCode V2. It supports approved write-capable prompt handoffs and server-attached live controls. |
+| Pi | Daemon HTTP via the extension | `pi` supports read and approved write with live steer and reroute. |
 | Cursor | Stdio bridge via the integration installer | `cursor` supports read and approved write, session resume, and optional session transport. UI subagents need their own MCP registration. |
-| Gemini CLI (legacy) | MCP configuration | `gemini` requires CLI v0.62.0. Read and approved write are available with native-session follow-up. Inherited include directories limit filesystem containment. |
 | Amp | MCP configuration | `amp` supports approved write only, with native-session follow-up. Run Harnest on Linux, macOS, or inside WSL. |
 | Antigravity CLI | [Manual MCP configuration](docs/users/integrations.md#antigravity-cli-as-a-lead-client) | `acp` with `route.agent: "antigravity"` launches `agy acp` for approved writes. Harnest has not verified the preset against the real CLI. |
 | Registered ACP agent | Depends on the client's MCP support | `acp` supports approved writes with an explicitly trusted local registration. Register with `bun run acp add <preset-id> --trust` or [supply your own command](docs/acp-agents.md#register-manually). Harnest has not verified the twelve presets against the real agents. |
 
-Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the `antigravity` ACP preset. See [Development and account changes for Gemini CLI](https://github.com/google-gemini/gemini-cli/discussions/27274).
+Personal Google accounts can use the [Antigravity ACP preset](docs/acp-agents.md#register-from-a-preset).
 
-Gemini, Amp, and generic ACP use native-session follow-up and reject session transport and live controls. See [supported agents](docs/users/supported-agents.md) for the full control and platform boundaries.
+Amp and generic ACP use native-session follow-up and reject session transport and live controls. See [supported agents](docs/users/supported-agents.md) for the full control and platform boundaries.
 
 ## Choose a connection
 

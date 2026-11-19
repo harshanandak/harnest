@@ -144,7 +144,7 @@ test("routing keeps ACP out of bare auto and preserves route.agent as the regist
       target: "acp",
       route: { agent: "fixture" },
       scores: { quality: 5, speed: 5, efficiency: 5, reliability: 5 },
-      capabilities: { readOnly: false, write: true, taskflow: false, liveControl: false },
+      capabilities: { readOnly: false, write: true, liveControl: false },
     }],
   } }], { now: () => 0 });
   assert.equal(decision.target, "acp");

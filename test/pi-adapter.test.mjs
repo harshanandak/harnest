@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { PiAdapter, PiAdapterError, isClaudeRoute, resolveTaskflowExtensionPath } from "../src/adapters/pi.mjs";
+import { PiAdapter, PiAdapterError, isClaudeRoute } from "../src/adapters/pi.mjs";
 
 class FakeChild extends EventEmitter {
   constructor(onCommand) {
@@ -45,7 +45,6 @@ function request(cwd, overrides = {}) {
     cwd,
     context: { source: "test", files: ["README.md"] },
     contextDigest: "a".repeat(64),
-    workflow: null,
     route: {},
     execution: { background: false, timeoutMs: 5_000, sessionId: null },
     policy: { write: false, tools: [] },
@@ -74,7 +73,7 @@ test("Pi checks the active default before sending any prompt", async () => {
   }
 });
 
-function terminalChildFactory({ finalText = "workflow output", withTaskflow = false, taskflowState = true, assistantError = null, stats = null, model = state().model } = {}) {
+function terminalChildFactory({ finalText = "workflow output", assistantError = null, stats = null, model = state().model } = {}) {
   let child;
   let launch;
   const spawnFn = (command, args, _options) => {
@@ -84,24 +83,6 @@ function terminalChildFactory({ finalText = "workflow output", withTaskflow = fa
         instance.emitJson({ type: "response", id: command.id, command: "get_state", success: true, data: { ...state(), model } });
       } else if (command.type === "prompt") {
         instance.emitJson({ type: "response", id: command.id, command: "prompt", success: true });
-        if (withTaskflow) {
-          instance.emitJson({
-            type: "message_end",
-            message: {
-              role: "toolResult",
-              toolName: "taskflow",
-              isError: false,
-              content: [{ type: "text", text: finalText }],
-              details: {
-                action: "run",
-                finalOutput: finalText,
-                ...(taskflowState
-                  ? { state: { runId: "run-pi-001", flowName: "review", status: "completed", totalUsage: { totalTokens: 7 } } }
-                  : {}),
-              },
-            },
-          });
-        }
         instance.emitJson({
           type: "message_end",
           message: assistantError
@@ -218,7 +199,7 @@ test("Pi subtracts exact denies from its authorized tools and probes the native 
   }
 });
 
-test("Pi rejects unsupported tool names, allow lists, Taskflow and versions before a prompt", async () => {
+test("Pi rejects unsupported tool names, allow lists and versions before a prompt", async () => {
   const calls = [];
   const adapter = new PiAdapter({
     command: "fake-pi",
@@ -235,7 +216,6 @@ test("Pi rejects unsupported tool names, allow lists, Taskflow and versions befo
   for (const [overrides, reason] of [
     [{ policy: { tools: { allow: ["read"] } } }, /deny only/],
     [{ policy: { tools: { deny: ["unknown"] } } }, /exact built-in/],
-    [{ policy: { tools: { deny: ["read"] } }, workflow: { nodes: [] } }, /Taskflow/],
     [{ policy: { tools: { deny: ["read"] } } }, /version cannot enforce/],
   ]) {
     await assert.rejects(adapter.run(request(process.cwd(), overrides)), (error) => error.details?.kind === "policy" && reason.test(error.message));
@@ -243,19 +223,15 @@ test("Pi rejects unsupported tool names, allow lists, Taskflow and versions befo
   assert.deepEqual(calls, [["--help"]]);
 });
 
-test("surfaces the provider error instead of a missing taskflow result", async () => {
+test("surfaces a prompt-only provider error", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-provider-error-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
   const providerError = "404: no endpoints satisfy the configured routing policy";
   const fake = terminalChildFactory({ assistantError: providerError });
-  const adapter = new PiAdapter({ command: "fake-pi", taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: fake.spawnFn });
+  const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
 
   await assert.rejects(
-    adapter.run(request(cwd, {
-      workflow: {
-        engine: "taskflow",
-        spec: { name: "review", phases: [{ id: "final", task: "Review.", final: true }] },
-      },
-    })),
+    adapter.run(request(cwd)),
     (error) => error?.message === providerError && error?.details?.kind === "downstream",
   );
 });
@@ -263,9 +239,9 @@ test("surfaces the provider error instead of a missing taskflow result", async (
 test("Pi prompt orders the stable context before the variable tail", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-prefix-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
-  const fake = terminalChildFactory({ finalText: "plain answer", withTaskflow: false });
+  const fake = terminalChildFactory({ finalText: "plain answer" });
   const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
-  const output = await adapter.run(request(cwd, { workflow: null }));
+  const output = await adapter.run(request(cwd));
   assert.equal(output.result.finalText, "plain answer");
   const prompt = fake.child.commands.find((command) => command.type === "prompt").message;
   assert.ok(prompt.indexOf('"context"') < prompt.indexOf('"task"'), "context precedes the variable task");
@@ -283,7 +259,7 @@ test("Pi normalizes the installed get_session_stats shape and never invents a ca
   };
   const fake = terminalChildFactory({ finalText: "usage answer", stats });
   const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
-  const output = await adapter.run(request(cwd, { workflow: null }));
+  const output = await adapter.run(request(cwd));
   assert.deepEqual(output.usage, stats);
   assert.deepEqual(output.usageSummary, {
     inputTokens: 22,
@@ -294,58 +270,6 @@ test("Pi normalizes the installed get_session_stats shape and never invents a ca
     cacheWriteTokens: 2,
     costUsd: 0.03,
   });
-});
-
-test("runs a FlowSpec through Pi's /tf path and returns taskflow identity", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-"));
-  const fake = terminalChildFactory({ finalText: "saved flow result", withTaskflow: true });
-  const adapter = new PiAdapter({
-    command: "fake-pi",
-    taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js",
-    spawnFn: fake.spawnFn,
-  });
-  try {
-    const output = await adapter.run(request(cwd, {
-      route: { provider: "openai", model: "gpt-test", thinking: "high" },
-      policy: { write: false, tools: ["write"] },
-      execution: { timeoutMs: 5_000, sessionId: "session-pi-001" },
-      workflow: {
-        engine: "taskflow",
-        name: "review",
-        spec: { name: "review", phases: [{ id: "final", task: "Review the repository.", final: true }] },
-        args: { branch: "main" },
-      },
-    }));
-    assert.equal(output.sessionId, "session-pi-001");
-    assert.equal(output.workflowRunId, "run-pi-001");
-    assert.equal(output.result.finalText, "saved flow result");
-    assert.deepEqual(output.usage.tokens, { total: 7 });
-    assert.equal(output.route.provider, "openai");
-    assert.equal(output.route.model, "gpt-test");
-    assert.equal(output.route.thinking, "high");
-    assert.deepEqual(fake.launch.args.slice(0, 8), [
-      "--mode",
-      "rpc",
-      "--extension",
-      "C:\\pinned\\pi-taskflow\\dist\\index.js",
-      "--provider",
-      "openai",
-      "--model",
-      "gpt-test",
-    ]);
-    assert.equal(fake.launch.args[8], "--thinking");
-    assert.equal(fake.launch.args[9], "high");
-    const toolList = fake.launch.args[fake.launch.args.indexOf("--tools") + 1].split(",");
-    assert.ok(toolList.includes("read"));
-    assert.ok(toolList.includes("taskflow"));
-    assert.ok(!toolList.includes("write"));
-    const prompt = fake.child.commands.find((command) => command.type === "prompt");
-    assert.match(prompt.message, /^\/tf:review--req-pi-001-/);
-    assert.match(prompt.message, /req-pi-001/);
-    assert.match(prompt.message, /branch=main/);
-  } finally {
-    await rm(cwd, { recursive: true, force: true });
-  }
 });
 
 test("steers, queues, and reroutes through the active Pi RPC channel", async (t) => {
@@ -406,78 +330,7 @@ test("steers, queues, and reroutes through the active Pi RPC channel", async (t)
   assert.equal(output.result.finalText, "controlled result");
 });
 
-test("translates workflow nodes into the deterministic Pi slash-command path", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-"));
-  const fake = terminalChildFactory({ finalText: "node graph result", withTaskflow: true });
-  const adapter = new PiAdapter({ command: "fake-pi", taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: fake.spawnFn });
-  try {
-    const output = await adapter.run(request(cwd, {
-      workflow: {
-        name: "node-graph",
-        nodes: [
-          { id: "inspect", prompt: "Inspect", dependsOn: [] },
-          { id: "verify", prompt: "Verify", dependsOn: ["inspect"] },
-        ],
-      },
-    }));
-    assert.equal(output.result.finalText, "node graph result");
-    const prompt = fake.child.commands.find((command) => command.type === "prompt");
-    assert.match(prompt.message, /^\/tf:node-graph--req-pi-001-/);
-    assert.equal(output.workflowRunId, "run-pi-001");
-  } finally {
-    await rm(cwd, { recursive: true, force: true });
-  }
-});
-
-test("a saved FlowSpec cannot complete from unrelated assistant text", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-"));
-  const fake = terminalChildFactory({ finalText: "unrelated agent catalog", withTaskflow: false });
-  const adapter = new PiAdapter({ command: "fake-pi", taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: fake.spawnFn });
-  try {
-    await assert.rejects(
-      adapter.run(request(cwd, {
-        workflow: { name: "must-run", spec: { name: "must-run", phases: [{ id: "final", task: "Run", final: true }] } },
-      })),
-      /without a taskflow terminal result/,
-    );
-  } finally {
-    await rm(cwd, { recursive: true, force: true });
-  }
-});
-
-test("a saved FlowSpec requires an explicit completed taskflow state", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-"));
-  const fake = terminalChildFactory({ finalText: "plausible output", withTaskflow: true, taskflowState: false });
-  const adapter = new PiAdapter({ command: "fake-pi", taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: fake.spawnFn });
-  try {
-    await assert.rejects(
-      adapter.run(request(cwd, {
-        workflow: { name: "state-required", spec: { name: "state-required", phases: [{ id: "final", task: "Run", final: true }] } },
-      })),
-      /Pi taskflow did not report completed state/,
-    );
-  } finally {
-    await rm(cwd, { recursive: true, force: true });
-  }
-});
-
-test("the same request produces the same deterministic Pi flow command", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-"));
-  const workflow = { name: "stable", nodes: [{ id: "final", prompt: "Run", dependsOn: [] }] };
-  try {
-    const firstFake = terminalChildFactory({ finalText: "first", withTaskflow: true });
-    const secondFake = terminalChildFactory({ finalText: "second", withTaskflow: true });
-    await new PiAdapter({ command: "fake-pi", taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: firstFake.spawnFn }).run(request(cwd, { workflow }));
-    await new PiAdapter({ command: "fake-pi", taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: secondFake.spawnFn }).run(request(cwd, { workflow }));
-    const firstPrompt = firstFake.child.commands.find((command) => command.type === "prompt").message;
-    const secondPrompt = secondFake.child.commands.find((command) => command.type === "prompt").message;
-    assert.equal(firstPrompt, secondPrompt);
-  } finally {
-    await rm(cwd, { recursive: true, force: true });
-  }
-});
-
-test("a plain prompt runs natively without loading Taskflow", async () => {
+test("a plain prompt runs natively", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-"));
   const fake = terminalChildFactory({ finalText: "prompt result" });
   const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
@@ -486,20 +339,15 @@ test("a plain prompt runs natively without loading Taskflow", async () => {
     assert.equal(output.result.finalText, "prompt result");
     const prompt = fake.child.commands.find((command) => command.type === "prompt");
     assert.match(prompt.message, /Execute the assigned task directly/);
-    assert.doesNotMatch(prompt.message, /invoke the taskflow tool/i);
-    assert.match(prompt.message, /Do not invoke Taskflow or create a separate workflow/);
+    assert.match(prompt.message, /Do not create a separate workflow/);
     assert.match(prompt.message, /req-pi-001/);
     assert.match(prompt.message, /contextDigest/);
     assert.ok(!fake.launch.args.includes("--extension"), "plain Pi runs must not load an extension");
     const toolList = fake.launch.args[fake.launch.args.indexOf("--tools") + 1].split(",");
-    assert.ok(!toolList.includes("taskflow"), "plain Pi runs must not expose the taskflow tool");
+    assert.deepEqual(toolList, ["read", "grep", "find", "ls"]);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
-});
-
-test("an explicit Taskflow extension override is used without resolving the optional package", () => {
-  assert.equal(resolveTaskflowExtensionPath("C:\\pinned\\pi-taskflow\\dist\\index.js"), "C:\\pinned\\pi-taskflow\\dist\\index.js");
 });
 
 test("propagates abort without spending a model call", async () => {
@@ -529,7 +377,7 @@ test("propagates abort without spending a model call", async () => {
   }
 });
 
-test("graph node runs directly instead of asking Pi to create another Taskflow", async () => {
+test("graph node runs directly instead of asking Pi to create another workflow", async () => {
   const fake = terminalChildFactory({ finalText: "node result" });
   const adapter = new PiAdapter({ command: "fake-pi", spawnFn: fake.spawnFn });
   const output = await adapter.run(request(process.cwd(), { context: { graph: { graphId: "graph-fixture", nodeId: "synthesis", upstream: { review: { result: { finalText: "attributed evidence" } } } } } }));
@@ -537,7 +385,6 @@ test("graph node runs directly instead of asking Pi to create another Taskflow",
   const prompts = fake.child.commands.filter(command => command.type === "prompt");
   assert.equal(prompts.length, 1);
   assert.match(prompts[0].message, /Execute this single agent-graph node directly/);
-  assert.doesNotMatch(prompts[0].message, /invoke the taskflow tool with action=run/);
   assert.match(prompts[0].message, /attributed evidence/);
 });
 
@@ -574,59 +421,6 @@ test("fails a terminal RPC with no downstream final output", async () => {
       assert.match(error.message, /without final downstream output/);
       return true;
     });
-  } finally {
-    await rm(cwd, { recursive: true, force: true });
-  }
-});
-
-test("prompt-only runs prefer the post-steer assistant text over the stale taskflow output", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-steer-"));
-  let child;
-  let launch;
-  const spawnFn = (command, args, _options) => {
-    launch = { command, args };
-    child = new FakeChild((command, instance) => {
-      if (command.type === "get_state") {
-        instance.emitJson({ type: "response", id: command.id, command: "get_state", success: true, data: state() });
-      } else if (command.type === "prompt") {
-        instance.emitJson({ type: "response", id: command.id, command: "prompt", success: true });
-        instance.emitJson({
-          type: "message_end",
-          message: {
-            role: "toolResult",
-            toolName: "taskflow",
-            isError: false,
-            content: [{ type: "text", text: "ORIGINAL_RESULT" }],
-            details: {
-              action: "run",
-              finalOutput: "ORIGINAL_RESULT",
-              state: { runId: "run-pi-002", flowName: "task", status: "completed", totalUsage: { totalTokens: 7 } },
-            },
-          },
-        });
-        instance.emitJson({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "STEER_APPLIED" }] } });
-        instance.emitJson({ type: "agent_settled" });
-      } else if (command.type === "get_last_assistant_text") {
-        instance.emitJson({ type: "response", id: command.id, command: "get_last_assistant_text", success: true, data: { text: "STEER_APPLIED" } });
-      } else if (command.type === "get_session_stats") {
-        instance.emitJson({
-          type: "response",
-          id: command.id,
-          command: "get_session_stats",
-          success: true,
-          data: { sessionId: "session-pi-002", tokens: { total: 7 }, cost: 0 },
-        });
-      } else if (command.type === "abort") {
-        instance.kill();
-      }
-    });
-    return child;
-  };
-  const adapter = new PiAdapter({ command: "fake-pi", spawnFn });
-  try {
-    const output = await adapter.run(request(cwd));
-    assert.equal(output.result.finalText, "STEER_APPLIED");
-    assert.equal(output.workflowRunId, "run-pi-002");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAdapter } from "../src/adapters/index.mjs";
-import { assertAdapterRoute, assertNoClaudeWorkflow, isClaudeRoute } from "../src/model-policy.mjs";
+import { assertAdapterRoute, isClaudeRoute } from "../src/model-policy.mjs";
 
 test("non-Claude adapters reject named Claude routes before spawning", async () => {
   for (const target of ["pi", "opencode", "cursor", "codex"]) {
@@ -12,10 +12,10 @@ test("non-Claude adapters reject named Claude routes before spawning", async () 
   }
 });
 
-test("nested Taskflow phases cannot name Claude through qualified aliases", () => {
+test("Claude aliases are recognized", () => {
   assert.equal(isClaudeRoute({ model: "fable" }), true);
+  assert.equal(isClaudeRoute({ model: "gateway/opus" }), true);
   assert.equal(isClaudeRoute({ model: "openai/gpt-5.6-sol" }), false);
-  assert.throws(() => assertNoClaudeWorkflow("pi", { spec: { phases: [{ type: "parallel", phases: [{ model: "gateway/opus" }] }] } }), /Claude/);
 });
 
 test("Amp routing admits only native modes and rejects model-style controls before launch", () => {
@@ -28,31 +28,12 @@ test("Amp routing admits only native modes and rejects model-style controls befo
   }
 });
 
-test("Gemini routing accepts native Google model pins and rejects every unsupported route control", () => {
-  for (const route of [
-    {},
-    { provider: "google" },
-    { provider: "gemini", model: "gemini-3-pro" },
-    { provider: "google-gemini", model: "gemini-3-flash-preview" },
-    { provider: "google/gemini", model: "gemini-3-pro" },
-  ]) assert.doesNotThrow(() => assertAdapterRoute("gemini", route));
-
-  for (const route of [
-    { provider: "openai" },
-    { model: "gpt-6" },
-    { agent: "reviewer" },
-    { variant: "high" },
-    { harnessVersion: "v2" },
-    { serverUrl: "http://localhost" },
-  ]) assert.throws(() => assertAdapterRoute("gemini", route), /Gemini route/i);
-});
-
 test("one-shot adapters reject structured workflows instead of silently dropping nodes", async () => {
-  for (const target of ["claude", "cursor", "codex"]) {
+  for (const target of ["claude", "cursor", "codex", "pi", "opencode", "amp"]) {
     for (const workflow of [{ nodes: [{ id: "work", task: "do work" }] }, { spec: { phases: [] } }]) {
       let spawned = false;
       const adapter = createAdapter(target, { [target]: { command: "synthetic", spawnFn: () => { spawned = true; throw new Error("must not spawn"); } } });
-      await assert.rejects(adapter.run({ workflow }), (error) => error.details?.kind === "policy" && /Taskflow/.test(error.message));
+      await assert.rejects(adapter.run({ workflow }), (error) => error.details?.kind === "policy" && error.details.field === "workflow");
       assert.equal(spawned, false);
     }
   }

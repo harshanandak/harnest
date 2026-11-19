@@ -72,12 +72,12 @@ test("OpenCode single, graph, and dynamic leaves reject unenforceable tools befo
 
 test("MCP comparison and review schemas expose only the five read-only targets", () => {
   const server = createServer({ detachBackground: false });
-  const targets = ["pi", "cursor", "claude", "codex", "gemini"];
+  const targets = ["pi", "cursor", "claude", "codex"];
   const inputFor = (collection, target) => ({
     request: { requestId: `readonly-${target}`, target, task: "inspect", cwd: process.cwd() },
     [collection]: [
-      { name: "first", target, route: { model: target === "gemini" ? "gemini-fixture" : "fixture" } },
-      { name: "second", target, route: { model: target === "gemini" ? "gemini-fixture" : "fixture" } },
+      { name: "first", target, route: { model: "fixture" } },
+      { name: "second", target, route: { model: "fixture" } },
     ],
   });
   for (const [toolName, collection] of [["handoff_compare", "candidates"], ["handoff_review", "reviewers"]]) {

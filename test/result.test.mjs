@@ -44,7 +44,7 @@ test("structured result extracts a trailing completion object after model preamb
   assert.deepEqual(result.risks, []);
 });
 
-test("large taskflow text is bounded", () => {
+test("large result text is bounded", () => {
   const compacted = compactText("x".repeat(9_000));
   assert.ok(compacted.length < 8_100);
   assert.match(compacted, /truncated 1000 chars/);

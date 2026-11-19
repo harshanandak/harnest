@@ -13,10 +13,9 @@ test("dynamic start always returns durable background work at the MCP boundary",
   assert.equal(actual.source, "return 1");
 });
 
-test("dynamic tool schemas admit Gemini and explicit write-capable Amp and ACP roots", () => {
+test("dynamic tool schemas admit explicit write-capable Amp and ACP roots", () => {
   const tool = dynamicToolDefinitions({}).find((item) => item.name === "handoff_dynamic_start");
   const base = { requestId: "request", cwd: process.cwd(), source: "return 1" };
-  assert.equal(tool.inputSchema.safeParse({ workflow: { ...base, target: "gemini", policy: { write: false } } }).success, true);
   assert.equal(tool.inputSchema.safeParse({ workflow: { ...base, target: "amp", route: { variant: "medium" }, policy: { write: true } } }).success, true);
   assert.equal(tool.inputSchema.safeParse({ workflow: { ...base, target: "acp", route: { agent: "fixture" }, policy: { write: true } } }).success, true);
 });

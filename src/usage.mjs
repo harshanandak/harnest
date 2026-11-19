@@ -2,8 +2,7 @@
 //
 // The provider payload stays in `usage` exactly as the adapter observed it;
 // `usageSummary` is a separate normalized view so consumers can compare
-// prompt-cache behavior across the seven harnesses without re-learning seven
-// shapes. Nothing here replaces or reshapes a legacy field.
+// prompt-cache behavior across harnesses without re-learning their usage shapes. Nothing here replaces or reshapes a legacy field.
 //
 // Contract:
 // - null always means "not reported by the harness/provider" — never a
@@ -108,7 +107,7 @@ export function addUsageToTotals(totals, value) {
 /**
  * Normalize one harness's observed usage into the shared summary shape.
  *
- * @param {"opencode"|"pi"|"cursor"|"claude"|"codex"|"gemini"|"amp"|"acp"|string} host
+ * @param {"opencode"|"pi"|"cursor"|"claude"|"codex"|"amp"|"acp"|string} host
  * @param {object|null} usage raw provider payload (legacy shape, unchanged)
  * @param {{reported?: object|null}} [options] For harnesses whose accumulator
  *   cannot distinguish "unreported" from an explicit 0 (OpenCode), `reported`
@@ -196,7 +195,6 @@ export function summarizeUsage(host, usage = null, { reported = null } = {}) {
         costUsd: allow("cost", pick(usage, ["cost", "costUsd", "totalCostUsd"])),
       });
     }
-    case "gemini":
     case "amp":
     case "acp":
       // Raw usage remains available on the receipt, but these native counter

@@ -23,7 +23,7 @@ test("a loaded runtime reports source drift until it is restarted", async () => 
     const restarted = createRuntimeInfo(root)();
     assert.equal(restarted.sourceStatus, "current");
     assert.equal(restarted.loadedFingerprint, after.diskFingerprint);
-    assert.deepEqual(restarted.targets, ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]);
+    assert.deepEqual(restarted.targets, ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]);
     await rm(join(root, "src"), { recursive: true });
     assert.equal(loaded().sourceStatus, "unknown");
   } finally {

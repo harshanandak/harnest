@@ -110,9 +110,9 @@ test("transaction lock spans read and update, preserving independent overlays", 
 test("wizard preserves both training answers through expansion and routing", async () => {
   const { interactive } = await import("../scripts/setup-routing.mjs");
   for (const answer of ["yes", "no"]) {
-    const answers = [...Array(8).fill(""), "n", "pi", answer];
+    const answers = [...Array(7).fill(""), "n", "pi", answer];
     const selected = await interactive({}, { rl: { question: async () => answers.shift(), close() {} }, pickLanes: async () => [] });
-    assert.equal(answers.length, 0, "fixture must answer every seven-target wizard prompt");
+    assert.equal(answers.length, 0, "fixture must answer every six-target wizard prompt");
     const policy = JSON.parse(JSON.stringify({ allowTrainingEndpoints: selected.allowTrainingEndpoints }));
     assert.equal(expandUserPolicy(policy).allowTrainingEndpoints, answer === "yes");
   }

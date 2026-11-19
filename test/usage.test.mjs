@@ -193,8 +193,8 @@ test("summarizeUsage never claims exclusive semantics for Cursor cache counters"
   );
 });
 
-test("Gemini and Amp usage stays unknown until native counter semantics are verified", () => {
-  for (const target of ["gemini", "amp"]) {
+test("Amp usage stays unknown until native counter semantics are verified", () => {
+  for (const target of ["amp"]) {
     assert.deepEqual(summarizeUsage(target, {
       inputTokens: 10,
       outputTokens: 5,

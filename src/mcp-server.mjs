@@ -17,7 +17,7 @@ import { registerRoutingTools } from "./routing-tools.mjs";
 // the boundary converts it into a durable background job and the caller
 // polls handoff_status/handoff_result instead.
 export const FOREGROUND_SAFE_WAIT_MS = 55_000;
-const READ_ONLY_TARGETS = ["pi", "cursor", "claude", "codex", "gemini"];
+const READ_ONLY_TARGETS = ["pi", "cursor", "claude", "codex"];
 
 export function foregroundTimeoutConversion(request) {
   const execution = request?.execution;
@@ -58,12 +58,11 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     requestId: z.string().trim().min(1).describe(
       "Stable caller-generated recovery key; required before any downstream work starts.",
     ),
-    target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]),
+    target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]),
     task: z.string().trim().min(1),
     cwd: z.string().trim().min(1),
     context: z.unknown().optional(),
     contextDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-    workflow: z.unknown().optional(),
     route: routeInputSchema.optional(),
     execution: z.object({
       background: z.boolean().optional(),
@@ -74,7 +73,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     policy: policyInputSchema.optional(),
     metadata: metadataInputSchema.optional(),
   }).strict().describe(
-    "Complete Harnest request containing target, task, absolute cwd, context, workflow, route, execution, and policy.",
+    "Complete Harnest request containing target, task, absolute cwd, context, route, execution, and policy.",
   );
   const namedRouteSchema = routeInputSchema.extend({ model: z.string().trim().min(1) });
   const readOnlyRequestSchema = requestSchema.safeExtend({
@@ -125,7 +124,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     {
       title: "Hand off a complete workflow",
       description:
-        "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is opt-in through route.agent and accepts advertised model, variant, and options controls. ACP is write-only and rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. For bounded independent work longer than one turn — not quick questions or in-session edits. Use policy.tools with explicit allow and deny names for Claude print or Gemini, and deny only for Pi. OpenCode V2 requires approved write-capable policy because its server owns tool permissions. Cursor print supports policy.mode=plan and policy.sandbox=true. Use background=true for durable status/result retrieval. A foreground execution.timeoutMs above the safe MCP foreground wait (55s, below the common 60s client tool timeout) is converted to a durable background job automatically; its receipt carries execution.foregroundConverted=true and the caller polls handoff_status instead of waiting. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
+        "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is opt-in through route.agent and accepts advertised model, variant, and options controls. ACP is write-only and rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. For bounded independent work longer than one turn — not quick questions or in-session edits. Use policy.tools with explicit allow and deny names for Claude print, and deny only for Pi. OpenCode V2 requires approved write-capable policy because its server owns tool permissions. Cursor print supports policy.mode=plan and policy.sandbox=true. Use background=true for durable status/result retrieval. A foreground execution.timeoutMs above the safe MCP foreground wait (55s, below the common 60s client tool timeout) is converted to a durable background job automatically; its receipt carries execution.foregroundConverted=true and the caller polls handoff_status instead of waiting. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
       inputSchema: z.object({ request: requestSchema }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -338,7 +337,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).optional(),
         state: z.enum(["queued", "running", "completed", "failed", "cancelled", "partial"]).optional(),
-        target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]).optional(),
+        target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]).optional(),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
@@ -359,7 +358,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).optional(),
         state: z.enum(["queued", "running", "completed", "failed", "cancelled", "partial"]).optional(),
-        target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]).optional(),
+        target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]).optional(),
         recent: z.number().int().min(0).max(10).optional(),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false },
@@ -465,21 +464,20 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
             claude: "Agent SDK streaming input; delivery is not consumption; setModel has native acknowledgement",
             codex: "app-server; turn/steer acknowledged; next-turn messages remain queued until observed",
             cursor: "ACP; negotiated resume and cancellation; active-turn message/steer unsupported",
-            gemini: "unsupported; prompt-only one-shot execution",
             amp: "unsupported; prompt-only one-shot execution",
             acp: "unsupported; generic ACP uses attached prompt turns and native resume negotiation without Harnest persistent transport",
             usageLimitWaiting: "Claude SDK does not inherit interactive subscription reset waiting",
           },
           writeApproval: {
             marker: "metadata.harnest.writeApproved=true",
-            appliesTo: "write-capable handoff_workflow and handoff_graph_start calls on guarded hosts, including policy.write=true, policy.readOnly=false, and policy.allowWrites=true",
+            appliesTo: "write-capable handoff_workflow and handoff_graph_start calls on guarded hosts with policy.write=true",
             scope: "The lead confirms the intended write scope before setting the marker; there is no separate writeScope protocol field.",
           },
           nestedHandoffs: "A nested handoff remains subject to the child host's approval and sandbox restrictions and cannot widen them.",
           launchPath: {
             direct: "Call handoff_workflow directly as an MCP tool when child visibility is not needed.",
-            claude: "Invoke the native workflow-rescue subagent (or harnest:opencode-worker / harnest:pi-worker / harnest:cursor-worker / harnest:claude-worker / harnest:codex-worker / harnest:gemini-worker / harnest:amp-worker / harnest:acp-worker) via the Agent tool so the receipt returns through the subagent transcript; the worker pages status/trace and returns the durable receipt verbatim.",
-            codex: "For Codex-to-Codex, call handoff_workflow directly. For other targets, call it directly or spawn the matching native worker for a visible child thread: opencode_worker, pi_worker, cursor_worker, claude_worker, gemini_worker, amp_worker, or acp_worker.",
+            claude: "Invoke the native workflow-rescue subagent (or harnest:opencode-worker / harnest:pi-worker / harnest:cursor-worker / harnest:claude-worker / harnest:codex-worker / harnest:amp-worker / harnest:acp-worker) via the Agent tool so the receipt returns through the subagent transcript; the worker pages status/trace and returns the durable receipt verbatim.",
+            codex: "For Codex-to-Codex, call handoff_workflow directly. For other targets, call it directly or spawn the matching native worker for a visible child thread: opencode_worker, pi_worker, cursor_worker, claude_worker, amp_worker, or acp_worker.",
             opencode: "Call harnest_handoff_workflow directly, or call the subagent tool with the matching worker agent ID for a visible child session.",
             pi: "Call handoff_workflow directly; Pi has no child-agent surface, bounded status/trace pages ARE the operator view.",
             cursor: "Call handoff_workflow directly as an MCP tool (Cursor MCP servers are team/workspace configured). For visibility, run one cursor-worker background agent per handoff and poll status/trace; Cursor subagents do not inherit UI MCP servers in automations, so prefer direct calls.",
@@ -490,7 +488,6 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
             { agent: "cursor-worker", target: "cursor", notes: "One-shot print mode with stream-json deltas in trace. Read-only defaults to ask and approved write defaults to --force unless policy controls apply. Supports policy.mode=plan and policy.sandbox=true. Resume via execution.sessionId; no live message/reroute." },
             { agent: "claude-worker", target: "claude", notes: "One-shot print mode with stream-json deltas in trace. Read-only maps to --permission-mode plan; write uses acceptEdits. Supports route.agent, route.serviceTier fast, explicit policy.tools.allow and deny, and maxCostUsd via --max-budget-usd. Resume via execution.sessionId; no live message/reroute." },
             { agent: "codex-worker", target: "codex", notes: "One-shot exec with JSONL events in trace. Supports route.profile and route.serviceTier. Read-only maps to --sandbox read-only; write uses workspace-write (never danger-full-access). Resume via execution.sessionId; no live message/reroute." },
-            { agent: "gemini-worker", target: "gemini", notes: "Prompt-only one-shot with isolated native policy for read or approved write work. Supports explicit policy.tools.allow and deny. Rejects cost budgets, persistent session transport, and live controls." },
             { agent: "amp-worker", target: "amp", notes: "Prompt-only attached local execution on macOS or Linux, including when the whole MCP server runs inside WSL. Requires approved write policy; route.variant accepts low, medium, high, or ultra. Rejects read-only work, model/provider pins, persistent session transport, and live controls." },
             { agent: "acp-worker", target: "acp", notes: "One generic worker for a trusted local ACP registration selected by route.agent. Requires approved write policy. Only native advertised model, variant, and options choices are accepted. Native authentication stays native. Provider pins, automatic installation, persistent session transport, and live controls are unsupported." },
           ],
@@ -501,7 +498,6 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
             cursor: "oneshot rejects live controls; session uses ACP cancellation and negotiated model reroute, but rejects mid-turn messages",
             claude: "oneshot rejects live controls; session uses SDK streaming guidance with UUID consumption evidence and native setModel acknowledgement",
             codex: "oneshot rejects live controls; session uses app-server turn/steer and owned next-turn messages",
-            gemini: "oneshot rejects live controls; resume uses the native session identity when supplied",
             amp: "oneshot rejects live controls; resume uses the native session identity when supplied",
             acp: "generic attached ACP supports cancellation only; message and reroute controls are unsupported",
           },
@@ -522,7 +518,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     const protocol = new McpServer(
       { name: "harnest", version: "0.1.0" },
       {
-        instructions: "One harness owns each handoff. For mixed-harness dependency graphs, validate then start with handoff_graph_validate/handoff_graph_start, retain graphId, poll graph status and inspect individual child traces. Preserve completed nodes when resuming unsuccessful graphs. For one handoff use requestId+cwd+context+workflow+route+policy, start background, poll handoff_trace with afterSequence, return handoff_result verbatim. Never merge or deploy unless policy grants it. Call handoff_host_info when unsure of the launch path.",
+        instructions: "One harness owns each handoff. For mixed-harness dependency graphs, validate then start with handoff_graph_validate/handoff_graph_start, retain graphId, poll graph status and inspect individual child traces. Preserve completed nodes when resuming unsuccessful graphs. For one handoff use requestId+cwd+context+route+policy, start background, poll handoff_trace with afterSequence, return handoff_result verbatim. Never merge or deploy unless policy grants it. Call handoff_host_info when unsure of the launch path.",
       },
     );
     for (const definition of tools) protocol.registerTool(...definition);

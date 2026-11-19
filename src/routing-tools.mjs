@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { RoutingSettings } from "./routing-settings.mjs";
 
-const target = z.enum(["pi", "opencode", "claude", "codex", "cursor", "gemini", "amp", "acp"]);
+const target = z.enum(["pi", "opencode", "claude", "codex", "cursor", "amp", "acp"]);
 const preset = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/);
 const object = z.record(z.string(), z.unknown());
 export const routingSettingsSchema = z.object({
@@ -25,7 +25,7 @@ export function routingToolDefinitions(settings, options = {}) {
       settings: routingSettingsSchema.optional(),
     }).strict(), false, (input) => settings.configure(input)],
     ["preview", "Explain a task's route for a saved-policy snapshot using the actual selector and configured resolver, without launching a handoff. Show target, provider, model, thinking and overrides. Runtime circuit-breaker and last-known-good policy state are not shared; host config and executable hooks stay process-cached. An optional preset applies only to this preview (null selects base). Pass the same task, target, route and routing metadata intended for execution.", z.object({
-      request: z.object({ task: z.string().trim().min(1).max(100000), cwd: z.string().min(1).optional(), target: z.enum(["auto", "pi", "opencode", "claude", "codex", "cursor", "gemini", "amp", "acp"]).optional(), route: object.optional(), metadata: object.optional(), policy: object.optional(), context: object.optional(), execution: object.optional() }).strict(),
+      request: z.object({ task: z.string().trim().min(1).max(100000), cwd: z.string().min(1).optional(), target: z.enum(["auto", "pi", "opencode", "claude", "codex", "cursor", "amp", "acp"]).optional(), route: object.optional(), metadata: object.optional(), policy: object.optional(), context: object.optional(), execution: object.optional() }).strict(),
       preset: preset.nullable().optional(),
     }).strict(), true, (input) => settings.preview(input)],
   ];

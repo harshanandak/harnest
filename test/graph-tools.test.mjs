@@ -15,7 +15,7 @@ test("published graph schema matches MCP input and accepts task-aware automatic 
   assert.equal(graphInputSchema.safeParse({ ...graph, nodes: [{ ...graph.nodes[0], workflow: { spec: {} } }] }).success, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, execution: { maxConcurrency: 7 } }).success, false);
   const schema = z.toJSONSchema(graphInputSchema);
-  assert.deepEqual(Object.keys(schema.properties.policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
+  assert.deepEqual(Object.keys(schema.properties.policy.properties), ["write", "tools", "mode", "sandbox", "maxCostUsd"]);
   assert.equal(schema.properties.policy.additionalProperties, false);
   assert.deepEqual(Object.keys(schema.properties.nodes.items.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
   assert.equal(schema.properties.nodes.items.properties.route.additionalProperties, false);
@@ -27,7 +27,6 @@ test("published graph schema matches MCP input and accepts task-aware automatic 
   assert.equal(graphInputSchema.safeParse({ ...graph, policy: { permissions: "write" } }).success, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, nodes: [{ ...graph.nodes[0], route: { reasoningEffort: "xhigh" } }] }).success, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, policy: { write: true }, nodes: [
-    { id: "gemini", target: "gemini", task: "review", policy: { write: false } },
     { id: "amp", target: "amp", task: "edit", route: { variant: "medium" }, policy: { write: true } },
   ] }).success, true);
 });
@@ -36,7 +35,7 @@ test("graph runtime errors list accepted policy and route fields", async () => {
   const graph = { requestId: "graph-runtime-fields", cwd: process.cwd(), nodes: [{ id: "step", target: "pi", task: "test" }] };
   await assert.rejects(
     normalizeGraph({ ...graph, policy: { permission: "write" } }),
-    /policy\.permission is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd, mode, sandbox/,
+    /policy\.permission is unsupported; expected one of write, tools, maxCostUsd, mode, sandbox/,
   );
   await assert.rejects(
     normalizeGraph({ ...graph, nodes: [{ ...graph.nodes[0], route: { reasoningEffort: "xhigh" } }] }),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import test from "node:test";
@@ -255,15 +255,11 @@ test("OpenCode rejects granular policies before probing CLI or server", async ()
       { execution: { sessionId: "previous", sessionAction: "fork" } },
       { context: { graph: { graphId: "fixture", nodeId: "inspect" } } },
       { context: { dynamic: { runId: "fixture" } } },
-      { workflow: { spec: {} } },
     ]) {
       await assert.rejects(adapter.run(request({ policy: { tools }, ...overrides })),
         (error) => error.details?.kind === "policy" && error.details.field === "policy.tools");
     }
   }
-  await assert.rejects(adapter.run(request({
-    workflow: { spec: { phases: [{ id: "inspect", task: "Inspect.", tools: ["read"] }] } },
-  })), /does not enforce Taskflow phase tool lists/);
   assert.equal(probes, 0);
 });
 
@@ -362,212 +358,12 @@ test("OpenCode rejects read-only before probing either a local or attached serve
       { policy: { write: false }, context: { graph: { graphId: "fixture" } } },
       { policy: { write: false }, execution: { sessionId: "previous" } },
       { policy: { write: false }, execution: { sessionId: "previous", sessionAction: "fork" } },
-      { policy: { write: false }, workflow: { spec: { task: "Review." } } },
+      { policy: { write: false } },
     ]) {
       await assert.rejects(adapter.run(request(overrides)),
         (error) => error.details?.kind === "policy" && error.details.field === "policy.write");
     }
   }
-});
-
-test("OpenCode Taskflow rejects a selected agent with tool restrictions before server startup", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-agent-policy-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const agents = join(cwd, ".pi", "agents");
-  await mkdir(agents, { recursive: true });
-  await writeFile(join(agents, "read-auditor.md"), "---\nname: read-auditor\ndescription: Read-only audit\ntools: read\n---\nReview the files.\n");
-  const adapter = new OpenCodeAdapter({
-    command: "fake-opencode",
-    spawnFn() { assert.fail("restricted flow reached the CLI"); },
-    fetchFn() { assert.fail("restricted flow reached the server"); },
-  });
-  await assert.rejects(adapter.run(request({ cwd, workflow: { spec: {
-    agentScope: "project",
-    name: "restricted-agent",
-    phases: [
-      { id: "first", task: "Perform a task." },
-      { id: "final", agent: "read-auditor", task: "Review the result.", final: true },
-    ],
-  } } })), /does not enforce Taskflow agent tool lists/);
-});
-
-test("OpenCode rejects dynamic nested Taskflow restrictions before launching the plan phase", async () => {
-  const adapter = new OpenCodeAdapter({
-    command: "fake-opencode",
-    spawnFn() { assert.fail("uninspectable flow reached the CLI"); },
-    fetchFn() { assert.fail("uninspectable flow reached the server"); },
-  });
-  const workflow = { spec: { name: "dynamic-child", phases: [
-    { id: "plan", task: "Write a FlowSpec.", output: "json" },
-    { id: "child", type: "flow", def: "{steps.plan.json}", dependsOn: ["plan"], final: true },
-  ] } };
-  await assert.rejects(adapter.run(request({ workflow })),
-    (error) => error.details?.kind === "policy" && /nested tool policy before launch.*child/.test(error.message));
-  workflow.spec.phases[1].def = [{ id: "restricted", task: "Review.", tools: ["read"] }];
-  await assert.rejects(adapter.run(request({ workflow })),
-    (error) => error.details?.kind === "policy" && /does not enforce Taskflow phase tool lists/.test(error.message));
-});
-
-test("OpenCode runs an unrestricted nested FlowSpec through V2", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-nested-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const calls = [];
-  const adapter = new OpenCodeAdapter({
-    ...managedOptions(), command: "fake-opencode",
-    spawnFn(_command, args) {
-      calls.push(args);
-      return new FakeChild(streamLines("nested-session", "nested output"));
-    },
-  });
-  const output = await adapter.run(request({ cwd, workflow: { spec: {
-    name: "static-child",
-    phases: [{ id: "child", type: "flow", def: [{ id: "inner", task: "Return nested canary.", final: true }], final: true }],
-  } } }));
-  assert.equal(output.result.finalText, "nested output");
-  assert.equal(calls.length, 1);
-  assert.match(calls[0][1], /Return nested canary/);
-  assert.ok(calls[0].includes("--server"));
-});
-
-test("OpenCode rejects workflow.nodes before launch instead of silently running it as a prompt", async () => {
-  let spawned = 0;
-  const adapter = new OpenCodeAdapter({
-    ...managedOptions(),
-    command: "fake-opencode",
-    spawnFn() {
-      spawned += 1;
-      return new FakeChild(streamLines());
-    },
-  });
-  await assert.rejects(
-    adapter.run(request({ workflow: { engine: "taskflow", nodes: [{ id: "final", prompt: "Run", dependsOn: [] }] } })),
-    (error) => error.details?.kind === "unsupported-workflow" && /workflow\.spec/.test(error.message),
-  );
-  assert.equal(spawned, 0);
-});
-
-test("executes a FlowSpec through the pinned taskflow handler with fake phase processes", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-test-"));
-  const phaseCwd = join(cwd, "phase-cwd");
-  await mkdir(phaseCwd);
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const calls = [];
-  const adapter = new OpenCodeAdapter({
-    ...managedOptions(),
-    command: "fake-opencode",
-    spawnFn(command, args, options) {
-      calls.push({ command, args, options });
-      return new FakeChild(streamLines(`phase-session-${calls.length}`, "phase result"));
-    },
-  });
-  const output = await adapter.run(request({
-    cwd,
-    task: "Run the complete flow.",
-    route: { model: "openai/gpt-test" },
-    policy: { write: true },
-    workflow: {
-      engine: "taskflow",
-      spec: {
-        name: "deterministic-flow",
-        phases: [
-          { id: "inspect", type: "agent", task: "Inspect.", cwd: phaseCwd },
-          { id: "final", type: "agent", task: "Produce the final answer.", from: ["inspect"], final: true },
-        ],
-      },
-    },
-  }));
-
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].options.cwd, phaseCwd);
-  assert.match(calls[0].args[1], /req-opencode-001/);
-  assert.match(calls[0].args[1], /deterministic-flow/);
-  assert.equal(output.result.finalText, "phase result");
-  assert.match(output.result.taskflow, /taskflow complete/);
-  assert.ok(output.workflowRunId);
-  assert.deepEqual(output.usage, { input: 6, output: 12, cacheRead: 4, cacheWrite: 2, cost: 0.02, contextTokens: 9, turns: 2 });
-  assert.deepEqual(output.usageSummary, {
-    inputTokens: 12,
-    uncachedInputTokens: 6,
-    inputSemantics: "exclusive",
-    outputTokens: 12,
-    cacheReadTokens: 4,
-    cacheWriteTokens: 2,
-    costUsd: 0.02,
-  });
-});
-
-test("OpenCode Taskflow accepts an empty deny list", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-empty-deny-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const calls = [];
-  const adapter = new OpenCodeAdapter({
-    ...managedOptions(),
-    command: "fake-opencode",
-    spawnFn(_command, args, options) {
-      calls.push({ args, options });
-      return new FakeChild(streamLines(`phase-session-${calls.length}`, "phase result"));
-    },
-  });
-  const output = await adapter.run(request({
-    cwd,
-    route: { model: "openai/gpt-test" },
-    policy: { write: true, tools: { deny: [] } },
-    workflow: { spec: {
-      name: "empty-deny-flow",
-      phases: [
-        { id: "inspect", type: "agent", task: "Inspect." },
-        { id: "final", type: "agent", task: "Return the result.", from: ["inspect"], final: true },
-      ],
-    } },
-  }));
-
-  assert.equal(output.result.finalText, "phase result");
-  assert.equal(calls.length, 2);
-  for (const { args } of calls) assert.ok(args.includes("--server"));
-});
-
-test("a workflow phase carries the shared context once with identifiers after the stable prefix", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-prefix-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const marker = `CTX-ONE-COPY-${Math.random().toString(36).slice(2)}`;
-  const calls = [];
-  const adapter = new OpenCodeAdapter({
-    ...managedOptions(),
-    command: "fake-opencode",
-    spawnFn(command, args, options) {
-      calls.push({ command, args, options });
-      return new FakeChild(streamLines(`phase-session-${calls.length}`, "phase result"));
-    },
-  });
-  await adapter.run(request({
-    cwd,
-    task: "Root task canary.",
-    context: { marker, count: 2 },
-    workflow: {
-      engine: "taskflow",
-      spec: {
-        name: "single-copy-flow",
-        phases: [
-          { id: "inspect", type: "agent", task: "Inspect canary." },
-          { id: "final", type: "agent", task: "Final canary.", from: ["inspect"], final: true },
-        ],
-      },
-    },
-  }));
-
-  assert.equal(calls.length, 2);
-  for (const [index, call] of calls.entries()) {
-    const prompt = call.args[1];
-    assert.equal(prompt.split(marker).length - 1, 1, `phase ${index + 1} must embed the shared context exactly once`);
-    assert.match(prompt, /Root task canary\./, "the root task survives");
-    assert.match(prompt, /single-copy-flow/);
-    assert.match(prompt, /Phase task:/);
-    assert.ok(prompt.indexOf('"context"') < prompt.indexOf('"task"'), "context precedes the variable task");
-    assert.ok(prompt.indexOf('"task"') < prompt.indexOf('"requestId"'), "requestId follows the task");
-    assert.ok(prompt.indexOf('"requestId"') < prompt.indexOf('"route"'), "route stays at the tail");
-  }
-  assert.match(calls[0].args[1], /Inspect canary\./);
-  assert.match(calls[1].args[1], /Final canary\./);
 });
 
 test("rejects a missing model before launching OpenCode", async () => {

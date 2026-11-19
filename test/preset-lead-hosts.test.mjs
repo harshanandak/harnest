@@ -68,11 +68,11 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
       const comments = ["qwen-code", "kilo", "auggie", "devin"].includes(host);
       const unrelated = { kind: "keep", url: "https://example.test/path//keep" };
       const other = { command: "other", args: ['a"b'] };
-      const settings = { unrelated, [key]: { other, "agent-companion": { command: "legacy" } } };
+      const settings = { unrelated, [key]: { other } };
       const raw = JSON.stringify(settings, null, 2).replace(/\n/g, "\r\n") + "\r\n";
       const prior = comments ? "// keep this comment\r\n" + raw
         .replace('  "unrelated"', '  /* keep this too */\r\n  "unrelated"')
-        .replace('    "agent-companion"', '    // keep the server note\r\n    "agent-companion"') : raw;
+        .replace('    "other"', '    // keep the server note\r\n    "other"') : raw;
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, prior);
 
@@ -108,7 +108,6 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
     const cases = {
       ...jsonHosts,
       kilo: ["custom settings", "kilo", "kilo.json"],
-      gemini: ["custom settings", ".gemini", "settings.json"],
       amp: ["custom settings", "amp", "settings.json"],
       cursor: [".cursor", "mcp.json"],
     };
@@ -119,14 +118,14 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         const project = join(home, "workspace");
         const projectFlags = host === "cursor" ? ["--project", project] : [];
         const options = cliOptions(home, {
-          XDG_CONFIG_HOME: join(home, "custom settings"), GEMINI_CLI_HOME: join(home, "custom settings"),
+          XDG_CONFIG_HOME: join(home, "custom settings"),
         });
         const key = { kilo: "mcp", amp: "amp.mcpServers" }[host] ?? "mcpServers";
         const comments = ["qwen-code", "kilo", "auggie", "devin"].includes(host);
         await assert.rejects(readFile(path), { code: "ENOENT" });
         const { stdout } = await run(process.execPath, ["scripts/setup.mjs", host, ...projectFlags, "--no-autostart"], options);
         const installed = JSON.parse(await readFile(path, "utf8"));
-        const entry = host === "gemini" ? { ...bridge, trust: false } : expected[host] ?? bridge;
+        const entry = expected[host] ?? bridge;
         assert.deepEqual(installed, { [key]: { harnest: entry } });
         const prefix = "Reverse path: ";
         const outputLines = stdout.split(/\r?\n/);
@@ -136,9 +135,7 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
           "Run it from the Harnest repository root, with the same config path environment variables you used for setup.");
 
         const other = { command: "other" };
-        const legacy = { command: "legacy" };
         installed[key].other = other;
-        installed[key]["agent-companion"] = legacy;
         installed.unrelated = true;
         const raw = JSON.stringify(installed, null, 2);
         const edited = comments ? raw.replace('    "other"', '    // keep this note\n    "other"') : raw;
@@ -150,7 +147,7 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         const removed = await runShell(command, options);
         const updated = await readFile(path, "utf8");
         assert.deepEqual(comments ? parse(updated) : JSON.parse(updated), {
-          [key]: { other, "agent-companion": legacy }, unrelated: true,
+          [key]: { other }, unrelated: true,
         });
         if (comments) assert.match(updated, /\/\/ keep this note\n/);
         const { backup } = JSON.parse(removed.stdout);

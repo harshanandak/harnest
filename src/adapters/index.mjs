@@ -1,7 +1,6 @@
 import { ClaudeAdapter } from "./claude.mjs";
 import { CodexAdapter } from "./codex.mjs";
 import { CursorAdapter } from "./cursor.mjs";
-import { GeminiAdapter } from "./gemini.mjs";
 import { AmpAdapter } from "./amp.mjs";
 import { PiAdapter } from "./pi.mjs";
 import { ACPAdapter } from "./acp.mjs";
@@ -14,7 +13,6 @@ class LazyOpenCodeAdapter {
   }
 
   load() {
-    // Taskflow's runtime is expensive even when a worker uses another harness.
     // Share the instance promise so run and concurrent controls use one session.
     this.adapter ??= import("./opencode.mjs")
       .then(({ OpenCodeAdapter }) => new OpenCodeAdapter(this.options));
@@ -87,7 +85,6 @@ export function createAdapter(target, options = {}, request = null) {
   if (target === "cursor") return new CursorAdapter(options.cursor);
   if (target === "claude") return new ClaudeAdapter(options.claude);
   if (target === "codex") return new CodexAdapter(options.codex);
-  if (target === "gemini") return new GeminiAdapter(options.gemini);
   if (target === "amp") return new AmpAdapter(options.amp);
   if (target === "acp") return new ACPAdapter(options.acp);
   throw new TypeError(`unsupported target: ${target}`);

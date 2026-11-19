@@ -8,7 +8,7 @@ per host; never copy an unbounded transcript into the parent prompt.
 Claude subagents, Codex child threads, and OpenCode child sessions each own a live
 transcript the operator opens directly (agent view / panel / child-session navigation).
 Intermediates stay in the child; only the terminal receipt returns to the parent
-context. Bridge workers (`opencode-worker`, `pi-worker`, `cursor-worker`, `claude-worker`, `codex-worker`, `gemini-worker`, `amp-worker`, `acp-worker`)
+context. Bridge workers (`opencode-worker`, `pi-worker`, `cursor-worker`, `claude-worker`, `codex-worker`, `amp-worker`, `acp-worker`)
 exist precisely to give every handoff one of these live views: the worker thread IS the
 operator screen, and it returns the receipt verbatim at the end.
 
@@ -109,7 +109,6 @@ its existing production board directory.
 | Cursor | `cursor-agent --output-format stream-json --stream-partial-output` deltas fold into the trace as `cursor_delta` events, so trace polling IS live streaming | one-shot: controls fail closed; thinking rides in `route.model` (for example `claude-opus-5-thinking-high`); follow up by resuming with `execution.sessionId` |
 | Claude | `claude -p --output-format stream-json --verbose` assistant deltas fold into the trace as `claude_delta` events (plus `claude_permission_denied` markers), so trace polling IS live streaming; terminal `result` envelope carries `session_id`, token usage, `total_cost_usd`, and `permission_denials` | one-shot: controls fail closed; `route.thinking` maps to `--effort` (`low`\|`medium`\|`high`\|`xhigh`\|`max`; `off`/`minimal` are dropped); follow up by resuming with `execution.sessionId` |
 | Codex | `codex exec --json -o <file>` JSONL deltas fold into the trace as `codex_delta` events; the `-o` last-message file is authoritative for `finalText` | one-shot: controls fail closed; `route.thinking` maps to `model_reasoning_effort`; follow up by resuming with `execution.sessionId` |
-| Gemini | native structured stream events fold into the trace; a successful native terminal result with nonempty final text is required | prompt-only one-shot: controls and `execution.transport=session` fail closed; follow up by resuming with `execution.sessionId` |
 | Amp | attached structured stream events fold into the trace; a successful native terminal result with nonempty final text is required; downstream execution requires explicit write approval on native Linux/macOS or with the entire MCP server running inside WSL | write-only prompt one-shot: read-only, live controls and `execution.transport=session` fail before spawn; follow up by resuming with `execution.sessionId`; detached orbs are outside scope |
 | Generic ACP | negotiated `session/update` notifications fold into the bounded durable trace; the adapter requires a successful terminal prompt result and nonempty final text | write-only attached run selected by `route.agent`; live controls and `execution.transport=session` fail closed; follow up with the observed `execution.sessionId` when the negotiated agent supports resume/load |
 
@@ -118,7 +117,7 @@ its existing production board directory.
 The Codex plugin for Claude Code buffers its app-server deltas into background job logs
 and offers only `status`/`result`/`cancel` polling — it does not forward token deltas to
 the lead. Harnest matches that contract (`status`/`trace`/`result`/`cancel`)
-and goes one step further for Cursor, Claude, Codex, Gemini, Amp, and generic ACP: streaming deltas enter the
+and goes one step further for Cursor, Claude, Codex, Amp, and generic ACP: streaming deltas enter the
 trace while the run is still in flight, so a polling parent sees partial output, not
 just a terminal dump.
 True push streaming (server → lead `notifications/progress`) is not available on the pinned

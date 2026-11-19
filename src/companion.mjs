@@ -206,7 +206,6 @@ function requestIdentity(value) {
     task: value.task,
     cwd: value.cwd,
     contextDigest: value.contextDigest,
-    workflow: value.workflow,
     route: value.route,
     policy: value.policy,
   });
@@ -407,7 +406,7 @@ export class Companion {
     const request = options.routeResolved ? normalized : await this.routeResolver(normalized);
     if (request.target === "opencode") {
       assertAdapterRoute(request.target, request.route);
-      assertAdapterPolicy(request.target, request.policy, request.execution, request.workflow);
+      assertAdapterPolicy(request.target, request.policy, request.execution);
     }
     const cwd = await stat(request.cwd).catch(() => null);
     if (!cwd?.isDirectory()) throw Object.assign(new TypeError(`cwd is not a directory: ${request.cwd}`), { details: { kind: "validation", hint: "cwd must be an existing absolute directory" } });
@@ -671,7 +670,7 @@ export class Companion {
       });
       const resolved = await this.routeResolver(requested);
       if (resolved.policy.write) throw Object.assign(new TypeError(`candidate ${candidate.name} resolved to a write-capable request`), { details: { kind: "policy" } });
-      if (resolved.target === "opencode") assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution, resolved.workflow);
+      if (resolved.target === "opencode") assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution);
       return { candidate, request: resolved };
     }));
     const routeOwners = new Map();
@@ -764,7 +763,7 @@ export class Companion {
       });
       const resolved = await this.routeResolver(requested);
       if (resolved.policy.write) throw Object.assign(new TypeError(`reviewer ${reviewer.name} resolved to a write-capable request`), { details: { kind: "policy" } });
-      if (resolved.target === "opencode") assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution, resolved.workflow);
+      if (resolved.target === "opencode") assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution);
       return { reviewer, request: resolved };
     }));
     const routeOwners = new Map();
@@ -1129,7 +1128,7 @@ export class Companion {
         const attempt = currentAttempt;
         if (job.request.target === "opencode") {
           assertAdapterRoute(job.request.target, job.request.route);
-          assertAdapterPolicy(job.request.target, job.request.policy, job.request.execution, job.request.workflow);
+          assertAdapterPolicy(job.request.target, job.request.policy, job.request.execution);
         }
         const create = () => this.adapterFactory(job.request.target, this.adapterOptions, job.request);
         if (job.request.execution.transport === "session" && ["claude", "codex", "cursor"].includes(job.request.target)) {

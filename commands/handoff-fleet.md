@@ -1,6 +1,6 @@
 ---
 description: Watch every running Harnest agent at once
-argument-hint: "[state=queued|running|completed|failed|cancelled|partial] [target=opencode|pi|cursor|claude|codex|gemini|amp|acp]"
+argument-hint: "[state=queued|running|completed|failed|cancelled|partial] [target=opencode|pi|cursor|claude|codex|amp|acp]"
 allowed-tools: mcp__plugin_harnest_harnest__handoff_fleet, mcp__plugin_harnest_harnest__handoff_message, mcp__plugin_harnest_harnest__handoff_resume
 ---
 

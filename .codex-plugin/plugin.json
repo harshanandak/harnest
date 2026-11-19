@@ -1,7 +1,7 @@
 {
   "name": "harnest",
   "version": "0.1.0+codex.20261118190922",
-  "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Gemini CLI, Amp, and trusted registered ACP agents.",
+  "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Amp, and trusted registered ACP agents.",
   "author": {
     "name": "Harsha Nanda"
   },
@@ -14,9 +14,7 @@
     "cursor",
     "claude",
     "codex",
-    "gemini",
-    "amp",
-    "taskflow"
+    "amp"
   ],
   "skills": "./skills/",
   "interface": {
@@ -34,7 +32,6 @@
       "Run this graph in OpenCode and return its receipt.",
       "Run this graph in Pi and return its receipt.",
       "Run this graph in Codex and return its receipt.",
-      "Run this graph in Gemini and return its receipt.",
       "Run this graph in Amp and return its receipt."
     ]
   },

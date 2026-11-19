@@ -20,9 +20,6 @@ for (let index = 0; index < args.length; index += 2) {
   if (!option || !value || value.startsWith("--")) throw new Error(usage);
   leadOptions[option] = option === "host" ? value : resolve(value);
 }
-if (!leadOptions.host || leadOptions.host === "gemini") {
-  process.stdout.write("Legacy Gemini target. Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the antigravity ACP preset.\n");
-}
 if (!await checkLeadConnections(leadOptions)) process.exitCode = 1;
 if (leadOptions.host) process.exit(process.exitCode ?? 0);
 const daemon = await daemonStatus().catch(() => ({ ready: false, version: null }));
@@ -51,7 +48,6 @@ const resolved = {
   cursor: resolveLaunch("cursor"),
   claude: resolveLaunch("claude"),
   codex: resolveLaunch("codex"),
-  gemini: resolveLaunch("gemini"),
   amp: resolveLaunch("amp"),
 };
 const describeLaunch = async (entry, args = ["--version"], timeoutMs = 15_000) => entry.ok
@@ -65,7 +61,6 @@ const checks = {
   cursor: await describeLaunch(resolved.cursor),
   claude: await describeLaunch(resolved.claude),
   codex: await describeLaunch(resolved.codex),
-  gemini: await describeLaunch(resolved.gemini),
   amp: await describeLaunch(resolved.amp),
 };
 for (const [name, value] of Object.entries(checks)) process.stdout.write(`${name}: ${value}\n`);
@@ -130,7 +125,7 @@ for (const name of ["acorn", "ajv", "quickjs-emscripten-core", "@jitl/quickjs-wa
         ? Object.entries(parsed.models).map(([target, model]) => `${target}=${model}`).join(", ")
         : "(defaults)";
       const mark = (name) => {
-        const line = checks[{ opencode: "opencode", pi: "pi", cursor: "cursor", claude: "claude", codex: "codex", gemini: "gemini", amp: "amp" }[name]];
+        const line = checks[{ opencode: "opencode", pi: "pi", cursor: "cursor", claude: "claude", codex: "codex", amp: "amp" }[name]];
         if (!line) return "?";
         return /unavailable/i.test(line) ? "✗" : "✓";
       };

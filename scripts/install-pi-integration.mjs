@@ -1,9 +1,9 @@
-import { mkdir, readFile, readdir, rename } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { setupDaemon } from "./install-daemon.mjs";
-import { backupStamp, readExisting, replaceWithBackup } from "./install-files.mjs";
+import { readExisting, replaceWithBackup } from "./install-files.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 export const piConfigDir = () => process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -34,11 +34,9 @@ async function installExtension(piDir) {
 }
 
 /** Drop previous registrations of this extension (moved checkout or drive-case change) before adding the current path. */
-export const isLegacyPiExtension = (entry) => typeof entry === "string" && /(?:^|[\\/])agent-companion(?:\.(?:m?js|ts))?[\\/]?$/i.test(entry);
 
 export function mergeExtensionList(list, extensionPath) {
-  const kept = (Array.isArray(list) ? list : []).filter((entry) => !isLegacyPiExtension(entry)
-    && (typeof entry !== "string" || !/(?:^|[\\/])harnest\.mjs$/i.test(entry)));
+  const kept = (Array.isArray(list) ? list : []).filter((entry) => typeof entry !== "string" || !/(?:^|[\\/])harnest\.mjs$/i.test(entry));
   kept.push(extensionPath);
   return kept;
 }
@@ -49,10 +47,8 @@ async function registerInSettings(piDir, extensionPath) {
   let settings;
   try { settings = JSON.parse(previousRaw?.replace(/^\uFEFF/, "") ?? "{}"); }
   catch { throw new Error("Invalid Pi configuration: " + settingsPath); }
-  const migrated = Array.isArray(settings.extensions) && settings.extensions.some(isLegacyPiExtension) ? ["settings.extensions agent-companion"] : [];
   settings.extensions = mergeExtensionList(settings.extensions, extensionPath);
-  const status = await backupAndWrite(settingsPath, JSON.stringify(settings, null, 2) + "\n", "settings.extensions");
-  return { status, migrated };
+  return backupAndWrite(settingsPath, JSON.stringify(settings, null, 2) + "\n", "settings.extensions");
 }
 
 async function installSkill(piDir) {
@@ -70,21 +66,9 @@ async function installSkill(piDir) {
 
 export async function installPiIntegration(piDir = piConfigDir()) {
   const extensionPath = await installExtension(piDir);
-  const { status: settings, migrated } = await registerInSettings(piDir, extensionPath);
+  const settings = await registerInSettings(piDir, extensionPath);
   const skill = await installSkill(piDir);
-  const extensionDir = dirname(extensionPath);
-  const backups = [];
-  // Pi loads extensions from this directory even without a settings entry.
-  for (const item of await readdir(extensionDir)) {
-    if (!isLegacyPiExtension(item)) continue;
-    const oldPath = join(extensionDir, item);
-    const backup = join(piDir, `.bak-harnest-${backupStamp()}`, item);
-    await mkdir(dirname(backup), { mode: 0o700 });
-    await rename(oldPath, backup);
-    migrated.push(`extensions/${item}`);
-    backups.push({ path: oldPath, backup });
-  }
-  return { extensionPath, settings, skill, migrated, backups };
+  return { extensionPath, settings, skill };
 }
 
 const isCli = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

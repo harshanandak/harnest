@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { normalizeExecutionControls } from "./execution-controls.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
-export const TARGETS = new Set(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]);
+export const TARGETS = new Set(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]);
 export const SESSION_TARGETS = new Set(["claude", "codex", "cursor"]);
 export const ROUTE_FIELDS = Object.freeze(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
 export const ACP_ROUTE_FIELDS = Object.freeze(["agent", "model", "variant", "options"]);
@@ -14,7 +14,7 @@ export const MAX_ROUTE_OPTION_ID = 128;
 export const MAX_ROUTE_OPTION_VALUE = 256;
 export const RESERVED_ROUTE_OPTION_IDS = Object.freeze(["__proto__", "prototype", "constructor"]);
 export const HARNESS_VERSIONS = Object.freeze(["v2"]);
-export const POLICY_FIELDS = Object.freeze(["write", "readOnly", "allowWrites", "tools", "maxCostUsd", "mode", "sandbox"]);
+export const POLICY_FIELDS = Object.freeze(["write", "tools", "maxCostUsd", "mode", "sandbox"]);
 export const EXACT_TOOL_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 function invalid(message) {
   return Object.assign(new TypeError(message), { details: { kind: "validation" } });
@@ -187,37 +187,9 @@ function normalizePolicy(inputPolicy) {
   if (policy.maxCostUsd !== undefined && policy.maxCostUsd !== null && (typeof policy.maxCostUsd !== "number" || !Number.isFinite(policy.maxCostUsd) || policy.maxCostUsd < 0)) {
     throw invalid("policy.maxCostUsd must be a non-negative number");
   }
-  const hasWrite = Object.prototype.hasOwnProperty.call(policy, "write");
-  const hasReadOnly = Object.prototype.hasOwnProperty.call(policy, "readOnly");
-  const hasAllowWrites = Object.prototype.hasOwnProperty.call(policy, "allowWrites");
-  const rawWrite = policy.write;
-  const rawReadOnly = policy.readOnly;
-  const rawAllowWrites = policy.allowWrites;
-  if (hasWrite && typeof rawWrite !== "boolean") throw invalid("policy.write must be a boolean");
-  if (hasReadOnly && typeof rawReadOnly !== "boolean") throw invalid("policy.readOnly must be a boolean");
-  if (hasAllowWrites && typeof rawAllowWrites !== "boolean") throw invalid("policy.allowWrites must be a boolean");
-
-  let derived = null;
-  let hasDerived = false;
-  if (hasReadOnly || hasAllowWrites) {
-    const fromReadOnly = hasReadOnly ? !rawReadOnly : null;
-    const fromAllowWrites = hasAllowWrites ? rawAllowWrites : null;
-    if (fromReadOnly !== null && fromAllowWrites !== null && fromReadOnly !== fromAllowWrites) {
-      throw invalid("contradictory policy aliases: readOnly and allowWrites disagree");
-    }
-    if (fromReadOnly !== null) {
-      derived = fromReadOnly;
-      hasDerived = true;
-    } else if (fromAllowWrites !== null) {
-      derived = fromAllowWrites;
-      hasDerived = true;
-    }
-  }
-  if (hasWrite && hasDerived && Boolean(rawWrite) !== derived) {
-    throw invalid("contradictory policy: policy.write conflicts with readOnly/allowWrites alias");
-  }
+  if (Object.hasOwn(policy, "write") && typeof policy.write !== "boolean") throw invalid("policy.write must be a boolean");
   return {
-    write: hasDerived && !hasWrite ? derived : Boolean(rawWrite),
+    write: policy.write === true,
     ...controls,
     maxCostUsd: policy.maxCostUsd ?? null,
   };
@@ -227,11 +199,12 @@ export function normalizeRequest(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("request must be an object");
   }
+  if (Object.hasOwn(input, "workflow")) throw invalid("request.workflow is unsupported");
   if (!TARGETS.has(input.target)) {
     if (input.target === "dsh") {
       throw invalid("dsh is not a downstream target: run DeepSeek models via pi or opencode instead (a DSH lead plugin is only possible once headless gains an MCP surface)");
     }
-    throw invalid("target must be opencode, pi, cursor, claude, codex, gemini, amp, or acp");
+    throw invalid("target must be opencode, pi, cursor, claude, codex, amp, or acp");
   }
   if (typeof input.requestId !== "string" || !input.requestId.trim()) throw invalid("requestId is required");
   if (typeof input.task !== "string" || !input.task.trim()) throw invalid("task is required");
@@ -276,7 +249,6 @@ export function normalizeRequest(input) {
     if (!route.agent) throw invalid("ACP requires route.agent naming a trusted local registration");
     const unsupportedRoute = ROUTE_FIELDS.filter((field) => !ACP_ROUTE_FIELDS.includes(field) && route[field] !== undefined);
     if (unsupportedRoute.length) throw invalid(`ACP route does not support: ${unsupportedRoute.join(", ")}`);
-    if (input.workflow != null) throw invalid("ACP does not support structured workflows");
     if (policy.write !== true) throw invalid("ACP is write-only; policy.write must be true");
     if (hasToolPolicy(policy.tools)) throw invalid("ACP does not support granular policy.tools");
     if (policy.maxCostUsd != null) throw invalid("ACP does not enforce policy.maxCostUsd");
@@ -290,7 +262,6 @@ export function normalizeRequest(input) {
     cwd,
     context: input.context ?? null,
     contextDigest: computedDigest,
-    workflow: input.workflow ?? null,
     route,
     execution: {
       background: Boolean(input.execution?.background),
