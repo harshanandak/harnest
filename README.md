@@ -63,6 +63,27 @@ bun run doctor --host codex
 > [!TIP]
 > Run `bun run setup --help` to see every host name. Setup also installs the shared daemon and a login item so it starts with your machine. Pass `--no-autostart` to skip that.
 
+### Or let your agent set it up
+
+Paste this prompt into the coding agent you want to use as the lead. It installs the pinned release, connects that agent, and leaves logins and secrets to you.
+
+```text
+Install and set up Harnest (https://github.com/harshanandak/harnest) on this machine so you can hand off work to other coding agents.
+
+1. Check that git, bun, and Node.js 22 or newer are installed. If any is missing, stop and tell me what to install.
+2. Ask me where to keep the checkout. It must stay in place, because host configs point at it. Suggest ~/harnest.
+3. Clone and install the release:
+   git clone --branch v0.1.0 https://github.com/harshanandak/harnest.git <directory>
+   cd <directory>
+   bun install --frozen-lockfile --omit optional
+4. Run `bun run setup --help` and find the host name that matches you. Setup writes your host configuration and starts a local background daemon. Ask me for permission first, and stop if I say no. Then ask whether the daemon should also start at login, and add --no-autostart if I say no. Run `bun run setup <host>`. If you are Cursor, also ask me for the absolute path of the project I use you in and add `--project "<that path>"`, so the project files go there instead of into the Harnest checkout.
+   Some hosts (for example goose, mistral-vibe, and `other`) are set up by hand: setup only prints configuration for me to add. In that case, show me the printed instructions, do not edit the configuration yourself, skip step 5, and tell me setup is not finished until I add it.
+5. Run `bun run doctor --host <host>`. Fix what you can and report anything still failing.
+6. Check which downstream agent CLIs from the README's "Supported clients and downstream agents" table are on PATH. Do not install them or log in to them. Tell me which ones I still need to install or log in to.
+
+Rules: never read, print, or ask me for API keys, tokens, or other secrets. Do not change configuration beyond what setup writes. When you finish, tell me to restart you and check that the handoff_workflow, handoff_status, handoff_trace, and handoff_result tools are listed, then point me to the README's "Your first handoff" section.
+```
+
 ### Pick your lead agent
 
 <details>
