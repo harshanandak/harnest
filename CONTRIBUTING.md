@@ -14,12 +14,12 @@ You must understand your change. Using a coding agent is fine, and expected for 
 
 ## Set up
 
-You need Git, Bun, and Node.js.
+You need Git, Bun, and Node.js 22 or newer.
 
 ```sh
 git clone https://github.com/harshanandak/harnest.git
 cd harnest
-bun install --frozen-lockfile
+bun install --frozen-lockfile --omit optional
 ```
 
 ## Check your change
