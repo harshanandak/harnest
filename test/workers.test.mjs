@@ -38,7 +38,8 @@ test("handoff skills honor the user's model choice", async () => {
   for (const path of ["skills/handoff/SKILL.md", ".cursor/skills/handoff/SKILL.md"]) {
     const skill = await readFile(join(root, path), "utf8");
     assert.match(skill, /Use the model the user names in `route\.model` and any effort they name in `route\.thinking`/);
-    assert.match(skill, /Set `metadata\.routing\.modelVersion` to `pin`/);
+    assert.match(skill, /If the user names an exact model ID, set `metadata.routing.modelVersion` to `pin`/);
+    assert.match(skill, /Leave native aliases such as `sonnet` or `opus` unpinned/);
     assert.match(skill, /use their saved routing preferences/);
     assert.match(skill, /omit `route\.model` so the downstream CLI can use its configured default/);
     assert.doesNotMatch(skill, /\bgpt-6\.[12]-(?:sol|terra)\b/i);
