@@ -3,7 +3,7 @@
 ## The MCP client shows no Harnest tools
 
 1. Run `bun run daemon status` to verify readiness. For stdio clients, check that the command uses Node and the absolute path to `src/mcp-bridge.mjs`.
-2. Confirm Node.js is version 20.6.0 or newer.
+2. Confirm Node.js is version 22 or newer.
 3. Run `bun run smoke:mcp` from the Harnest checkout.
 4. Restart or reload the MCP client after changing its configuration.
 5. Use `harnest` as the MCP server key.

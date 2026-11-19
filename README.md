@@ -41,7 +41,7 @@ flowchart LR
 
 ## Quick start
 
-You need **Git**, **Bun**, and **Node.js 20.6.0 or newer**. Install and log in to each downstream CLI through its own setup first, and keep those CLIs on `PATH`.
+You need **Git**, **Bun**, and **Node.js 22 or newer**. Install and log in to each downstream CLI through its own setup first, and keep those CLIs on `PATH`.
 
 **1. Clone and install.** Pick a directory you will keep, because host configs point at it.
 

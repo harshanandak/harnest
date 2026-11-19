@@ -5,7 +5,7 @@ Harnest MCP runs from a source checkout. Clients share one local HTTP daemon. A 
 ## Requirements
 
 - Git.
-- Bun and Node.js 20.6.0 or newer.
+- Bun and Node.js 22 or newer.
 - An MCP client that supports Streamable HTTP or stdio.
 - At least one [supported downstream agent](supported-agents.md), installed and authenticated through its native instructions.
 

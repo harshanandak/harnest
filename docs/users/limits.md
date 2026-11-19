@@ -19,7 +19,7 @@ Harnest `v0.1.0` is distributed as a tagged source checkout from the public `har
 
 ## Workflow boundaries
 
-- Harnest requires Node.js 20.6.0 or newer. CI runs the Node test suite on Node.js 22 and memory checks on Node.js 24.
+- Harnest requires Node.js 22 or newer (Node.js 20 is end of life). CI runs the Node test suite on Node.js 22 and memory checks on Node.js 24.
 - Durable throughput depends on storage and workload. The release has no throughput, CPU or RAM improvement, or token savings guarantee.
 - Harnest does not create, merge, or delete worktrees. Supply separate existing working directories for concurrent writers.
 
