@@ -18,10 +18,10 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 ### Changed
 
 - Renamed Agent Companion to Harnest and standardized installation on the tagged GitHub checkout.
-- Codex leaf defaults use `gpt-6.2-sol` for writing code, `gpt-6.1-sol` for reviews and investigations, and `gpt-6.1-terra` for read-only non-code work, all at high reasoning.
+- Harnest does not choose models. The lead uses the model the user names in the prompt, then the user's routing preferences, then the downstream CLI's own default.
 - Codex, Cursor, and the Devin example use the daemon-backed stdio bridge. Generic clients can generate a stdio snippet or write the local HTTP credential directly into private configuration.
 - Doctor checks installed lead configuration and MCP discovery. CI also runs the bridge smoke against an isolated daemon.
-- Pi shows the Harnest status name. OpenCode host info includes the routing tools. The live routing probe uses the current Sol and Terra model defaults.
+- Pi shows the Harnest status name. OpenCode host info includes the routing tools. The live routing probe uses explicit model pins.
 - Improved ACP initialization, prompt correlation, cancellation acknowledgement, native cleanup, and session identity through failures and resume.
 
 ### Fixed

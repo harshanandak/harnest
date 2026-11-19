@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/assets/harnest-banner.svg" alt="Harnest: a lead agent hands tasks through the Harnest MCP daemon to native coding agents and gets receipts back" width="100%">
-</p>
+# Harnest
 
 <p align="center">
   <strong>Let one coding agent hand work to another, and get a receipt back.</strong>
@@ -164,8 +162,6 @@ With Codex installed and logged in as the downstream agent, call `handoff_workfl
     "target": "codex",
     "task": "Summarize how tests are organized in this repository. Include file paths.",
     "cwd": "/absolute/path/to/project",
-    "route": { "model": "gpt-6.1-terra", "thinking": "high" },
-    "metadata": { "routing": { "modelVersion": "pin" } },
     "execution": { "background": true },
     "policy": { "write": false }
   }
@@ -259,15 +255,13 @@ Configure `node /absolute/path/to/harnest/src/mcp-server.mjs` to give each invoc
 
 Host installers register a login item by default: Windows Task Scheduler, a macOS LaunchAgent, or a systemd user unit. Run the installer with your `HARNEST_STATE_DIR` (if you set one) and the downstream CLIs on `PATH`. The login item captures `PATH`, the job and daemon directories, and supported non-secret Harnest settings. See [daemon lifecycle](docs/architecture.md#shared-daemon) and [host setup and restore](docs/users/integrations.md).
 
-## Routing and model defaults
+## Choosing models
 
-| Work | Codex route | Reasoning |
-| --- | --- | --- |
-| Writing code | `gpt-6.2-sol` | `high` |
-| Reviews and investigations | `gpt-6.1-sol` | `high` |
-| Read-only research, lookups, audits | `gpt-6.1-terra` | `high` |
+Tell your lead agent which model to use in plain words. For example, “Use gpt-6.1-sol at high effort for this review.”
 
-The native Codex worker bridges also use Terra at high effort to forward requests; their downstream routes are chosen independently. Explicit model and effort pins win. Set `metadata.routing.modelVersion` to `pin` to keep the selected version. For other providers, pick a model from that provider's native catalog. Call `handoff_routing_preview` to see the selected route and its catalog freshness before dispatch. An omitted model can leave the choice to the downstream client's config. See [routing preferences and precedence](docs/preferences.md).
+You can also [set routing preferences once](docs/preferences.md#set-up-from-the-terminal). The lead uses your saved choice when you leave the model out of your prompt. If neither applies, the downstream CLI uses its own configured default.
+
+Call `handoff_routing_preview` to see the chosen route before dispatch.
 
 ## Safety, data, and limits
 

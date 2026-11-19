@@ -90,8 +90,6 @@ Ask the MCP client to call `handoff_workflow` with a read-only task and an absol
     "target": "codex",
     "task": "Inspect the repository and summarize how tests are organized. Do not edit files.",
     "cwd": "/absolute/path/to/project",
-    "route": { "model": "gpt-6.1-terra", "thinking": "high" },
-    "metadata": { "routing": { "modelVersion": "pin" } },
     "execution": { "background": true },
     "policy": { "write": false }
   }

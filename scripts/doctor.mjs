@@ -229,7 +229,7 @@ for (const name of ["acorn", "ajv", "quickjs-emscripten-core", "@jitl/quickjs-wa
   }
 }
 
-// Generated Codex workers are read-only bridges with one model and effort.
+// Generated Codex workers are read-only bridges with high effort.
 {
   const { readdir } = await import("node:fs/promises");
   try {
@@ -237,18 +237,16 @@ for (const name of ["acorn", "ajv", "quickjs-emscripten-core", "@jitl/quickjs-wa
     let bad = 0;
     for (const file of files) {
       const raw = await readFile(join(root, "codex-agents", file), "utf8");
-      const need = ["name", "description", "developer_instructions", "model", "model_reasoning_effort", "sandbox_mode"];
+      const need = ["name", "description", "developer_instructions", "model_reasoning_effort", "sandbox_mode"];
       const missing = need.filter((key) => !new RegExp(`^${key}\\s*=`, "m").test(raw));
-      const model = /^model\s*=\s*"([^"]+)"/m.exec(raw)?.[1];
       const effort = /^model_reasoning_effort\s*=\s*"([^"]+)"/m.exec(raw)?.[1];
-      if (model !== "gpt-6.1-terra" && !missing.includes("model")) missing.push("model");
       if (effort !== "high" && !missing.includes("model_reasoning_effort")) missing.push("model_reasoning_effort");
       if (missing.length) {
         process.stdout.write(`codex-worker: FAIL — ${file} missing/invalid: ${missing.join(",")}\n`);
         bad += 1;
       }
     }
-    if (bad === 0) process.stdout.write(`codex-workers: ok (${files.length} workers, gpt-6.1-terra/high)\n`);
+    if (bad === 0) process.stdout.write(`codex-workers: ok (${files.length} workers, high effort)\n`);
     else process.exitCode = 1;
   } catch (error) {
     process.stdout.write(`codex-workers: UNKNOWN — ${error.message}\n`);

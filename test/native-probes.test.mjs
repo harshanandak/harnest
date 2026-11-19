@@ -64,6 +64,7 @@ esac
   assert.equal(existsSync(trustedMarker), true, "the installed Codex must run plugin list");
   assert.match(stdout, /^codex: trusted Codex version /m);
   assert.match(stdout, /^marketplace-isolation: ok /m);
+  assert.match(stdout, /^codex-workers: ok \(\d+ workers, high effort\)$/m);
 });
 
 test("Windows system commands require a fully qualified root and fall back to windir", () => {
