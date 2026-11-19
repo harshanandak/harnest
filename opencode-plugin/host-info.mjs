@@ -2,7 +2,7 @@ const WORKERS = [
   {
     agent: "opencode-worker",
     target: "opencode",
-    notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. Live steer/reroute requires route.harnessVersion v2; V1 controls fail closed.",
+    notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. OpenCode V2 supports live steering on server-attached handoffs. Its server owns tool permissions.",
   },
   {
     agent: "pi-worker",
@@ -77,7 +77,7 @@ export function hostInfoSnapshot(env = process.env) {
     launchPath: {
       direct: "Call harnest_handoff_workflow directly as an MCP tool when child visibility is not needed.",
       nativeChild:
-        "Launch the task tool with the matching worker subagent (opencode-worker, pi-worker, cursor-worker, claude-worker, codex-worker, gemini-worker, amp-worker, acp-worker) so the handoff runs in a visible OpenCode child session; the worker pages status/trace and returns the durable receipt.",
+        "Call the subagent tool with the matching worker agent ID (opencode-worker, pi-worker, cursor-worker, claude-worker, codex-worker, gemini-worker, amp-worker, acp-worker) so the handoff runs in a visible OpenCode child session; the worker pages status/trace and returns the durable receipt.",
     },
     workers: WORKERS,
     graphWorkflows: "Harnest coordinates mixed-harness DAGs. Validate/start with handoff_graph_*, inspect node child job IDs, and selectively resume unsuccessful steps. Native panels are host-dependent; graph status is the portable view.",
@@ -94,7 +94,7 @@ export function hostInfoSnapshot(env = process.env) {
     controlSemantics: {
       acknowledged: "applied",
       uncertain: "transport acknowledgement lost; reconcile from downstream trace",
-      v1Opencode: "live message/reroute fail closed by design",
+      opencode: "server-attached handoffs support live message/reroute; shared-service graph nodes use graph controls",
       cursor: "oneshot rejects live controls; session uses ACP cancel/model negotiation and rejects mid-turn messages",
       claude: "oneshot rejects live controls; session uses SDK streaming guidance with consumption evidence and acknowledged setModel",
       codex: "oneshot rejects live controls; session uses app-server turn/steer and owned queued follow-ups",

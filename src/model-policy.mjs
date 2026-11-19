@@ -1,4 +1,4 @@
-import { ACP_ROUTE_FIELDS, hasToolPolicy, routeControlError } from "./protocol.mjs";
+import { ACP_ROUTE_FIELDS, HARNESS_VERSIONS, hasToolPolicy, routeControlError } from "./protocol.mjs";
 
 export function isClaudeRoute(route) {
   const value = route && typeof route === "object" ? route : {};
@@ -21,6 +21,9 @@ export function assertNoClaudeRoute(target, route) {
 
 export function adapterRouteRejectionReasons(target, route) {
   const reasons = [];
+  if (target === "opencode" && route?.harnessVersion !== undefined && !HARNESS_VERSIONS.includes(route.harnessVersion)) {
+    reasons.push("opencode-version");
+  }
   if (!["claude", "acp"].includes(target) && isClaudeRoute(route)) reasons.push("claude-model");
   if (target === "gemini") {
     const provider = typeof route?.provider === "string" ? route.provider.toLowerCase() : null;
@@ -54,8 +57,13 @@ export function adapterRouteRejectionReasons(target, route) {
 }
 
 export function assertAdapterRoute(target, route) {
-  assertNoClaudeRoute(target, route);
   const reasons = adapterRouteRejectionReasons(target, route);
+  if (reasons.includes("opencode-version")) {
+    throw Object.assign(new Error("route.harnessVersion must be v2 or omitted; OpenCode V1 is unsupported"), {
+      details: { kind: "validation", field: "route.harnessVersion" },
+    });
+  }
+  assertNoClaudeRoute(target, route);
   if (reasons.includes("gemini-provider")) {
     throw Object.assign(new Error("Gemini route.provider must be google, gemini, google-gemini, or google/gemini"), {
       name: "GeminiAdapterError",
@@ -104,24 +112,48 @@ export function assertAdapterRoute(target, route) {
   }
 }
 
-export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}) {
+export function openCodeUsesSharedService(request, serverUrl) {
+  return Boolean(request.context?.graph?.graphId && !(serverUrl || request.route?.serverUrl));
+}
+
+function taskflowToolPolicyError(spec) {
+  if (!spec || typeof spec !== "object") return null;
+  const phases = Array.isArray(spec) ? spec : spec.phases ?? spec.chain ?? spec.tasks ?? [spec];
+  if (!Array.isArray(phases)) return null;
+  for (const phase of phases) {
+    if (!phase || typeof phase !== "object") continue;
+    if (Array.isArray(phase.tools)) return "OpenCode V2 does not enforce Taskflow phase tool lists";
+    if (typeof phase.def === "string" || phase.use != null || phase.shareContext === true) {
+      return `OpenCode V2 cannot check nested tool policy before launch for Taskflow phase "${phase.id ?? "(unnamed)"}"`;
+    }
+    if (phase.def?.contextSharing === true) return "OpenCode V2 does not support Taskflow's dynamic shared context";
+    const nested = taskflowToolPolicyError(phase.def);
+    if (nested) return nested;
+  }
+  return spec.contextSharing === true ? "OpenCode V2 does not support Taskflow's dynamic shared context" : null;
+}
+
+export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}, workflow) {
   const reasons = [];
   if (["amp", "acp"].includes(target) && policy.write !== true) reasons.push("read-only");
   if (hasToolPolicy(policy.tools)) {
     const legacy = Array.isArray(policy.tools);
     if (["amp", "acp", "codex", "cursor"].includes(target)
       || (["claude", "gemini"].includes(target) && (legacy || execution.transport === "session"))
-      || (["opencode", "pi"].includes(target) && !legacy && policy.tools.allow !== undefined)) reasons.push("granular-tools");
+      || (target === "pi" && !legacy && policy.tools.allow !== undefined)
+      || (target === "opencode" && (legacy || policy.tools.allow !== undefined || policy.tools.deny?.length))) reasons.push("granular-tools");
   }
+  if (target === "opencode" && taskflowToolPolicyError(workflow?.spec)) reasons.push("taskflow-tools");
+  if (target === "opencode" && policy.write !== true) reasons.push("read-only");
   if (policy.mode !== undefined && (target !== "cursor" || execution.transport === "session")) reasons.push("policy.mode");
   if (policy.sandbox !== undefined && (target !== "cursor" || execution.transport === "session" || policy.sandbox === false)) reasons.push("policy.sandbox");
   if (["gemini", "amp", "acp"].includes(target) && policy.maxCostUsd != null) reasons.push("cost-budget");
   return reasons;
 }
 
-export function assertAdapterPolicy(target, policy = {}, execution) {
-  const reasons = adapterPolicyRejectionReasons(target, policy, execution);
-  if (reasons.includes("read-only")) {
+export function assertAdapterPolicy(target, policy = {}, execution, workflow) {
+  const reasons = adapterPolicyRejectionReasons(target, policy, execution, workflow);
+  if (reasons.includes("read-only") && target !== "opencode") {
     const name = target === "acp" ? "ACP" : "Amp";
     throw Object.assign(new Error(`${name} cannot enforce a read-only request; set policy.write true only when workspace writes are intended`), {
       name: `${target === "acp" ? "Acp" : "Amp"}AdapterError`,
@@ -129,10 +161,25 @@ export function assertAdapterPolicy(target, policy = {}, execution) {
     });
   }
   if (reasons.includes("granular-tools")) {
+    if (target === "opencode") {
+      throw Object.assign(new Error("OpenCode V2 does not enforce granular policy.tools; its server owns tool permissions"), {
+        details: { kind: "policy", field: "policy.tools" },
+      });
+    }
     const name = target === "acp" ? "ACP" : target[0].toUpperCase() + target.slice(1);
     throw Object.assign(new Error(`${name} does not support granular policy.tools in this form or transport`), {
       name: `${name}AdapterError`,
       details: { kind: "policy", field: "policy.tools" },
+    });
+  }
+  if (reasons.includes("taskflow-tools")) {
+    throw Object.assign(new Error(taskflowToolPolicyError(workflow?.spec)), {
+      details: { kind: "policy", field: "workflow.spec" },
+    });
+  }
+  if (reasons.includes("read-only")) {
+    throw Object.assign(new Error("OpenCode V2 cannot enforce read-only execution with server-owned permissions"), {
+      details: { kind: "policy", field: "policy.write", hint: "choose a read-only-capable target" },
     });
   }
   const cursorControl = reasons.find((reason) => reason.startsWith("policy."));

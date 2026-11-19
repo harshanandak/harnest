@@ -48,9 +48,18 @@ test("lazy OpenCode forwards progress, live controls and abort to the same adapt
   let started;
   const launched = new Promise((resolve) => { started = resolve; });
   const progress = [];
+  const prompts = [];
   const adapter = createAdapter("opencode", { opencode: {
     command: "synthetic",
-    spawnFn() {
+    serverUrl: "http://127.0.0.1:43991",
+    async fetchFn(url) {
+      assert.equal(new URL(url).pathname, "/api/health");
+      return { ok: true, status: 200 };
+    },
+    clientFactory: () => ({ session: { async prompt(input) { prompts.push(input); } } }),
+    spawnFn(_command, args) {
+      assert.equal(args[0], "run");
+      assert.ok(args.includes("--server"));
       child = new EventEmitter();
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
@@ -66,16 +75,25 @@ test("lazy OpenCode forwards progress, live controls and abort to the same adapt
     },
   } });
   const controller = new AbortController();
-  const running = adapter.run(normalizeRequest({
+  const request = normalizeRequest({
     requestId: "lazy-opencode", target: "opencode", task: "fixture", cwd: process.cwd(),
-    route: { model: "fixture/model" }, execution: { timeoutMs: 10_000 },
-  }), { signal: controller.signal, onProgress: (event) => progress.push(event) });
-  const aborted = assert.rejects(running, (error) => error.details?.kind === "abort");
-  await launched;
-  await assert.rejects(adapter.control({ kind: "message", message: "fixture" }), (error) =>
-    error.details?.kind === "unsupported-control" && /V1/.test(error.message));
-  controller.abort();
-  await aborted;
+    route: { model: "fixture/model" }, policy: { write: true }, execution: { timeoutMs: 10_000 },
+  });
+  const running = adapter.run(request, { signal: controller.signal, onProgress: (event) => progress.push(event) });
+  try {
+    await Promise.race([launched, running]);
+    await assert.rejects(adapter.run({ ...request, requestId: "another-request" }), (error) => error.details?.kind === "busy");
+    const acknowledgement = await adapter.control({ commandId: "lazy-message", kind: "message", message: "fixture", delivery: "follow_up" });
+    assert.equal(acknowledgement.harnessVersion, "v2");
+    assert.equal(acknowledgement.sessionId, "lazy-session");
+    assert.equal(acknowledgement.persisted, true);
+    assert.deepEqual(prompts.map(({ sessionID, delivery, text }) => ({ sessionID, delivery, text })), [
+      { sessionID: "lazy-session", delivery: "queue", text: "fixture" },
+    ]);
+  } finally {
+    controller.abort();
+    await assert.rejects(running, (error) => error.details?.kind === "abort");
+  }
   assert.equal(child.killed, true);
   assert.ok(progress.some((event) => event.sessionId === "lazy-session"));
 });

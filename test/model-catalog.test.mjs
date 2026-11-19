@@ -56,6 +56,7 @@ function fakeProbe(handlers) {
   const calls = [];
   const probe = async (spec) => {
     calls.push(spec);
+    if (spec.target === "opencode" && spec.args.at(-1) === "--version") return { status: 0, stdout: "opencode v2.2.1" };
     const handler = handlers[spec.target];
     if (!handler) throw new Error(`no fake for ${spec.target}`);
     return typeof handler === "function" ? handler(spec, calls.length) : handler;
@@ -127,31 +128,39 @@ test("codex entries: hidden unavailable, efforts filtered, unsafe rejected", () 
   assert.ok(!("provider" in models[0]));
 });
 
-// --- launch honors env/config/harnessVersion ---------------------------------
-
-test("launch respects catalog env, config executables, and v2 mapping", async () => {
+test("OpenCode catalog uses the same V2 override for omitted and explicit versions", async () => {
   const probe = fakeProbe({
     opencode: { status: 0, stdout: JSON.stringify({ data: [] }), stderr: "" },
     pi: { status: 0, stdout: PI_TABLE, stderr: "" },
   });
-  const fromEnv = createModelCatalog({ probe, env: { HARNEST_OPENCODE: "oc-fake" } });
-  await fromEnv({ target: "opencode" });
-  assert.equal(probe.calls.at(-1).command, "oc-fake");
-  assert.ok(probe.calls.at(-1).args.includes("api"));
+  const fromEnv = createModelCatalog({ probe, env: { HARNEST_OPENCODE_V2: "oc2-fake" } });
+  const automatic = await fromEnv({ target: "opencode" });
+  const explicit = await fromEnv({ target: "opencode", route: { harnessVersion: "v2" } });
+  assert.equal(explicit, automatic);
+  assert.equal(automatic.source, "opencode api model.list");
+  assert.deepEqual(probe.calls.map(({ command, args }) => [command, args]), [
+    ["oc2-fake", ["--version"]], ["oc2-fake", ["api", "model.list"]],
+  ]);
 
-  const fromConfig = createModelCatalog({ probe, env: {}, config: { executables: { pi: "pi-fake" } } });
+  const fromConfig = createModelCatalog({ probe, env: {}, config: { executables: { opencode2: "oc2-config", pi: "pi-fake" } } });
+  await fromConfig({ target: "opencode" });
+  assert.equal(probe.calls.at(-1).command, "oc2-config");
   await fromConfig({ target: "pi" });
   assert.equal(probe.calls.at(-1).command, "pi-fake");
+});
 
-  const v2 = createModelCatalog({ probe, env: { HARNEST_OPENCODE_V2: "oc2-fake" } });
-  const rich = await v2({ target: "opencode", route: { harnessVersion: "v2" } });
-  assert.equal(probe.calls.at(-1).command, "oc2-fake");
-  assert.equal(rich.source, "opencode2 api model.list");
-
-  const v1 = createModelCatalog({ probe, env: { HARNEST_OPENCODE: "oc-fake" } });
-  const plain = await v1({ target: "opencode" });
-  assert.equal(probe.calls.at(-1).command, "oc-fake");
-  assert.equal(plain.source, "opencode api model.list");
+test("catalog rejects a V1 route and never requests metadata from a V1 binary", async () => {
+  const calls = [];
+  const catalog = createModelCatalog({ probe: async ({ args }) => {
+    calls.push(args);
+    return { status: 0, stdout: "1.18.18" };
+  } });
+  assert.equal((await catalog({ target: "opencode", route: { harnessVersion: "v1" } })).reason, "opencode:v2-required");
+  assert.deepEqual(calls, []);
+  assert.equal((await catalog({ target: "opencode" })).reason, "opencode:v2-required");
+  assert.equal((await catalog({ target: "opencode" })).reason, "opencode:v2-required");
+  assert.deepEqual(calls.map((args) => args.at(-1)), ["--version"]);
+  assert.equal((await catalog({ target: "dsh" })).reason, "catalog:unsupported-target");
 });
 
 // --- bounded total timeout, generic reasons -----------------------------------
@@ -163,21 +172,22 @@ test("an error shaped like a reason code cannot expose arbitrary subprocess text
   assert.ok(!JSON.stringify(result).includes("private-diagnostic-text"));
 });
 
-test("api+cli share one total timeout budget", async () => {
+test("version, API, and CLI share one total timeout budget", async () => {
   const seen = [];
   const probe = async (spec) => {
     seen.push({ args: spec.args, timeoutMs: spec.timeoutMs });
+    if (spec.args.at(-1) === "--version") return { status: 0, stdout: "2.2.1" };
     if (spec.args.includes("api")) {
       await new Promise((resolve) => setTimeout(resolve, 60));
       return { status: 1 };
     }
     return { status: 0, stdout: "openai/gpt-5.6-sol\n" };
   };
-  const getCatalog = createModelCatalog({ probe, env: { HARNEST_OPENCODE: "/x/oc" }, timeoutMs: 5000 });
+  const getCatalog = createModelCatalog({ probe, env: { HARNEST_OPENCODE_V2: "oc-fake" }, timeoutMs: 5000 });
   const result = await getCatalog({ target: "opencode" });
   assert.equal(result.source, "opencode models");
   assert.equal(seen[0].timeoutMs, 5000);
-  assert.ok(seen[1].timeoutMs < 5000 && seen[1].timeoutMs > 0);
+  assert.ok(seen[2].timeoutMs < seen[1].timeoutMs && seen[2].timeoutMs > 0);
 });
 
 test("failures are generic codes; stderr never leaks", async () => {
@@ -247,24 +257,11 @@ test("codex custom provider is unsupported without probing", async () => {
   assert.equal(result.reason, "codex:unsupported-provider");
 });
 
-test("cache key includes harnessVersion; unknown targets fail closed", async () => {
-  const probe = fakeProbe({ opencode: { status: 0, stdout: JSON.stringify({ data: [] }), stderr: "" } });
-  const getCatalog = createModelCatalog({ probe, env: { HARNEST_OPENCODE: "/x/oc", HARNEST_OPENCODE_V2: "/x/oc2" } });
-  await getCatalog({ target: "opencode", cwd: "C:/a" });
-  await getCatalog({ target: "opencode", cwd: "C:/a", route: { harnessVersion: "v2" } });
-  await getCatalog({ target: "opencode", cwd: "C:/a" });
-  assert.equal(probe.calls.length, 2);
-
-  const unknown = await getCatalog({ target: "dsh" });
-  assert.equal(unknown.status, "unavailable");
-  assert.equal(unknown.reason, "catalog:unsupported-target");
-});
-
 test("row cap bounds untrusted catalog data", async () => {
   const big = Array.from({ length: 5000 }, (_, index) => `openai/model-${index}`).join("\n");
   const capped = createModelCatalog({
-    probe: async () => ({ status: 0, stdout: big, stderr: "" }),
-    env: { HARNEST_OPENCODE: "/x/oc" },
+    probe: async ({ args }) => ({ status: 0, stdout: args.at(-1) === "--version" ? "2.2.1" : big, stderr: "" }),
+    env: { HARNEST_OPENCODE_V2: "oc-fake" },
     maxRows: 10,
   });
   const rows = await capped({ target: "opencode", cwd: "rows" });
@@ -569,20 +566,28 @@ test("claude returns managed aliases with no probe", async () => {
 });
 
 test("concurrent callers coalesce; TTL expiry refetches", async () => {
-  let count = 0;
-  const probe = async () => {
-    count++;
+  const calls = [];
+  const probe = async ({ args }) => {
+    calls.push(args.at(-1));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    return { status: 0, stdout: JSON.stringify({ data: [] }), stderr: "" };
+    return { status: 0, stdout: args.at(-1) === "--version" ? "2.2.1" : JSON.stringify(OPENCODE_API), stderr: "" };
   };
   let timestamp = 1_000_000;
-  const getCatalog = createModelCatalog({ probe, now: () => timestamp, env: { HARNEST_OPENCODE: "/x/oc" } });
+  const getCatalog = createModelCatalog({ probe, now: () => timestamp, ttlMs: 1000, env: { HARNEST_OPENCODE_V2: "oc-fake" } });
   const [first, second] = await Promise.all([getCatalog({ target: "opencode" }), getCatalog({ target: "opencode" })]);
-  assert.equal(count, 1);
+  assert.equal(first.status, "available");
+  assert.ok(first.models.some((model) => model.id === "gpt-5.6-sol"));
+  assert.equal(calls.length, 2);
   assert.equal(second, first);
-  timestamp += 3_600_001;
-  await getCatalog({ target: "opencode" });
-  assert.equal(count, 2);
+  timestamp += 999;
+  assert.equal(await getCatalog({ target: "opencode" }), first);
+  assert.equal(calls.length, 2);
+  timestamp += 2;
+  const refreshed = await getCatalog({ target: "opencode" });
+  assert.equal(refreshed.status, "available");
+  assert.deepEqual(refreshed.models, first.models);
+  assert.notEqual(refreshed.at, first.at);
+  assert.deepEqual(calls.slice(2), calls.slice(0, 2));
 });
 
 test("Gemini and Amp catalogs are explicitly unavailable without probing or inventing aliases", async () => {

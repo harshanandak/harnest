@@ -1,7 +1,7 @@
 // Bounded metadata-only model catalog discovery for all registered targets.
 //
 // getCatalog({target, route, cwd}) returns one catalog snapshot per
-// target+provider+cwd+harnessVersion, coalesced across concurrent callers and
+// target+provider+cwd, coalesced across concurrent callers and
 // cached in memory with TTL refresh. Failures back off and serve
 // explicitly-stale data only after a first success; the first failure is
 // unavailable, never a hollow stale shell.
@@ -15,9 +15,8 @@
 // with route.thinking; anything else is omitted, never invented.
 //
 // Sources (exact strings in `source`):
-//   opencode v1/v2: `<launcher> api model.list` (rich Model.Info: cost,
+//   OpenCode V2: `<launcher> api model.list` (rich Model.Info: cost,
 //     variants, enabled) with fallback to `<launcher> models` (bare ids).
-//     v2 resolves the opencode2 launch (route.harnessVersion), never a shell.
 //   pi:       `pi --list-models` table (strict columns; thinking levels from
 //             pi's own --help, granted only when the row asserts support)
 //   cursor:   `cursor-agent --list-models` (`id - description`; safe-id gated,
@@ -30,9 +29,9 @@
 // are generic target:code pairs; raw stderr and process exceptions never
 // reach callers. Cost is only reported when the catalog states it.
 
-import { harnessLaunch } from "./config.mjs";
+import { harnessLaunch, isOpenCodeV2Version } from "./config.mjs";
 import { spawnNativeCommand } from "./launch-command.mjs";
-import { TARGETS } from "./protocol.mjs";
+import { HARNESS_VERSIONS, TARGETS } from "./protocol.mjs";
 
 export const CATALOG_TTL_MS = 3_600_000;
 export const CATALOG_RETRY_MS = 60_000;
@@ -55,8 +54,6 @@ export const CLAUDE_MANAGED_ALIASES = Object.freeze(["opus", "sonnet", "fable"])
 // Native launch env vars per harness (mirrors config.mjs; catalog env/config
 // take precedence, process env remains the fallback inside harnessLaunch).
 const LAUNCH_ENV_VARS = Object.freeze({
-  opencode: "HARNEST_OPENCODE",
-  opencode2: "HARNEST_OPENCODE_V2",
   pi: "HARNEST_PI",
   cursor: "HARNEST_CURSOR",
   claude: "HARNEST_CLAUDE",
@@ -233,7 +230,7 @@ function kill(child) {
 
 function launchFor(name, { env, config } = {}) {
   const injected = env?.[LAUNCH_ENV_VARS[name]] ?? config?.executables?.[name] ?? undefined;
-  const launch = harnessLaunch(name, injected);
+  const launch = name === "opencode" ? harnessLaunch(name, undefined, { env, config }) : harnessLaunch(name, injected);
   return {
     command: launch.command,
     baseArgs: [...(launch.args || [])],
@@ -497,20 +494,22 @@ export function createModelCatalog({
     }
   };
 
-  const launchSpec = (target, route, cwd) => {
-    // OpenCode v2 metadata resolves the opencode2 launch (native direct
-    // binary on Windows); v1 and every other harness use their own launch.
-    // No shell anywhere: fixed argv only.
-    const name = target === "opencode" && route?.harnessVersion === "v2" ? "opencode2" : target;
-    const { command, baseArgs, env: launchEnv } = launchFor(name, { env, config });
+  const launchSpec = (target, cwd) => {
+    const { command, baseArgs, env: launchEnv } = launchFor(target, { env, config });
     return {
       target, kind: "exec", command, args: baseArgs, env: launchEnv,
-      cwd: cwd ?? process.cwd(), timeoutMs, maxOutputBytes, maxRows, label: name, spawnFn,
+      cwd: cwd ?? process.cwd(), timeoutMs, maxOutputBytes, maxRows, label: target, spawnFn,
     };
   };
 
   async function fetchOpencode(spec, target, deadline) {
-    const api = await runProbe({ ...spec, args: [...spec.args, "api", "model.list"] });
+    const version = await runProbe({ ...spec, timeoutMs: Math.min(spec.timeoutMs, 5_000), args: [...spec.args, "--version"] });
+    if (version.status !== 0 || !isOpenCodeV2Version(version.stdout ?? "")) {
+      throw new Error(code(target, version.code ?? "v2-required"));
+    }
+    const apiTimeout = deadline - now();
+    if (!(apiTimeout > 0)) throw new Error(code(target, "timeout"));
+    const api = await runProbe({ ...spec, timeoutMs: apiTimeout, args: [...spec.args, "api", "model.list"] });
     if (api.status === 0 && typeof api.stdout === "string") {
       try {
         const payload = JSON.parse(decodeCatalogText(api.stdout));
@@ -572,7 +571,7 @@ export function createModelCatalog({
         status: "unavailable", reason: `${target}:native-catalog-unavailable`,
       };
     }
-    const spec = launchSpec(target, route, cwd);
+    const spec = launchSpec(target, cwd);
     const deadline = now() + timeoutMs;
     let fetched;
     if (target === "opencode") fetched = await fetchOpencode(spec, target, deadline);
@@ -595,7 +594,10 @@ export function createModelCatalog({
     if (typeof target !== "string" || !TARGETS.has(target)) {
       return fail(target, "unknown", code("catalog", "unsupported-target"), now);
     }
-    const key = `${target}::${route?.provider ?? ""}::${cwd ?? ""}::${route?.harnessVersion ?? ""}`;
+    if (target === "opencode" && route?.harnessVersion !== undefined && !HARNESS_VERSIONS.includes(route.harnessVersion)) {
+      return fail(target, target, code(target, "v2-required"), now);
+    }
+    const key = `${target}::${route?.provider ?? ""}::${cwd ?? ""}`;
     const timestamp = now();
     const cached = cache.get(key);
     if (cached && timestamp < cached.expiresAt) return cached.data;
@@ -621,6 +623,7 @@ export function createModelCatalog({
         const raw = error instanceof Error && typeof error.message === "string" ? error.message : "";
         const suffix = raw.startsWith(`${target}:`) ? raw.slice(target.length + 1) : "";
         const known = new Set(["timeout", "output-limit", "spawn-failed", "closed-early", "rpc-error", "stdin-error", "protocol-overflow", "empty-catalog", "unsupported-provider", "rpc-failed"]);
+        if (target === "opencode") known.add("v2-required");
         const reason = known.has(suffix) || /^exit-(?:null|-?\d+)$/.test(suffix) ? raw : code(target, "probe-failed");
         rememberFailure(key, reason, now());
         const previous = cache.get(key);

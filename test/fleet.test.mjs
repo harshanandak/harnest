@@ -45,9 +45,10 @@ function gateAdapter({ beforeProgress } = {}) {
   };
 }
 
-function startJob(companion, requestId, target = "pi", route = {}) {
+function startJob(companion, requestId, target = "pi", route = {}, context) {
   return companion.start({
-    requestId, target, task: "hold", cwd: process.cwd(), route,
+    requestId, target, task: "hold", cwd: process.cwd(), route, context,
+    policy: { write: target === "opencode" },
     execution: { background: true, timeoutMs: 10_000 },
   });
 }
@@ -156,15 +157,24 @@ test("fleet steer modes match target control semantics", async (t) => {
     await waitForProgress(companion, g, await startJob(companion, "fleet-pi", "pi"));
     await waitForProgress(companion, g, await startJob(companion, "fleet-codex", "codex", { provider: "openai", model: "m" }));
     await waitForProgress(companion, g, await startJob(companion, "fleet-v2", "opencode", { provider: "p", model: "m", harnessVersion: "v2" }));
-    await waitForProgress(companion, g, await startJob(companion, "fleet-v1", "opencode", { provider: "p", model: "m" }));
+    await waitForProgress(companion, g, await startJob(companion, "fleet-default", "opencode", { provider: "p", model: "m" }));
+    const graph = { graph: { graphId: "fixture" } };
+    const shared = await startJob(companion, "fleet-shared", "opencode", { provider: "p", model: "m" }, graph);
+    await waitForProgress(companion, g, shared);
+    const attached = await startJob(companion, "fleet-attached", "opencode", { provider: "p", model: "m", serverUrl: "http://127.0.0.1:43991" }, graph);
+    await waitForProgress(companion, g, attached);
     const fleet = await companion.fleet({ state: "running", recent: 0 });
     const byRequest = new Map(fleet.agents.map((a) => [a.requestId, a]));
     assert.equal(byRequest.get("fleet-pi").steer.mode, "live");
     assert.equal(byRequest.get("fleet-codex").steer.mode, "resume");
     assert.match(byRequest.get("fleet-codex").steer.hint, /one-shot/);
     assert.equal(byRequest.get("fleet-v2").steer.mode, "live");
-    assert.equal(byRequest.get("fleet-v1").steer.mode, "resume");
-    assert.match(byRequest.get("fleet-v1").steer.hint, /V1 controls fail closed/);
+    assert.equal(byRequest.get("fleet-default").steer.mode, "live");
+    assert.equal(byRequest.get("fleet-shared").steer.mode, "graph");
+    assert.match(byRequest.get("fleet-shared").steer.hint, /graph tools/);
+    assert.equal((await companion.status(shared.jobId)).capabilities.liveControl, false);
+    assert.equal((await companion.status(attached.jobId)).capabilities.liveControl, true);
+    assert.equal(byRequest.get("fleet-attached").steer.mode, "live");
   } finally {
     g.release();
     await Promise.allSettled([...companion.running.values()].map(({ promise }) => promise));

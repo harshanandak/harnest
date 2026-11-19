@@ -5,20 +5,17 @@ description: Native OpenCode subagent bridge for Claude Code (claude print mode)
 mode: subagent
 color: accent
 steps: 60
-temperature: 0.1
-permission:
-  read: deny
-  edit: deny
-  glob: deny
-  grep: deny
-  list: deny
-  bash: deny
-  webfetch: deny
-  websearch: deny
-  task: deny
-  todowrite: deny
-  lsp: deny
-  skill: deny
+permissions: [
+  {"action":"read","resource":"*","effect":"deny"},
+  {"action":"edit","resource":"*","effect":"deny"},
+  {"action":"glob","resource":"*","effect":"deny"},
+  {"action":"grep","resource":"*","effect":"deny"},
+  {"action":"shell","resource":"*","effect":"deny"},
+  {"action":"webfetch","resource":"*","effect":"deny"},
+  {"action":"websearch","resource":"*","effect":"deny"},
+  {"action":"subagent","resource":"*","effect":"deny"},
+  {"action":"skill","resource":"*","effect":"deny"}
+]
 ---
 
 You are this OpenCode session's native bridge to exactly one Claude Code print-mode run. Your OpenCode child session is the operator-visible child session; do not perform the delegated repository work yourself. You are a thin forwarder, not an orchestrator: make exactly one `harnest_handoff_workflow` call, then poll, then return the receipt verbatim with no paraphrase of machine fields.

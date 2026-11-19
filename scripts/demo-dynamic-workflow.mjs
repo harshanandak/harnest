@@ -4,7 +4,7 @@
 // Runs the real QuickJS engine through the real detached DynamicWorkflowRunner
 // with a real Companion, but every child handoff goes to the fake adapter in
 // scripts/fixtures/dynamic-demo-adapter.mjs. No native harness process, no
-// network, no paid model call, and no write-capable policy is ever used.
+// network or paid model calls. Write-capable routes still use the fake adapter.
 //
 // Flow: validate -> start -> branch -> mixed seven-target parallel fan-out ->
 // one failed agent -> pause (in-flight checkpoint drains; the next dispatch
@@ -93,7 +93,7 @@ export const WORKFLOW_SOURCE = [
   '        items: args.items,',
   '        failFirst: lane[0] === "work-cursor" && args.failCursor !== false,',
   '      }),',
-  '      { label: lane[0], target: lane[1], policy: { write: lane[1] === "amp" },',
+  '      { label: lane[0], target: lane[1], policy: { write: ["opencode", "amp"].includes(lane[1]) },',
   '        ...(lane[1] === "opencode" ? { route: { model: "demo/opencode" } } : {}) },',
   '    );',
   '    return {',
@@ -114,7 +114,7 @@ export const WORKFLOW_SOURCE = [
   '    maxHoldMs: args.maxHoldMs ? args.maxHoldMs : 0,',
   '    postFileHoldMs: 200,',
   '  }),',
-  '  { label: "checkpoint", target: "opencode", route: { model: "demo/opencode" }, policy: { write: false } },',
+  '  { label: "checkpoint", target: "pi", policy: { write: false } },',
   ');',
   '',
   'const afterPause = await agent(',

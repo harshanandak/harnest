@@ -142,8 +142,8 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.equal(request.properties.route.additionalProperties, false);
   assert.deepEqual(Object.keys(request.properties.execution.properties), ["background", "timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns", "transport"]);
   assert.equal(request.properties.execution.additionalProperties, false);
-  assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"], description: "OpenCode only: v1 or v2." });
-  assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"] });
+  assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"], description: "OpenCode only: v2 or omitted." });
+  assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"] });
   const policy = request.properties.policy;
   assert.deepEqual(Object.keys(policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
   const [legacyTools, explicitTools] = policy.properties.tools.anyOf;
@@ -161,7 +161,7 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.deepEqual(Object.keys(node.properties.execution.properties), ["timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns"]);
   assert.equal(node.properties.execution.additionalProperties, false);
   assert.equal(node.properties.policy.additionalProperties, false);
-  const readOnlyTargets = ["opencode", "pi", "cursor", "claude", "codex", "gemini"];
+  const readOnlyTargets = ["pi", "cursor", "claude", "codex", "gemini"];
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.request.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.candidates.items.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_review").parameters.properties.request.properties.target.enum, readOnlyTargets);

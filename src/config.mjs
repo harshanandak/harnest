@@ -11,12 +11,12 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // prompt surfacing as `unknown option '--git'`). handoff prompts are JSON
 // envelopes, so any shim in the spawn path corrupts them. The direct launches
 // below bypass the .ps1 entirely by resolving the underlying node entrypoint.
-function windowsPowerShellShim(name) {
+function windowsPowerShellShim(name, env = process.env) {
   if (process.platform !== "win32") return null;
-  for (const directory of trustedPathDirectories()) {
+  for (const directory of trustedPathDirectories(env)) {
     const candidate = join(directory, `${name}.ps1`);
     if (existsSync(candidate)) {
-      return { command: windowsSystemCommand("powershell.exe"), args: ["-NoProfile", "-File", candidate] };
+      return { command: windowsSystemCommand("powershell.exe", env), args: ["-NoProfile", "-File", candidate] };
     }
   }
   return null;
@@ -26,9 +26,9 @@ function hasWindowsNodeShim(directory, name) {
   return [".ps1", ".cmd"].some((extension) => existsSync(join(directory, name + extension)));
 }
 
-function windowsOpenCodeV2DirectLaunch() {
+function windowsOpenCodeV2DirectLaunch(env) {
   if (process.platform !== "win32") return null;
-  for (const directory of trustedPathDirectories()) {
+  for (const directory of trustedPathDirectories(env)) {
     if (!hasWindowsNodeShim(directory, "opencode") && !hasWindowsNodeShim(directory, "opencode2")) continue;
     // The package renamed its native binary across releases; probe current and
     // legacy names so an OpenCode update cannot break direct launch.
@@ -38,6 +38,18 @@ function windowsOpenCodeV2DirectLaunch() {
     }
   }
   return null;
+}
+
+function openCodeLaunch(env) {
+  return windowsOpenCodeV2DirectLaunch(env)
+    || resolveTrustedCommand("opencode2", env)
+    || windowsPowerShellShim("opencode2", env)
+    || resolveTrustedCommand("opencode", env)
+    || "opencode";
+}
+
+export function isOpenCodeV2Version(output) {
+  return /^(?:opencode\s+)?v?2\.\d+\.\d+(?:[-+][\w.+-]+)?$/i.test(output.trim());
 }
 
 function parseCursorVersion(name) {
@@ -124,13 +136,12 @@ export function harnessCommand(target, injected) {
   return harnessLaunch(target, injected).command;
 }
 
-export function harnessLaunch(target, injected) {
+export function harnessLaunch(target, injected, { env = process.env, config } = {}) {
   if (injected) {
     return typeof injected === "string" ? { command: injected, args: [] } : injected;
   }
   const envName = {
-    opencode: "HARNEST_OPENCODE",
-    opencode2: "HARNEST_OPENCODE_V2",
+    opencode: "HARNEST_OPENCODE_V2",
     pi: "HARNEST_PI",
     cursor: "HARNEST_CURSOR",
     claude: "HARNEST_CLAUDE",
@@ -140,10 +151,7 @@ export function harnessLaunch(target, injected) {
   }[target];
   if (!envName) throw new TypeError(`unsupported harness launch target: ${target}`);
   const defaults = {
-    opencode: "opencode",
-    get opencode2() {
-      return windowsOpenCodeV2DirectLaunch() || windowsPowerShellShim("opencode2") || "opencode2";
-    },
+    get opencode() { return openCodeLaunch(env); },
     // Pi RPC needs the Node entrypoint so the npm shim cannot drop piped stdin.
     get pi() {
       return windowsNodePackageLaunch("pi", ["@earendil-works", "pi-coding-agent", "dist", "cli.js"])
@@ -157,8 +165,9 @@ export function harnessLaunch(target, injected) {
     get gemini() { return windowsNodePackageLaunch("gemini", ["@google", "gemini-cli", "dist", "index.js"]) || "gemini"; },
     amp: "amp",
   };
-  const environmentValue = process.env[envName];
-  const localValue = readLocalConfig().executables?.[target];
+  const localKey = target === "opencode" ? "opencode2" : target;
+  const environmentValue = env[envName];
+  const localValue = (config ?? readLocalConfig()).executables?.[localKey];
   const configured = environmentValue || localValue || defaults[target] || target;
   let launch = typeof configured === "string" ? { command: configured, args: [] } : configured;
   const isAbsolute = (value) => typeof value === "string"
@@ -169,29 +178,18 @@ export function harnessLaunch(target, injected) {
   if (isAbsolute(launch?.command) && !existsSync(launch.command)) {
     const fallback = defaults[target];
     const fallbackLaunch = typeof fallback === "string" ? { command: fallback, args: [] } : fallback;
-    const fallbackUsable = isAbsolute(fallbackLaunch?.command) ? existsSync(fallbackLaunch.command) : resolveTrustedCommand(fallbackLaunch?.command);
+    const fallbackUsable = isAbsolute(fallbackLaunch?.command) ? existsSync(fallbackLaunch.command) : resolveTrustedCommand(fallbackLaunch?.command, env);
     if (fallbackUsable) {
-      const source = environmentValue ? envName : localValue ? `executables.${target}` : "automatic detection";
+      const source = environmentValue ? envName : localValue ? `executables.${localKey}` : "automatic detection";
       launch = { ...fallbackLaunch, fallbackFrom: source, missing: launch.command };
     } else {
-      const source = environmentValue ? envName : localValue ? `executables.${target}` : "automatic detection";
+      const source = environmentValue ? envName : localValue ? `executables.${localKey}` : "automatic detection";
       throw Object.assign(new Error(`configured ${target} executable does not exist: ${launch.command}`), {
         details: { kind: "not-ready", configured: launch.command, source, hint: `fix ${source} or unset it so automatic detection can run` },
       });
     }
   }
   return launch;
-}
-
-export function openCodeEnvironment(version, injected = {}, source = process.env) {
-  const isolatedV1Data = version === "v1"
-    ? source.HARNEST_OPENCODE_V1_DATA_HOME
-    : null;
-  return {
-    ...source,
-    ...(isolatedV1Data ? { XDG_DATA_HOME: isolatedV1Data } : {}),
-    ...injected,
-  };
 }
 
 export function pluginRoot() {

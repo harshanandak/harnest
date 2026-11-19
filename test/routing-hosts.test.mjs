@@ -134,7 +134,7 @@ for (const modern of [false, true]) {
     snapshot = await pi.call("handoff_routing_configure", { action: "use-preset", preset: "all-hosts", expectedRevision: snapshot.revision });
     assert.equal((await call("handoff_routing_get", {})).activePreset, "all-hosts");
     for (const target of targets) {
-      const args = { request: { target, task: "Check the route", cwd: directory } };
+      const args = { request: { target, task: "Check the route", cwd: directory, policy: { write: target === "opencode" } } };
       const mcp = await call("handoff_routing_preview", args);
       const native = await pi.call("handoff_routing_preview", args);
       assert.deepEqual(native, mcp, `${target}: transport must not change the routing result`);
@@ -151,7 +151,7 @@ for (const modern of [false, true]) {
     const models = { claude: "claude-sonnet-4-5", codex: "gpt-5.6-sol", pi: "test-provider/gpt-5.6-sol", opencode: "test-provider/gpt-5.6-sol", cursor: "gpt-5.6-sol-high" };
     snapshot = await call("handoff_routing_configure", { action: "set", settings: { models, modelVersion: "latest" }, expectedRevision: snapshot.revision });
     for (const target of targets) {
-      const args = { request: { target, task: "Check version preference", cwd: directory } };
+      const args = { request: { target, task: "Check version preference", cwd: directory, policy: { write: target === "opencode" } } };
       const latest = await call("handoff_routing_preview", args);
       assert.deepEqual(await pi.call("handoff_routing_preview", args), latest);
       assert.equal(latest.route.model, target === "claude" ? "sonnet" : `gpt-6-sol${target === "cursor" ? "-high" : ""}`);

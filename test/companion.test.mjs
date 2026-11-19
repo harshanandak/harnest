@@ -170,7 +170,7 @@ test("multi-model comparison sends identical read-only context to distinct resol
   const comparison = await companion.compare({
     request: {
       requestId: "compare-opinions",
-      target: "opencode",
+      target: "pi",
       task: "Research the same question.",
       cwd: process.cwd(),
       context: { question: "Which option is better?" },
@@ -211,7 +211,7 @@ test("multi-model comparison rejects duplicate resolved routes before launching"
   assert.equal(launches, 0);
 });
 
-test("multi-model comparison canonicalizes equivalent OpenCode route spellings", async (t) => {
+test("read-only comparison and review reject OpenCode before starting any lane", async (t) => {
   let launches = 0;
   const { root, companion } = await fixture(() => ({
     async run() {
@@ -220,13 +220,14 @@ test("multi-model comparison canonicalizes equivalent OpenCode route spellings",
     },
   }), { routeResolver: async (request) => request });
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  await assert.rejects(companion.compare({
-    request: { requestId: "compare-canonical", target: "opencode", task: "same", cwd: process.cwd() },
-    candidates: [
-      { name: "split", route: { provider: "opencode-go", model: "deepseek-v4-flash" } },
-      { name: "full", route: { model: "opencode-go/deepseek-v4-flash" } },
-    ],
-  }), /resolve to the same route/);
+  const request = { requestId: "read-only-fanout", target: "pi", task: "same", cwd: process.cwd() };
+  const lanes = [
+    { name: "pi", target: "pi", route: { model: "one" } },
+    { name: "open-code", target: "opencode", route: { model: "test/two" } },
+  ];
+  for (const [tool, key] of [["compare", "candidates"], ["review", "reviewers"]]) {
+    await assert.rejects(companion[tool]({ request, [key]: lanes }), /cannot enforce read-only/);
+  }
   assert.equal(launches, 0);
 });
 
@@ -281,6 +282,7 @@ test("foreground handoff returns a parent-visible terminal receipt", async (t) =
   const receipt = await companion.start({
     requestId: "foreground-canary-request",
     target: "opencode",
+    policy: { write: true },
     task: "return canary",
     cwd: process.cwd(),
     context: { canary: "PARENT_RECEIVED_TERMINAL_PAYLOAD" },
@@ -349,7 +351,7 @@ test("terminal usageSummary survives persistence and a fresh Companion result/tr
       task: `run ${target}`,
       cwd: process.cwd(),
       route: target === "amp" ? { variant: "medium" } : { model: target === "gemini" ? "gemini-fixture" : "fixture-model" },
-      policy: { write: target === "amp" },
+      policy: { write: ["opencode", "amp"].includes(target) },
     });
   }
 
@@ -665,7 +667,7 @@ test("transport failure cannot masquerade as findings", async (t) => {
   }));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
-  const receipt = await companion.start({ requestId: "transport-failure-request", target: "opencode", task: "fail", cwd: process.cwd() });
+  const receipt = await companion.start({ requestId: "transport-failure-request", target: "opencode", task: "fail", cwd: process.cwd(), policy: { write: true } });
   assert.equal(receipt.state, "failed");
   assert.match(receipt.error.message, /transport unavailable/);
   assert.equal(receipt.result, null);
@@ -712,6 +714,7 @@ test("append-only trace and request-id lookup survive outside the compact receip
   const receipt = await companion.start({
     requestId: "request-trace-lookup",
     target: "opencode",
+    policy: { write: true },
     task: "trace",
     cwd: process.cwd(),
   });
@@ -746,7 +749,7 @@ test("status reuses its own job snapshot instead of re-reading it for the trace 
     },
   }));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const receipt = await companion.start({ requestId: "status-snapshot-reuse", target: "opencode", task: "trace", cwd: process.cwd() });
+  const receipt = await companion.start({ requestId: "status-snapshot-reuse", target: "opencode", task: "trace", cwd: process.cwd(), policy: { write: true } });
   assert.equal(receipt.state, "completed");
 
   // Instrument after start: the run's own bookkeeping reads must not count.
@@ -779,7 +782,7 @@ test("trace retrieval redacts secrets and bounds transcript strings", async (t) 
     },
   }));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const receipt = await companion.start({ requestId: "trace-redaction", target: "opencode", task: "trace", cwd: process.cwd() });
+  const receipt = await companion.start({ requestId: "trace-redaction", target: "opencode", task: "trace", cwd: process.cwd(), policy: { write: true } });
   const trace = await store.readTrace(receipt.jobId, { afterSequence: 0, limit: 20 });
   const serialized = JSON.stringify(trace.events);
   assert.doesNotMatch(serialized, /private-value/);
@@ -802,6 +805,7 @@ test("running status reports semantic progress instead of heartbeat-only health"
   const queued = await companion.start({
     requestId: "semantic-progress-request",
     target: "opencode",
+    policy: { write: true },
     task: "report progress",
     cwd: process.cwd(),
     execution: { background: true, timeoutMs: 1_000 },
@@ -968,6 +972,9 @@ test("a failed or ambiguous control is reported without failing the handoff", as
       if (command.commandId === "uncertain-control") {
         throw Object.assign(new Error("acknowledgement lost"), { details: { kind: "control", uncertain: true } });
       }
+      if (command.kind === "reroute") {
+        throw Object.assign(new Error("model changed; prompt acknowledgement lost"), { details: { kind: "control", uncertain: true, modelSwitchApplied: true } });
+      }
       throw Object.assign(new Error("control rejected"), { details: { kind: "control" } });
     },
   }));
@@ -975,6 +982,7 @@ test("a failed or ambiguous control is reported without failing the handoff", as
   const queued = await companion.start({
     requestId: "control-error-request",
     target: "opencode",
+    policy: { write: true },
     task: "keep running",
     cwd: process.cwd(),
     execution: { background: true, timeoutMs: 2_000 },
@@ -993,6 +1001,15 @@ test("a failed or ambiguous control is reported without failing the handoff", as
     message: "maybe delivered",
   });
   assert.equal(uncertain.state, "uncertain");
+  const switched = await companion.reroute(queued.jobId, {
+    commandId: "partial-reroute",
+    route: { provider: "fixture", model: "updated" },
+    message: "maybe delivered after switching models",
+  });
+  assert.equal(switched.state, "uncertain");
+  assert.equal(switched.effect, "delivery_unconfirmed");
+  assert.deepEqual(switched.acknowledgement, { modelSwitchApplied: true, promptAcknowledged: false });
+  assert.deepEqual((await companion.status(queued.jobId)).controls.at(-1).acknowledgement, switched.acknowledgement);
   release();
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if ((await companion.status(queued.jobId)).state === "completed") break;
@@ -1143,6 +1160,7 @@ test("a progress persistence failure becomes a terminal failure receipt", async 
   const receipt = await companion.start({
     requestId: "persistence-failure-request",
     target: "opencode",
+    policy: { write: true },
     task: "persist",
     cwd: process.cwd(),
   });

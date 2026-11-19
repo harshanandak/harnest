@@ -47,7 +47,7 @@ for (const modern of [false, true]) {
       }
       const receipts = await Promise.all(targets.map((target) => call(client, "handoff_workflow", { request: {
         requestId: `five-${target}`, target, cwd: root, task: "synthetic fixture", context,
-        policy: { write: ["amp", "acp"].includes(target) }, execution: { background: false, timeoutMs: 5000 },
+        policy: { write: ["opencode", "amp", "acp"].includes(target) }, execution: { background: false, timeoutMs: 5000 },
         route: target === "amp"
           ? { variant: "medium" }
           : target === "acp" ? { agent: "fixture-acp" }

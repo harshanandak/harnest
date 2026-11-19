@@ -8,7 +8,7 @@ import { hasNativeRouteControls, normalizeRequest } from "./protocol.mjs";
 import { attachRoutingDecision, resolvePolicyRoute, validatePolicyScopes } from "./routing-policy.mjs";
 import { expandUserPolicy } from "./routing-presets.mjs";
 import { hasModelFamily, isLatestAlias, selectLatestModel } from "./model-selection.mjs";
-import { assertAdapterRoute } from "./model-policy.mjs";
+import { assertAdapterPolicy, assertAdapterRoute, openCodeUsesSharedService } from "./model-policy.mjs";
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -258,7 +258,7 @@ export function createRouteResolver(options = {}) {
     const scopes = policyScopes(routing, request, userPolicy);
     let routed = request;
     if (scopes.length) {
-      const decision = resolvePolicyRoute(request, scopes, { now: options.now?.() ?? Date.now() });
+      const decision = resolvePolicyRoute(request, scopes, { now: options.now?.() ?? Date.now(), openCodeServerUrl: options.openCodeServerUrl });
       routed = normalizeRequest(attachRoutingDecision({
         ...request,
         target: decision.target,
@@ -332,6 +332,14 @@ export function createRouteResolver(options = {}) {
   const resolveRoute = async (input) => {
     const resolved = await resolveOnce(input);
     assertAdapterRoute(resolved.target, resolved.route);
+    if (resolved.target === "opencode") {
+      assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution, resolved.workflow);
+      // require.liveControl stays a hard gate after a local resolver override.
+      if (resolved.metadata?.harnest?.routingDecision?.requireLiveControl === true
+        && openCodeUsesSharedService(resolved, options.openCodeServerUrl)) {
+        throw Object.assign(new Error("Shared-service OpenCode graph nodes cannot provide live control"), { details: { kind: "policy" } });
+      }
+    }
     if (resolved.target === "acp") return resolved;
     const model = resolved?.route?.model;
     const mode = resolved.metadata?.harnest?.routingDecision?.modelVersion ?? "latest";

@@ -66,7 +66,7 @@
               "additionalProperties": false
             }
           ],
-          "description": "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi and local OpenCode V1 support deny only."
+          "description": "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi supports deny only. OpenCode delegates tool permissions to its server."
         },
         "mode": {
           "type": "string",
@@ -199,7 +199,6 @@
               "harnessVersion": {
                 "type": "string",
                 "enum": [
-                  "v1",
                   "v2"
                 ]
               },
@@ -309,7 +308,7 @@
                     "additionalProperties": false
                   }
                 ],
-                "description": "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi and local OpenCode V1 support deny only."
+                "description": "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi supports deny only. OpenCode delegates tool permissions to its server."
               },
               "mode": {
                 "type": "string",

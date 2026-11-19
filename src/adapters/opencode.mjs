@@ -3,7 +3,6 @@
 // Taskflow packages installed. The core is the same taskflow_run
 // implementation and lets this adapter supply the injected executable/spawn
 // seam required by the companion contract.
-import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,18 +16,15 @@ import {
   providerErrorFromEvent,
   runProcess,
 } from "../process.mjs";
-import { harnessLaunch, openCodeEnvironment } from "../config.mjs";
+import { harnessLaunch, isOpenCodeV2Version } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { executionError, stageAttachments, validateAdapterExecution } from "../execution-controls.mjs";
 import { requireExecutionFlags } from "./execution-help.mjs";
 import { compactText, structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
 import { OpenCodeControl } from "./opencode-control.mjs";
-import { assertNoClaudeRoute, assertNoClaudeWorkflow } from "../model-policy.mjs";
+import { assertAdapterPolicy, assertAdapterRoute, assertNoClaudeWorkflow, openCodeUsesSharedService } from "../model-policy.mjs";
 
-const BASELINE_READ_TOOLS = ["read", "grep", "glob", "list"];
-const SCOPED_V1_VERSION = "1.18.18";
-const TOOL_ALIASES = { find: "glob", ls: "list" };
 const MAX_PROTOCOL_TEXT_CHARS = 1024 * 1024;
 const MAX_FINAL_TEXT_CHARS = 64_000;
 const MAX_EVENT_TYPES = 256;
@@ -72,33 +68,6 @@ function observeEventSummary(state, event) {
   state.eventTypes.add(type);
   state.eventSummary.types.push(type);
   if (state.eventSummary.types.length > 20) state.eventSummary.types.shift();
-}
-
-function policyConfig(policy = {}, inlineConfig, scopedAgent) {
-  let base = {};
-  if (inlineConfig) {
-    try {
-      base = JSON.parse(inlineConfig);
-    } catch {
-      throw new TypeError("OPENCODE_CONFIG_CONTENT must be valid JSON so the handoff policy can be enforced");
-    }
-  }
-  const allowed = new Set(BASELINE_READ_TOOLS);
-  if (policy.write) {
-    for (const tool of Array.isArray(policy.tools) ? policy.tools : []) allowed.add(TOOL_ALIASES[tool] || tool);
-  }
-  const denied = policy.tools?.deny ?? [];
-  for (const tool of denied) allowed.delete(tool);
-  const denyRules = denied.map((tool) => [tool, "deny"]);
-  const permission = Object.fromEntries([["*", "deny"], ...[...allowed].map((tool) => [tool, "allow"]), ...denyRules]);
-  if (scopedAgent) {
-    // V1 applies agent rules last. Add only denies at that layer.
-    base.agent = { ...base.agent, [scopedAgent]: { mode: "primary", permission: Object.fromEntries(denyRules) } };
-  }
-  return JSON.stringify({
-    ...base,
-    permission,
-  });
 }
 
 const USAGE_KEYS = ["input", "output", "cacheRead", "cacheWrite", "cost", "contextTokens", "turns"];
@@ -259,24 +228,21 @@ function resolvedVariant(route, thinking, variant) {
   return undefined;
 }
 
-function buildArgs(request, { model, agent, thinking, variant, sessionId, prompt, serverUrl, harnessVersion, scopedAgent } = {}) {
+function buildArgs(request, { model, agent, thinking, variant, sessionId, prompt, serverUrl } = {}) {
   const route = request.route || {};
-  const version = harnessVersion === "v2" ? "v2" : "v1";
   const args = ["run"];
   args.push(prompt || "");
   args.push("--format", "json");
-  if (version === "v1") args.push("--pure", "--dir", request.cwd);
   const effectiveModel = resolvedModel(route, model);
   if (!effectiveModel) {
     throw new TypeError("OpenCode handoff requires an explicit route.model");
   }
-  if (serverUrl) args.push(version === "v2" ? "--server" : "--attach", serverUrl);
+  if (serverUrl) args.push("--server", serverUrl);
   const effectiveVariant = resolvedVariant(route, thinking, variant);
-  args.push("--model", version === "v2" && effectiveVariant ? `${effectiveModel}#${effectiveVariant}` : effectiveModel);
+  args.push("--model", effectiveVariant ? `${effectiveModel}#${effectiveVariant}` : effectiveModel);
   const effectiveAgent = route.agent || agent;
-  if (scopedAgent || (effectiveAgent && route.agent)) args.push("--agent", scopedAgent ?? String(effectiveAgent));
-  if (version === "v1" && effectiveVariant) args.push("--variant", effectiveVariant);
-  else if (route.thinking === true) args.push("--thinking");
+  if (effectiveAgent && route.agent) args.push("--agent", String(effectiveAgent));
+  if (route.thinking === true) args.push("--thinking");
   if (sessionId) args.push("--session", sessionId);
   if (request.execution?.sessionAction === "fork") args.push("--fork");
   for (const { path } of request.execution?.attachments ?? []) args.push("--file", path);
@@ -339,13 +305,6 @@ function adapterError(message, kind, details = {}) {
   error.name = "OpenCodeAdapterError";
   error.details = { kind, ...details };
   return error;
-}
-
-function validateHarnessVersion(value) {
-  if (value !== undefined && value !== "v1" && value !== "v2") {
-    throw adapterError("route.harnessVersion must be v1 or v2", "validation");
-  }
-  return value ?? "v1";
 }
 
 const PROJECT_ID_RECOVERY_GUIDANCE = "OpenCode database is incompatible (no such column: project_id). Back up the OpenCode database, update OpenCode, restart the server, and retry. Do not delete, migrate, or overwrite the database automatically.";
@@ -467,17 +426,56 @@ function executionSignal(parentSignal, timeoutMs) {
   };
 }
 
+function taskflowPolicyError(message) {
+  return adapterError(message, "policy", { field: "workflow.spec" });
+}
+
+function prepareTaskflow(cwd, spec, { isShorthand, desugar, discoverAgents, readSubagentSettings }) {
+  const flow = isShorthand(spec) ? desugar(spec) : spec;
+  const { modelRoles, taskflow } = readSubagentSettings();
+  const { agents } = discoverAgents(cwd, flow.agentScope ?? "both", modelRoles, taskflow);
+  const fallback = agents[0];
+  const selected = new Set();
+  let usesFallback = false;
+  const visit = (phases) => {
+    if (!Array.isArray(phases)) return;
+    for (const phase of phases) {
+      if (!phase || typeof phase !== "object") continue;
+      if (!["flow", "expand", "approval", "script"].includes(phase.type)) {
+        const names = Array.isArray(phase.branches) ? phase.branches.map((branch) => branch?.agent ?? phase.agent) : [phase.agent];
+        if (phase.type === "tournament") names.push(phase.judgeAgent ?? phase.agent);
+        if (phase.score?.judge) names.push(phase.score.judge.agent ?? phase.agent);
+        for (const name of names) {
+          if (typeof name === "string" && name) selected.add(agents.find((agent) => agent.name === name) ?? fallback);
+          else usesFallback = true;
+        }
+      }
+      visit(Array.isArray(phase.def) ? phase.def : phase.def?.phases);
+    }
+  };
+  visit(flow.phases);
+  // An implicit bundled agent is a Taskflow default. Use the native OpenCode
+  // agent for that case, including its own system prompt and permissions.
+  const nativeDefault = usesFallback && fallback?.source === "built-in" && !selected.has(fallback) ? fallback.name : null;
+  if ([...selected, ...(usesFallback ? [fallback] : [])].some((agent) => agent?.tools?.length && agent.name !== nativeDefault)) {
+    throw taskflowPolicyError("OpenCode V2 does not enforce Taskflow agent tool lists");
+  }
+  return { flow, agents: new Map(agents.map((agent) => [agent.name, agent])), nativeDefault };
+}
+
 export class OpenCodeAdapter {
   constructor(options = {}) {
     this.options = options;
     const injected = options.launch || options.command || options.executable || options.bin;
-    this.launch = harnessLaunch("opencode", injected);
-    this.launchV2 = harnessLaunch("opencode2", options.launchV2 || options.commandV2 || (injected ? injected : undefined));
-    this.spawnFn = options.spawnFn;
     this.env = options.env || {};
+    this.launch = harnessLaunch("opencode", options.launchV2 || options.commandV2 || injected, {
+      env: options.env ? mergeProcessEnv(this.env) : process.env,
+    });
+    this.spawnFn = options.spawnFn;
     this.fetchFn = options.fetchFn;
     this.controlRuntime = null;
     this.controlStart = null;
+    this.running = false;
     // Memoized only after a successful dynamic import: a load failure must not
     // wedge the adapter if the optional package is installed later.
     this.taskflowCore = null;
@@ -487,7 +485,8 @@ export class OpenCodeAdapter {
     if (this.taskflowCore) return this.taskflowCore;
     let cause;
     try {
-      const loaded = await import("taskflow-mcp-core/server");
+      const [server, core] = await Promise.all([import("taskflow-mcp-core/server"), import("taskflow-core")]);
+      const loaded = { makeToolHandlers: server.makeToolHandlers, core };
       this.taskflowCore = loaded;
       return loaded;
     } catch (error) {
@@ -523,39 +522,15 @@ export class OpenCodeAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
-    assertNoClaudeRoute("opencode", request.route);
-    assertNoClaudeWorkflow("opencode", request.workflow);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    assertAdapterRoute("opencode", request.route);
+    assertAdapterPolicy("opencode", { ...request.policy, ...normalizePolicyControls(request.policy ?? {}) }, request.execution, request.workflow);
+    assertNoClaudeWorkflow("opencode", request.workflow);
     request = validateAdapterExecution(request, "opencode");
     const { sessionId, sessionAction, attachments } = request.execution;
     const fork = sessionAction === "fork";
-    const harnessVersion = validateHarnessVersion(request.route?.harnessVersion);
     if (!resolvedModel(request.route, request.route?.model)) {
       throw new TypeError("OpenCode handoff requires an explicit route.model");
-    }
-    const { tools } = normalizePolicyControls(request.policy || {});
-    const { allow, deny = [] } = tools;
-    if (allow !== undefined) throw adapterError("OpenCode supports policy.tools.deny only for explicit tool policies", "policy");
-    if (deny.some((name) => !BASELINE_READ_TOOLS.includes(name))) {
-      throw adapterError("OpenCode policy.tools.deny accepts only exact default tool names: read, grep, glob, list", "policy");
-    }
-    let scopedAgent;
-    if (deny.length) {
-      if (harnessVersion !== "v1" || this.options.serverUrl || request.route?.serverUrl || request.route?.agent
-        || request.execution?.sessionId || request.workflow != null) {
-        throw adapterError("OpenCode policy.tools.deny requires a fresh local V1 run with its default agent and no Taskflow", "policy");
-      }
-      const version = await runProcess(this.launch.command, [...(this.launch.args || []), "--version"], {
-        cwd: request.cwd,
-        env: openCodeEnvironment(harnessVersion, mergeProcessEnv(this.env)),
-        spawnFn: this.spawnFn || spawnNativeCommand,
-        signal,
-        timeoutMs: Math.min(request.execution?.timeoutMs ?? 10_000, 10_000),
-      });
-      if (version.stdout.trim() !== SCOPED_V1_VERSION) {
-        throw adapterError(`OpenCode policy.tools.deny requires CLI version ${SCOPED_V1_VERSION}`, "policy");
-      }
-      scopedAgent = `harnest-${randomUUID()}`;
     }
     // A workflow.nodes request must not silently degrade into a plain prompt:
     // node-to-flow translation currently lives in Pi, so fail before any
@@ -571,7 +546,8 @@ export class OpenCodeAdapter {
     // Explicit workflow.spec needs the optional core. Load it before the
     // execution signal and control server so a missing dependency cannot start
     // a server (or a timeout) it must then unwind; plain runs never load it.
-    const taskflowCore = flowSpec !== null ? await this.#loadTaskflowCore() : null;
+    if (this.running) throw adapterError("OpenCode adapter already owns an active request", "busy");
+    this.running = true;
     const execution = executionSignal(signal, request.execution?.timeoutMs);
     const state = {
       sessionId: fork ? null : sessionId || null,
@@ -580,15 +556,13 @@ export class OpenCodeAdapter {
       eventSummary: { count: 0, types: [] },
       eventTypes: new Set(),
       lastFailure: null,
-      scopedAgent,
     };
-    const graphNode = Boolean(request.context?.graph?.graphId);
     // Graph nodes attach to the OpenCode background service by default, so each
     // node is a native session the operator can open in the sidebar. A private
     // control server is opt-in via route.serverUrl; host-attached nodes have no
     // live control surface because the graph scheduler owns them.
-    const hostAttached = harnessVersion === "v2" && graphNode && !(this.options.serverUrl || request.route?.serverUrl);
-    const controlRuntime = harnessVersion === "v2" && !hostAttached ? new OpenCodeControl({
+    const hostAttached = openCodeUsesSharedService(request, this.options.serverUrl);
+    const controlRuntime = !hostAttached ? new OpenCodeControl({
       spawnFn: this.spawnFn,
       fetchFn: this.fetchFn,
       clientFactory: this.options.clientFactory,
@@ -597,24 +571,45 @@ export class OpenCodeAdapter {
       timeoutMs: this.options.controlTimeoutMs || this.options.serverReadyTimeoutMs,
       port: this.options.serverPort,
     }) : null;
-    this.activeHarnessVersion = harnessVersion;
     this.hostAttached = hostAttached;
     this.controlRuntime = controlRuntime;
+    // Controls that arrive during preflight (Taskflow load, version and flag
+    // probes) wait for the control server instead of failing as not ready.
+    let controlGate = null;
+    if (controlRuntime) {
+      controlGate = {};
+      this.controlStart = new Promise((resolve, reject) => Object.assign(controlGate, { resolve, reject }));
+      this.controlStart.catch(() => {});
+    }
     let scratch;
     try {
-      const launch = harnessVersion === "v2" ? this.launchV2 : this.launch;
-      const env = openCodeEnvironment(harnessVersion, mergeProcessEnv(this.env));
+      const taskflow = flowSpec !== null ? await this.#loadTaskflowCore() : null;
+      const preparedFlow = taskflow && prepareTaskflow(request.cwd, flowSpec, taskflow.core);
+      const launch = this.launch;
+      const env = mergeProcessEnv(this.env);
+      if (!this.spawnFn) {
+        const { stdout } = await runProcess(launch.command, [...(launch.args ?? []), "--version"], {
+          cwd: request.cwd, env, spawnFn: spawnNativeCommand, signal: execution.signal, timeoutMs: 5_000,
+        });
+        if (!isOpenCodeV2Version(stdout)) {
+          throw adapterError("OpenCode V2 is required; install @opencode/cli or set HARNEST_OPENCODE_V2 to a V2 executable", "not-ready");
+        }
+      }
       await requireExecutionFlags({ launch, request, env, spawnFn: this.spawnFn, signal: execution.signal }, ["run"], [
+        ...(sessionId ? [["sessionAction", "--session"]] : []),
         ...(fork ? [["sessionAction", "--fork"]] : []),
         ...(attachments?.length ? [["attachments", "--file"]] : []),
       ]);
-      this.controlStart = controlRuntime?.start({
-        request, version: harnessVersion, launch, env, signal: execution.signal,
-        serverUrl: this.options.serverUrl || request.route?.serverUrl,
-      });
-      if (this.controlStart) await this.controlStart;
-      if (flowSpec !== null) {
-        return await this.#runWorkflow(request, flowSpec, execution, state, onProgress, taskflowCore);
+      if (controlGate) {
+        const started = Promise.resolve(controlRuntime.start({
+          request, launch, env, signal: execution.signal,
+          serverUrl: this.options.serverUrl || request.route?.serverUrl,
+        }));
+        started.then(controlGate.resolve, controlGate.reject);
+        await started;
+      }
+      if (taskflow) {
+        return await this.#runWorkflow(request, flowSpec, execution, state, onProgress, taskflow.makeToolHandlers, preparedFlow);
       }
       request = validateAdapterExecution(request, "opencode");
       if (attachments?.length) {
@@ -630,24 +625,23 @@ export class OpenCodeAdapter {
       if (error instanceof NativeLaunchError || error?.name === "OpenCodeAdapterError" || error?.details?.kind === "validation") throw error;
       throw processFailure(error, { ...execution.state, ...state });
     } finally {
+      // No-op once the server started; otherwise release waiting controls.
+      controlGate?.reject(Object.assign(new Error("OpenCode run ended before the control server started"), {
+        name: "OpenCodeControlError",
+        details: { kind: "not-ready" },
+      }));
       await controlRuntime?.stop().catch(() => {});
       this.controlRuntime = null;
       this.controlStart = null;
-      this.activeHarnessVersion = null;
       this.hostAttached = null;
       execution.dispose();
+      this.running = false;
       if (scratch) await rm(scratch, { recursive: true, force: true });
     }
   }
 
   async control(command, signal) {
-    if (command.kind === "reroute") assertNoClaudeRoute("opencode", command.route);
-    if (this.activeHarnessVersion === "v1") {
-      throw Object.assign(new Error("OpenCode V1 live control is unsafe in 1.18.18; use current OpenCode or Pi"), {
-        name: "OpenCodeControlError",
-        details: { kind: "unsupported-control" },
-      });
-    }
+    if (command.kind === "reroute") assertAdapterRoute("opencode", command.route);
     if (!this.controlRuntime || !this.controlStart) {
       const hostAttached = this.hostAttached;
       throw Object.assign(new Error(hostAttached
@@ -657,8 +651,9 @@ export class OpenCodeAdapter {
         details: { kind: hostAttached ? "unsupported-control" : "not-ready" },
       });
     }
+    const runtime = this.controlRuntime;
     await this.controlStart;
-    return this.controlRuntime.control(command, signal);
+    return runtime.control(command, signal);
   }
 
   async #spawn(request, prompt, execution, state, onProgress, options = {}) {
@@ -684,20 +679,16 @@ export class OpenCodeAdapter {
       sessionId: options.sessionId,
       prompt,
       serverUrl: this.controlRuntime?.serverUrl,
-      harnessVersion: request.route?.harnessVersion,
-      scopedAgent: state.scopedAgent,
     });
-    const activeLaunch = request.route?.harnessVersion === "v2" ? this.launchV2 : this.launch;
-    const launchArgs = Array.isArray(activeLaunch.args) ? activeLaunch.args : [];
-    const env = openCodeEnvironment(request.route?.harnessVersion, mergeProcessEnv(this.env));
-    env.OPENCODE_CONFIG_CONTENT = policyConfig(request.policy, env.OPENCODE_CONFIG_CONTENT, state.scopedAgent);
+    const launchArgs = this.launch.args ?? [];
+    const env = mergeProcessEnv(this.env);
     if (this.controlRuntime?.serverPassword) {
       env.OPENCODE_SERVER_PASSWORD = this.controlRuntime.serverPassword;
       env.OPENCODE_SERVER_USERNAME = this.controlRuntime.serverUsername;
     }
     const privateServer = Boolean(request.route?.serverUrl || this.options.serverUrl);
     try {
-      const result = await runProcess(activeLaunch.command, [...launchArgs, ...args], {
+      const result = await runProcess(this.launch.command, [...launchArgs, ...args], {
         cwd: request.cwd,
         env,
         spawnFn: this.spawnFn || spawnNativeCommand,
@@ -782,7 +773,7 @@ export class OpenCodeAdapter {
     return {
       sessionId: state.sessionId,
       workflowRunId: state.workflowRunId,
-      route: { harness: "opencode", ...(request.route || {}), model: resolvedModel(request.route, request.route?.model) || null },
+      route: { harness: "opencode", harnessVersion: "v2", ...(request.route || {}), model: resolvedModel(request.route, request.route?.model) || null },
       result: finalResult(result.eventState.finalText, {
         eventSummary: state.eventSummary,
       }),
@@ -792,43 +783,37 @@ export class OpenCodeAdapter {
     };
   }
 
-  async #runWorkflow(request, flowSpec, execution, state, onProgress, taskflowCore) {
-    // The optional core is loaded (and load failures classified) in run()
-    // before any control server or phase process exists.
-    const { makeToolHandlers } = taskflowCore;
-    const phaseState = { firstSession: true };
+  async #runWorkflow(request, flowSpec, execution, state, onProgress, makeToolHandlers, { flow, agents: preparedAgents, nativeDefault }) {
+    let resumeSessionId = request.execution?.sessionId;
     // Each phase envelope carries the shared context exactly once. Folding the
     // rendered root prompt into `task` while also supplying `context` in the
     // same envelope shipped two full copies to every phase process.
     const rootTask = request.task;
-    // Only legacy lists and empty deny policies can reach Taskflow.
-    const tools = Array.isArray(request.policy?.tools) ? request.policy.tools : [];
-    const authorizedTools = new Set(tools);
     const runner = {
       usageAccounting: "available",
       runTask: async (defaultCwd, agents, agentName, task, opts, globalThinking) => {
-        const agent = agents.find((candidate) => candidate.name === agentName) || {};
+        const effective = agents.find((candidate) => candidate.name === agentName);
+        const implicit = agentName === nativeDefault && effective?.source === "built-in";
+        const agent = implicit ? {} : preparedAgents.get(agentName) ?? {};
         const phaseTask = `${rootTask}\n\nPhase task:\n${task}`;
-        const phaseTools = opts?.tools ?? agent.tools;
         const phaseRequest = {
           ...request,
           cwd: opts?.cwd ?? defaultCwd ?? request.cwd,
-          policy: {
-            ...request.policy,
-            tools: phaseTools
-              ? phaseTools.filter((tool) => authorizedTools.has(tool))
-              : tools,
-          },
         };
         try {
-          const result = await this.#spawn(phaseRequest, promptFor(phaseRequest, flowSpec, phaseTask, agent.systemPrompt || ""), execution, state, onProgress, {
+          if (opts?.tools !== undefined || (!implicit && effective?.tools?.length)) {
+            throw taskflowPolicyError("OpenCode V2 does not enforce Taskflow phase or agent tool lists");
+          }
+          const sessionId = resumeSessionId;
+          resumeSessionId = null;
+          const phaseSignal = opts?.signal ? AbortSignal.any([execution.signal, opts.signal]) : execution.signal;
+          const result = await this.#spawn(phaseRequest, promptFor(phaseRequest, flowSpec, phaseTask, agent.systemPrompt || ""), { ...execution, signal: phaseSignal }, state, onProgress, {
             model: request.route?.model || opts?.model || agent.model,
             agent: request.route?.agent,
             variant: request.route?.variant,
             thinking: request.route?.thinking || opts?.thinking || agent.thinking || globalThinking,
-            sessionId: phaseState.firstSession ? request.execution?.sessionId : null,
+            sessionId,
           });
-          phaseState.firstSession = false;
           return {
             agent: agentName,
             task,
@@ -858,7 +843,7 @@ export class OpenCodeAdapter {
       },
     };
     const handlers = makeToolHandlers(request.cwd, runner, { host: "opencode" });
-    const response = await handlers.taskflow_run({ define: flowSpec }, { signal: execution.signal });
+    const response = await handlers.taskflow_run({ define: flow }, { signal: execution.signal });
     const raw = taskflowText(response);
     if (response?.isError) {
       if (state.lastFailure) throw state.lastFailure;
@@ -875,7 +860,7 @@ export class OpenCodeAdapter {
     return {
       sessionId: state.sessionId,
       workflowRunId: state.workflowRunId,
-      route: { harness: "opencode", ...(request.route || {}), model: resolvedModel(request.route, request.route?.model) || null },
+      route: { harness: "opencode", harnessVersion: "v2", ...(request.route || {}), model: resolvedModel(request.route, request.route?.model) || null },
       result: finalResult(finalText, {
         taskflow: compactText(raw),
         eventSummary: state.eventSummary,

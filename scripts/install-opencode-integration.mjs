@@ -1,5 +1,4 @@
 import { mkdir, readFile, readdir, writeFile, unlink, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
@@ -77,58 +76,81 @@ export async function restoreIntegration(manifestPath) {
   return { restored: files.length };
 }
 
-export async function installIntegration(configDir, { token } = {}) {
+export async function installIntegration(configDir, { token, prepareDaemon } = {}) {
   configDir = resolve(configDir);
   const json = join(configDir, "opencode.json");
   const jsonc = join(configDir, "opencode.jsonc");
-  if (existsSync(json) && existsSync(jsonc)) throw new Error("Both opencode.json and opencode.jsonc exist; consolidate them before installing");
-  const configPath = existsSync(jsonc) ? jsonc : json;
-  const original = await current(configPath);
+  const configPaths = [json, jsonc];
+  const originalFiles = await Promise.all(configPaths.map(current));
+  if (originalFiles.every((bytes) => bytes !== null)) throw new Error("Both opencode.json and opencode.jsonc exist; consolidate them before installing");
+  const selected = originalFiles[1] === null ? 0 : 1;
+  const configPath = configPaths[selected];
+  const original = originalFiles[selected];
+  const assertConfigUnchanged = async () => {
+    const files = await Promise.all(configPaths.map(current));
+    if (files.some((bytes, index) => {
+      const originalBytes = originalFiles[index];
+      return bytes === null || originalBytes === null ? bytes !== originalBytes : !bytes.equals(originalBytes);
+    })) {
+      throw new Error("OpenCode configuration changed during daemon preparation or installation. Retry with the current config.");
+    }
+  };
   const config = original ? parseConfig(original.toString("utf8")) : { $schema: "https://opencode.ai/config.json" };
+  const migrateConfig = () => {
+    throw new Error("Migrate the OpenCode configuration to V2 before installing Harnest. Use plugins and mcp.servers (https://opencode.ai/docs/migrate-v1/).");
+  };
   if (config.mcp !== undefined && !object(config.mcp)) throw new Error("mcp must be an object");
   config.mcp ??= {};
   if (config.mcp.servers !== undefined && !object(config.mcp.servers)) throw new Error("mcp.servers must be an object");
-  const legacy = config.mcp.servers === undefined && Object.values(config.mcp)
-    .some((entry) => object(entry) && ("type" in entry || "enabled" in entry));
-  const servers = legacy ? config.mcp : (config.mcp.servers ??= {});
+  if (Object.hasOwn(config, "plugin") || Object.hasOwn(config.mcp, "harnest") || Object.hasOwn(config.mcp, "agent-companion")
+    || Object.entries(config.mcp).some(([key, entry]) =>
+    key !== "servers" && object(entry) && ["type", "enabled", "command", "url"].some((field) => Object.hasOwn(entry, field)))) {
+    migrateConfig();
+  }
+  const servers = config.mcp.servers ??= {};
+  if (Object.values(servers).some((entry) => object(entry) &&
+    (Object.hasOwn(entry, "enabled") || typeof entry.timeout === "number"))) migrateConfig();
+  if (config.plugins !== undefined && !Array.isArray(config.plugins)) throw new Error("plugins must be an array");
+  const plugins = config.plugins ?? [];
+  if (plugins.some(Array.isArray)) migrateConfig();
+
   const migrated = [];
-  const previous = servers.harnest ?? servers["agent-companion"] ?? {};
-  for (const [key, entries] of [["mcp", config.mcp], ["mcp.servers", config.mcp.servers]]) {
-    if (entries && Object.hasOwn(entries, "agent-companion")) {
-      migrated.push(`${key}.agent-companion`);
-      delete entries["agent-companion"];
-    }
+  const previous = Object.hasOwn(servers, "harnest") ? servers.harnest
+    : Object.hasOwn(servers, "agent-companion") ? servers["agent-companion"] : {};
+  if (!object(previous)) throw new Error("The Harnest MCP entry must be an object");
+  if (Object.hasOwn(servers, "agent-companion")) {
+    if (Object.hasOwn(servers, "harnest")) throw new Error("Consolidate the harnest and agent-companion MCP entries before installing");
+    migrated.push("mcp.servers.agent-companion");
+    delete servers["agent-companion"];
   }
-  token ??= await readDaemonToken();
-  servers.harnest = {
-    type: "remote",
-    ...httpEntry(token),
-    oauth: false,
-    ...(legacy
-      ? { enabled: previous.enabled ?? true, ...(previous.timeout === undefined ? {} : { timeout: previous.timeout }) }
-      : { disabled: previous.disabled ?? false, codemode: previous.codemode ?? false,
-        timeout: object(previous.timeout) ? previous.timeout : { startup: 15_000, catalog: 15_000 } }),
-  };
-  for (const key of ["plugin", "plugins"]) {
-    if (config[key] !== undefined && !Array.isArray(config[key])) throw new Error(`${key} must be an array`);
-  }
-  const plugins = [...(config.plugin ?? []), ...(config.plugins ?? [])].map(entry => {
-    if (legacy && object(entry)) return [entry.package, entry.options];
-    if (!legacy && Array.isArray(entry)) return { package: entry[0], options: entry[1] };
-    return entry;
-  });
   const entry = "./plugins/harnest";
-  const isCurrent = (value) => (Array.isArray(value) ? value[0] : (value?.package ?? value)) === entry;
-  const legacyPlugin = plugins.find(isLegacyOpenCodePlugin);
-  const keptPlugins = plugins.filter((value) => !isLegacyOpenCodePlugin(value));
-  if (legacyPlugin) migrated.push("agent-companion plugin registration");
-  if (!keptPlugins.some(isCurrent)) {
-    if (Array.isArray(legacyPlugin)) keptPlugins.push([entry, legacyPlugin[1]]);
-    else if (object(legacyPlugin)) keptPlugins.push({ ...legacyPlugin, package: entry });
-    else keptPlugins.push(entry);
+  const activePlugin = plugins.some((value) => (value?.package ?? value) === entry);
+  const legacyPlugins = plugins.filter(isLegacyOpenCodePlugin);
+  if (legacyPlugins.length > 1 || (legacyPlugins.length && activePlugin)) {
+    throw new Error("Consolidate the harnest and agent-companion plugin registrations before installing");
   }
-  config[legacy ? "plugin" : "plugins"] = keptPlugins;
-  delete config[legacy ? "plugins" : "plugin"];
+  const [legacyPlugin] = legacyPlugins;
+  if (legacyPlugin) migrated.push("agent-companion plugin registration");
+  config.plugins = legacyPlugin
+    ? plugins.map((value) => value === legacyPlugin ? (object(value) ? { ...value, package: entry } : entry) : value)
+    : activePlugin ? plugins : [...plugins, entry];
+
+  await prepareDaemon?.();
+  token ??= await readDaemonToken();
+  const { command, environment, cwd, ...previousRemote } = previous;
+  const connection = httpEntry(token);
+  const headers = Object.fromEntries(Object.entries(previousRemote.headers ?? {})
+    .filter(([name]) => name.toLowerCase() !== "authorization"));
+  servers.harnest = {
+    ...previousRemote,
+    type: "remote",
+    ...connection,
+    headers: { ...headers, ...connection.headers },
+    oauth: false,
+    disabled: previous.disabled ?? false,
+    codemode: previous.codemode ?? false,
+    timeout: previous.timeout ?? { startup: 15_000, catalog: 15_000 },
+  };
 
   const candidates = [];
   const add = async (source, relative) => {
@@ -156,10 +178,11 @@ export async function installIntegration(configDir, { token } = {}) {
   candidates.push({ path: configPath, bytes: unchanged ? original : Buffer.from(JSON.stringify(config, null, 2) + "\n") });
   const changes = [];
   for (const file of candidates) {
-    const before = await current(file.path);
+    const before = file.path === configPath ? original : await current(file.path);
     if (before?.equals(file.bytes)) continue;
     changes.push({ ...file, before });
   }
+  await assertConfigUnchanged();
   if (unchanged) await replaceWithBackup(configPath, original, original, { sensitive: true });
   if (!changes.length) return { changed: [], manifest: null, migrated };
   const backupDir = join(configDir, ".harnest-backups", backupStamp());
@@ -174,6 +197,7 @@ export async function installIntegration(configDir, { token } = {}) {
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", { flag: "wx" });
   try {
     for (const file of changes) {
+      if (file.path === configPath) await assertConfigUnchanged();
       const now = await current(file.path);
       if ((now === null ? null : digest(now)) !== (file.before === null ? null : digest(file.before))) throw new Error(`File changed during install: ${file.path}`);
       await mkdir(dirname(file.path), { recursive: true });
@@ -195,8 +219,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else {
     if (args.length && !(args[0] === "--config-dir" && args.length === 2)) throw new Error("Usage: node scripts/install-opencode-integration.mjs [--config-dir PATH] [--no-autostart] or --restore MANIFEST");
     const configDir = args[1] ?? openCodeConfigDir();
-    await setupDaemon({ noAutostart });
-    const result = await installIntegration(configDir);
+    const result = await installIntegration(configDir, { prepareDaemon: () => setupDaemon({ noAutostart }) });
     console.log(JSON.stringify(result, null, 2));
     if (result.manifest) console.log(`Reverse path: node scripts/install-opencode-integration.mjs --restore "${result.manifest}"`);
   }

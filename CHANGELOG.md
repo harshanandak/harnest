@@ -25,12 +25,13 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 - Session mode and validated config option selection for registered ACP agents.
 - Native Codex config profile selection for one-shot handoffs.
 - Named Claude Code agents for one-shot handoffs.
-- Explicit tool allow and deny lists for Claude print and Gemini, and exact deny lists for Pi and local OpenCode V1.
+- Explicit tool allow and deny lists for Claude print and Gemini, and exact deny lists for Pi. OpenCode rejects nonempty tool lists.
 - Cursor print can request read-only plan mode and enable the native shell sandbox independently of write approval.
 
 ### Changed
 
 - Renamed Agent Companion to Harnest and standardized installation on the tagged GitHub checkout.
+- OpenCode support requires OpenCode V2. The OpenCode V1 runtime and host integration are removed.
 - Harnest does not choose models. The lead uses the model the user names in the prompt, then the user's routing preferences, then the downstream CLI's own default.
 - Codex, Cursor, and the Devin example use the daemon-backed stdio bridge. Generic clients can generate a stdio snippet or write the local HTTP credential directly into private configuration.
 - Doctor checks installed lead configuration and MCP discovery. CI also runs the bridge smoke against an isolated daemon.

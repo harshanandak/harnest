@@ -165,11 +165,7 @@ const AUTO_CANDIDATES = [
     target: "opencode",
     requiresModel: true,
     scores: { quality: 9, speed: 5, efficiency: 5, reliability: 9 },
-    // liveControl is FALSE here on purpose: the adapter defaults to the v1
-    // path, whose control() throws unsupported-control. Pin
-    // route.harnessVersion "v2" (explicit candidates may set
-    // capabilities.liveControl true alongside it) for live steering.
-    capabilities: { readOnly: true, write: true, taskflow: true, liveControl: false, maxContextTokens: 200000 },
+    capabilities: { readOnly: false, write: true, taskflow: true, liveControl: true, maxContextTokens: 200000 },
     tags: ["deep", "flagship"],
   },
   {
@@ -229,16 +225,17 @@ function capabilitiesFor(target) {
   if (target === "acp") return { readOnly: false, write: true, taskflow: false, liveControl: false };
   const base = { readOnly: true, write: true, taskflow: false, liveControl: false };
   if (target === "pi") {
-    // Pi is the only harness with a live steer/follow_up/reroute surface.
-    // OpenCode v1 control() throws unsupported-control; v2-capable explicit
-    // lanes must set liveControl alongside route.harnessVersion "v2" by hand.
     base.taskflow = true;
     base.liveControl = true;
     // Pi thinking levels are CLI-verified (pi --help); other harnesses use
     // unvalidated passthrough until their level sets are confirmed.
     base.thinking = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
   }
-  if (target === "opencode") base.taskflow = true;
+  if (target === "opencode") {
+    base.readOnly = false;
+    base.taskflow = true;
+    base.liveControl = true;
+  }
   // NOTE: no computerUse anywhere. No one-shot CLI route in this set offers
   // usable computer-use (verified 2026-09-11: claude --chrome needs a visible
   // window, cursor browser is IDE-bound, pi/opencode have no browser tool).

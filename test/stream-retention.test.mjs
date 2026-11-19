@@ -18,10 +18,10 @@ const stats = { tokens: { total: 17 }, cost: 0.01 };
 function request(target, overrides = {}) {
   return {
     requestId: `stream-${target}`, target, cwd: process.cwd(), task: "Return the final result.",
-    context: {}, contextDigest: "a".repeat(64), workflow: null,
+    context: target === "opencode" ? { graph: { graphId: "fixture" } } : {}, contextDigest: "a".repeat(64), workflow: null,
     route: { provider: "openai", model: "test-model" },
-    execution: { timeoutMs: 10_000, sessionId: "resumed-session" },
-    policy: { write: false, tools: [] }, ...overrides,
+    execution: { timeoutMs: 10_000, sessionId: target === "opencode" ? null : "resumed-session" },
+    policy: { write: target === "opencode", tools: [] }, ...overrides,
   };
 }
 
@@ -178,6 +178,7 @@ for (const target of Object.keys(adapters)) {
 for (const [code, errorMessage, kind] of [[0, null, null], [0, "Authentication required", "provider-auth"], [1, "Authentication required", "provider-auth"], [1, "early protocol failure", "downstream"]]) {
   test(`OpenCode real child keeps early ${kind || "success"} evidence beyond the stdout tail on exit ${code}`, { timeout: 20_000 }, async () => {
     const script = String.raw`
+      if (process.argv.includes("--version")) { console.log("opencode v2.2.1"); process.exit(0); }
       const { once } = require('node:events');
       async function emit(value) { if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain'); }
       (async () => {
@@ -209,6 +210,7 @@ for (const [code, errorMessage, kind] of [[0, null, null], [0, "Authentication r
 for (const taskflow of [false, true]) {
   test(`Pi real RPC child preserves early Taskflow identity and ${taskflow ? "saved-flow" : "post-steer"} final output through a large stream`, { timeout: 20_000 }, async () => {
     const script = String.raw`
+      if (process.argv.includes("--version")) { console.log("opencode v2.2.1"); process.exit(0); }
       const { once } = require('node:events');
       const { createInterface } = require('node:readline');
       async function emit(value) { if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain'); }
@@ -326,7 +328,7 @@ async function memoryProbe(urls, selectedTarget) {
       assert.ok(growth.heap < 16 * 1024 * 1024, `${target} retained ${growth.heap} heap bytes`);
       assert.ok(growth.buffers < 8 * 1024 * 1024, `${target} retained ${growth.buffers} buffer bytes`);
       if (target === "opencode") {
-        emit({ type: "result", result: "DONE" });
+        emit({ type: "text", sessionID: "memory-session", part: { type: "text", text: "DONE" } });
         child.emit("close", 0, null);
       } else {
         emit({ type: "message_end", message: { role: "assistant", content: "DONE" } });
@@ -341,15 +343,24 @@ async function memoryProbe(urls, selectedTarget) {
           : command.type === "get_last_assistant_text" ? { text: "DONE" } : { tokens: { total: 17 } } });
       return true;
     } };
-    const adapter = new Adapter({ command: `fake-${target}`, spawnFn: () => {
-      if (target === "opencode") queueMicrotask(flood);
+    const adapter = new Adapter({ command: `fake-${target}`, spawnFn: (_command, args) => {
+      if (target === "opencode") {
+        assert.equal(args[0], "run");
+        assert.ok(!args.includes("--server"));
+        queueMicrotask(flood);
+      }
       return child;
     } });
-    const output = await adapter.run({ requestId: "memory", target, cwd: process.cwd(), task: "Return result", context: {},
-      policy: { write: false }, route: { model: "openai/test" }, execution: { timeoutMs: 20_000 } }, {
+    const output = await adapter.run({ requestId: "memory", target, cwd: process.cwd(), task: "Return result",
+      context: target === "opencode" ? { graph: { graphId: "memory" } } : {},
+      policy: { write: target === "opencode" }, route: { model: "openai/test" }, execution: { timeoutMs: 20_000 } }, {
       onProgress() { count++; },
     });
     assert.equal(output.result.finalText, "DONE");
+    if (target === "opencode") {
+      assert.equal(output.sessionId, "memory-session");
+      assert.equal(count, 2049);
+    }
     assert.equal(output.result.eventSummary.count, count);
     results.push({ target, count, ...growth });
   }

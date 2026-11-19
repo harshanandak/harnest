@@ -48,7 +48,7 @@ function decide(req, policy = {}) {
 
 test("a bare target is a harness pin: policy picks a model within it and never changes it", () => {
   for (const target of ["pi", "cursor", "opencode", "claude"]) {
-    const decision = decide(request({ target }));
+    const decision = decide(request({ target, policy: { write: target === "opencode" } }));
     assert.equal(decision.target, target, target);
     assert.equal(decision.route.model, `${target}-model`, target);
     assert.equal(decision.explanation.selected, `${target}-lane`, target);
@@ -64,6 +64,7 @@ test("auto still selects across targets", () => {
   const decision = decide(automatic);
   assert.equal(decision.target, "claude");
   assert.equal(decision.explanation.selected, "claude-lane");
+  assert.ok(decision.explanation.rejected.find(({ id }) => id === "opencode-lane").reasons.includes("read-only"));
 });
 
 test("a matching rule that names another target cannot move a pinned target", () => {
@@ -130,14 +131,16 @@ test("graph nodes: target-only resolves within target, auto resolves across, pin
   const spec = {
     requestId: "target-pin-graph",
     cwd: root,
+    policy: { write: true },
+    metadata: { harnest: { writeApproved: true } },
     nodes: [
       // Before the fix, validate() rejected this node at graph.mjs with
       // "resolved node cursor-only changed an explicit target".
-      { id: "cursor-only", target: "cursor", task: "implement the change" },
+      { id: "cursor-only", target: "cursor", task: "implement the change", policy: { write: false } },
       { id: "opencode-only", target: "opencode", task: "implement the change" },
-      { id: "auto-pick", target: "auto", task: "implement the change" },
-      { id: "explicit", target: "pi", task: "implement the change", route: { model: "explicit", thinking: "high" } },
-      { id: "pinned-rule", target: "pi", task: "review the change" },
+      { id: "auto-pick", target: "auto", task: "implement the change", policy: { write: false } },
+      { id: "explicit", target: "pi", task: "implement the change", route: { model: "explicit", thinking: "high" }, policy: { write: false } },
+      { id: "pinned-rule", target: "pi", task: "review the change", policy: { write: false } },
     ],
     execution: { background: false },
   };

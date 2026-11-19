@@ -84,8 +84,8 @@ async function installedConnection(host, { home, project, configPath }) {
       const rawc = await readExisting(jsonc);
       if (raw !== null && rawc !== null) throw new Error("Both opencode.json and opencode.jsonc exist.");
       const config = parseConfig(rawc ?? raw ?? "{}");
-      const servers = config.mcp?.servers ?? config.mcp;
-      const plugins = [...(config.plugin ?? []), ...(config.plugins ?? [])];
+      const servers = config.mcp?.servers;
+      const plugins = config.plugins ?? [];
       return { entry: servers?.harnest, old: legacy(servers) || legacy(config.mcp) || plugins.some(isLegacyOpenCodePlugin), path: rawc === null ? json : jsonc,
         assets: ["plugins/harnest/package.json", "skills/handoff/SKILL.md", "agents/acp-worker.md", "commands/handoff.md"].map((file) => join(dir, file)) };
     }

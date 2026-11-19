@@ -41,8 +41,8 @@ test("diamond mixes harnesses, joins only direct attributed dependencies and pre
     events.push(`end:${r.task}`);
     return { sessionId: `session-${r.task}`, result: { finalText: `result:${r.task}`, evidence: ["ok"], tests: ["pass"] } };
   });
-  const result = await f.runner.start(f.graph([node("root", [], { target: "claude" }), node("left", ["root"], { target: "codex" }), node("right", ["root"], { target: "cursor" }), node("join", ["left", "right"], { target: "opencode", route: { model: "fake/model" }, context: { requiredResultFields: ["tests"] } })], {
-    context: { shared: "capsule", requiredResultFields: ["evidence"] }, metadata: { routing: { consent: "retained" } },
+  const result = await f.runner.start(f.graph([node("root", [], { target: "claude", policy: { write: false } }), node("left", ["root"], { target: "codex", policy: { write: false } }), node("right", ["root"], { target: "cursor", policy: { write: false } }), node("join", ["left", "right"], { target: "opencode", route: { model: "fake/model" }, context: { requiredResultFields: ["tests"] } })], {
+    context: { shared: "capsule", requiredResultFields: ["evidence"] }, policy: { write: true }, metadata: { routing: { consent: "retained" }, harnest: { writeApproved: true } },
   }));
   assert.equal(result.state, "completed"); assert.equal(result.counts.completed, 4);
   assert.ok(events.indexOf("start:right") < events.indexOf("end:left"));
@@ -305,7 +305,8 @@ test("malformed DAGs, policy escalation and later invalid routes are rejected be
     f.graph([node("a"), node("b", [], { target: "codex", policy: { tools: ["read"] } })]),
     f.graph([node("a"), node("b", [], { target: "cursor", policy: { maxCostUsd: 1 } })]),
     f.graph([node("a"), node("b", [], { target: "claude", policy: { tools: ["read"] } })]),
-    f.graph([node("a"), node("b", [], { target: "opencode" })]),
+    f.graph([node("a"), node("b", [], { target: "opencode", route: { model: "fake/model" } })]),
+    f.graph([node("b", [], { target: "opencode" })], { policy: { write: true } }),
     f.graph([node("a"), node("b", [], { route: { model: "sonnet" } })]),
     f.graph([node("a"), node("amp-readonly", [], { target: "amp", route: { variant: "medium" } })]),
   ];
@@ -357,7 +358,8 @@ test("resolver cannot rewrite pins, identity, cwd, context, timeout or policy; a
   for (const [name, mutate, graphNode] of cases) {
     let launches = 0;
     const f = await fixture(t, async () => { launches++; return { result: { finalText: "ok" } }; }, { routeResolver: async (r) => mutate(r) });
-    await assert.rejects(f.runner.start(f.graph([graphNode])), (error) => { assert.ok(error instanceof Error, `${name} must reject`); return true; });
+    const graphPolicy = graphNode.target === "opencode" ? { policy: { write: true } } : {};
+    await assert.rejects(f.runner.start(f.graph([graphNode], graphPolicy)), (error) => { assert.ok(error instanceof Error, `${name} must reject`); return true; });
     assert.equal(launches, 0, `${name} must be rejected before dispatch`);
   }
   const resolved = [];

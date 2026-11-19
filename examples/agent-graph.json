@@ -29,8 +29,7 @@
     },
     {
       "id": "conclusion",
-      "target": "opencode",
-      "route": { "provider": "opencode-go", "model": "deepseek-v4.1-flash", "harnessVersion": "v2", "thinking": "high" },
+      "target": "pi",
       "dependsOn": ["correctness", "efficiency"],
       "task": "Consolidate only the two review results in context.graph.upstream. Preserve attribution and disagreements. Rank the smallest useful fixes. Do not edit."
     }

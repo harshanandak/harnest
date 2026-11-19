@@ -5,10 +5,13 @@ import { randomUUID } from "node:crypto";
 import { Companion } from "../src/companion.mjs";
 import { JobStore } from "../src/job-store.mjs";
 
-const [target, provider, model, harnessVersion, mode] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const allowWrite = args.includes("--allow-write");
+const [target, provider, model, mode] = args.filter(arg => arg !== "--allow-write");
 if (!target || !provider || !model) {
-  throw new Error("usage: node scripts/live-control-smoke.mjs <opencode|pi> <provider> <model> [v1|v2]");
+  throw new Error("usage: node scripts/live-control-smoke.mjs <opencode|pi> <provider> <model> [no-control] [--allow-write]");
 }
+if (target === "opencode" && !allowWrite) throw new Error("OpenCode V2 live smoke requires explicit --allow-write");
 
 const root = await mkdtemp(join(tmpdir(), "harnest-live-control-"));
 const companion = new Companion({ store: new JobStore(root) });
@@ -19,11 +22,11 @@ try {
     requestId,
     target,
     task: "First run a shell command that waits for 15 seconds without changing files. Then reply exactly ORIGINAL_RESULT.",
-    cwd: process.cwd(),
+    cwd: target === "opencode" ? root : process.cwd(),
     context: { expectedControlMarker: "STEER_APPLIED" },
-    route: { provider, model, ...(harnessVersion ? { harnessVersion } : {}) },
+    route: { provider, model },
     execution: { background: true, timeoutMs: 180_000 },
-    policy: { write: false },
+    policy: { write: target === "opencode" && allowWrite },
   });
   const acknowledgement = mode === "no-control" ? null : await companion.message(started.jobId, {
       commandId: `message-${randomUUID()}`,
@@ -41,7 +44,7 @@ try {
   if ((acknowledgement && acknowledgement.state !== "applied") || receipt.state !== "completed" || !finalText.includes(expected)) {
     throw new Error(JSON.stringify({ acknowledgement, receipt }, null, 2));
   }
-  console.log(`${mode === "no-control" ? "LIVE_HANDOFF_OK" : "LIVE_CONTROL_OK"} target=${target} harness=${harnessVersion || "default"} state=${receipt.state}`);
+  console.log(`${mode === "no-control" ? "LIVE_HANDOFF_OK" : "LIVE_CONTROL_OK"} target=${target} state=${receipt.state}`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

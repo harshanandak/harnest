@@ -9,7 +9,7 @@ import test from "node:test";
 import { normalizeRequest } from "../src/protocol.mjs";
 import { OpenCodeAdapter, foldOpenCodeEvent } from "../src/adapters/opencode.mjs";
 import { OpenCodeControl } from "../src/adapters/opencode-control.mjs";
-import { harnessLaunch, openCodeEnvironment } from "../src/config.mjs";
+import { harnessLaunch } from "../src/config.mjs";
 
 class FakeChild extends EventEmitter {
   constructor(lines, { hang = false } = {}) {
@@ -100,7 +100,7 @@ function request(overrides = {}) {
     cwd: process.cwd(),
     context: { source: "deterministic-test", count: 2 },
     route: { provider: "openai", model: "gpt-test", agent: "reviewer", variant: "high" },
-    policy: { write: false, tools: ["read"], maxCostUsd: 2 },
+    policy: { write: true },
     ...overrides,
   });
 }
@@ -126,10 +126,11 @@ test("OpenCode forwards a fork and both file input types through native argv", a
   await writeFile(image, "fixture image");
   const calls = [];
   const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
     command: "fake-opencode",
     spawnFn(_command, args) {
       calls.push(args);
-      if (args.at(-1) === "--help") return new FakeChild(["  --fork", "  --file <file>"]);
+      if (args.at(-1) === "--help") return new FakeChild(["  --session, -s string", "  --fork", "  --file, -f string"]);
       const [stagedFile, stagedImage] = [args.at(-3), args.at(-1)];
       assert.ok(isAbsolute(stagedFile) && isAbsolute(stagedImage));
       assert.deepEqual([basename(stagedFile), basename(stagedImage)], ["0-input.txt", "1-input.png"]);
@@ -168,7 +169,7 @@ test("Windows OpenCode V2 launch uses a shell-free PowerShell shim", { skip: pro
   process.env.PATH = bin;
   delete process.env.HARNEST_OPENCODE_V2;
   try {
-    const launch = harnessLaunch("opencode2");
+    const launch = harnessLaunch("opencode");
     assert.equal(launch.command, join(process.env.SystemRoot || process.env.windir, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"));
     assert.deepEqual(launch.args.slice(0, 2), ["-NoProfile", "-File"]);
     assert.match(launch.args[2], /opencode2\.ps1$/i);
@@ -176,16 +177,6 @@ test("Windows OpenCode V2 launch uses a shell-free PowerShell shim", { skip: pro
     process.env.PATH = savedPath;
     if (savedPin !== undefined) process.env.HARNEST_OPENCODE_V2 = savedPin;
   }
-});
-
-test("OpenCode V1 can use an isolated data profile without rerouting V2", () => {
-  const source = {
-    XDG_DATA_HOME: "shared-data",
-    HARNEST_OPENCODE_V1_DATA_HOME: "isolated-v1-data",
-  };
-  assert.equal(openCodeEnvironment("v1", {}, source).XDG_DATA_HOME, "isolated-v1-data");
-  assert.equal(openCodeEnvironment("v2", {}, source).XDG_DATA_HOME, "shared-data");
-  assert.equal(openCodeEnvironment("v1", { XDG_DATA_HOME: "explicit-data" }, source).XDG_DATA_HOME, "explicit-data");
 });
 
 test("managed OpenCode server reports the original spawn error", async () => {
@@ -209,12 +200,12 @@ test("managed OpenCode server reports the original spawn error", async () => {
     pollMs: 1,
   });
   await assert.rejects(
-    control.start({ request: request(), version: "v2", launch: { command: "opencode2", args: [] } }),
+    control.start({ request: request(), launch: { command: "opencode2", args: [] } }),
     (error) => /ENOENT/.test(error.message) && error.details?.code === "ENOENT",
   );
 });
 
-test("runs a read-only OpenCode handoff and extracts identifiers, output, and usage", async () => {
+test("an unversioned OpenCode handoff uses V2 argv and extracts identifiers, output, and usage", async () => {
   const calls = [];
   const adapter = new OpenCodeAdapter({
     ...managedOptions(),
@@ -229,12 +220,10 @@ test("runs a read-only OpenCode handoff and extracts identifiers, output, and us
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, "fake-opencode");
   assert.deepEqual(calls[0].args.slice(0, 3), ["run", calls[0].args[1], "--format"]);
-  assert.ok(calls[0].args.includes("--model") && calls[0].args.includes("openai/gpt-test"));
-  assert.ok(!calls[0].args.includes("--attach") && !calls[0].args.includes("--server"));
-  assert.ok(calls[0].args.includes("--agent") && calls[0].args.includes("reviewer"));
-  assert.ok(calls[0].args.includes("--variant") && calls[0].args.includes("high"));
+  assert.deepEqual(calls[0].args.slice(2), ["--format", "json", "--server", SERVER_URL, "--model", "openai/gpt-test#high", "--agent", "reviewer"]);
   assert.ok(!calls[0].args.includes("--auto"));
-  assert.equal(JSON.parse(calls[0].options.env.OPENCODE_CONFIG_CONTENT).permission["*"], "deny");
+  assert.equal(calls[0].options.cwd, process.cwd());
+  assert.equal(output.route.harnessVersion, "v2");
   assert.match(calls[0].args[1], /req-opencode-001/);
   assert.match(calls[0].args[1], /"model":"gpt-test"/);
   assert.equal(output.sessionId, "session-001");
@@ -252,65 +241,44 @@ test("runs a read-only OpenCode handoff and extracts identifiers, output, and us
   });
 });
 
-test("OpenCode V1 applies explicit denies in the selected fresh agent with an attachment", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "harnest-opencode-deny-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const file = join(root, "input.txt");
-  await writeFile(file, "fixture file");
-  const calls = [];
+test("OpenCode rejects granular policies before probing CLI or server", async () => {
+  let probes = 0;
   const adapter = new OpenCodeAdapter({
+    ...managedOptions({ fetchFn() { probes += 1; throw new Error("must not fetch"); } }),
     command: "fake-opencode",
-    spawnFn(_command, args, options) {
-      calls.push({ args, options });
-      if (args[0] === "--version") return new FakeChild(["1.18.18"]);
-      if (args.at(-1) === "--help") return new FakeChild(["  --file <file>"]);
-      assert.equal(readFileSync(args.at(-1), "utf8"), "fixture file");
-      return new FakeChild(streamLines());
-    },
+    spawnFn() { probes += 1; throw new Error("must not spawn"); },
   });
-  const req = request({
-    route: { model: "openai/gpt-test" },
-    execution: { attachments: [{ type: "file", path: file }] },
-    policy: { write: true, tools: { deny: ["read", "list"] } },
-  });
-  await adapter.run(req);
-  assert.deepEqual(calls[0].args, ["--version"]);
-  assert.deepEqual(calls[1].args, ["run", "--help"]);
-  const { args, options } = calls[2];
-  const { agent, permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
-  const [scopedAgent] = Object.keys(agent);
-  assert.deepEqual(args, ["run", args[1], "--format", "json", "--pure", "--dir", req.cwd, "--model", "openai/gpt-test", "--agent", scopedAgent, "--file", args.at(-1)]);
-  assert.equal(basename(args.at(-1)), "0-input.txt");
-  assert.deepEqual(permission, { "*": "deny", grep: "allow", glob: "allow", read: "deny", list: "deny" });
-  assert.deepEqual(agent[scopedAgent], { mode: "primary", permission: { read: "deny", list: "deny" } });
-  assert.equal(calls.length, 3);
+  for (const tools of [["read"], { allow: ["read"] }, { allow: [] }, { deny: ["read"] }]) {
+    for (const overrides of [
+      {},
+      { route: { model: "openai/gpt-test", harnessVersion: "v2" } },
+      { execution: { sessionId: "previous", sessionAction: "fork" } },
+      { context: { graph: { graphId: "fixture", nodeId: "inspect" } } },
+      { context: { dynamic: { runId: "fixture" } } },
+      { workflow: { spec: {} } },
+    ]) {
+      await assert.rejects(adapter.run(request({ policy: { tools }, ...overrides })),
+        (error) => error.details?.kind === "policy" && error.details.field === "policy.tools");
+    }
+  }
+  await assert.rejects(adapter.run(request({
+    workflow: { spec: { phases: [{ id: "inspect", task: "Inspect.", tools: ["read"] }] } },
+  })), /does not enforce Taskflow phase tool lists/);
+  assert.equal(probes, 0);
 });
 
-test("OpenCode rejects denies it cannot enforce before running a prompt", async () => {
+test("OpenCode rejects a missing resume flag before contacting its server", async () => {
   const calls = [];
   const adapter = new OpenCodeAdapter({
+    ...managedOptions({ fetchFn() { assert.fail("must not fetch"); } }),
     command: "fake-opencode",
     spawnFn(_command, args) {
       calls.push(args);
-      return new FakeChild(["2.2.1"]);
+      return new FakeChild(["  --fork"]);
     },
   });
-  const route = { model: "openai/gpt-test" };
-  const policy = { tools: { deny: ["read"] } };
-  for (const [overrides, reason] of [
-    [{ policy: { tools: { allow: ["read"] } } }, /deny only/],
-    [{ policy: { tools: { deny: ["unknown"] } } }, /exact default/],
-    [{ route: { ...route, harnessVersion: "v2" } }, /fresh local V1/],
-    [{ route: { ...route, serverUrl: "http://127.0.0.1:4096" } }, /fresh local V1/],
-    [{ route: { ...route, agent: "reviewer" } }, /fresh local V1/],
-    [{ execution: { sessionId: "previous" } }, /fresh local V1/],
-    [{ execution: { sessionId: "previous", sessionAction: "fork" } }, /fresh local V1/],
-    [{ workflow: { spec: {} } }, /fresh local V1/],
-    [{}, /version 1\.18\.18/],
-  ]) {
-    await assert.rejects(adapter.run(request({ route, policy, ...overrides })), (error) => error.details?.kind === "policy" && reason.test(error.message));
-  }
-  assert.deepEqual(calls, [["--version"]]);
+  await assert.rejects(adapter.run(request({ execution: { sessionId: "previous" } })), /requires --session support/);
+  assert.deepEqual(calls, [["run", "--help"]]);
 });
 
 test("foldOpenCodeEvent reports only the usage keys an event actually supplied", () => {
@@ -360,25 +328,105 @@ test("OpenCode keeps unreported cache counters null and explicit zeros as zero",
 
 test("passes write policy and launch prefixes without weakening the command contract", async () => {
   const calls = [];
+  const config = {
+    providers: { test: { package: "@opencode/ai/providers/openai-compatible" } },
+    permissions: [{ action: "shell", resource: "*", effect: "deny" }],
+  };
   const adapter = new OpenCodeAdapter({
     ...managedOptions(),
     launch: { command: "fake-opencode", args: ["--shim"] },
-    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { test: { name: "test" } } }) },
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
     spawnFn(command, args, options) {
       calls.push({ command, args, options });
       return new FakeChild(streamLines("write-session", "wrote result"));
     },
   });
-  const output = await adapter.run(request({ policy: { write: true, tools: ["write"], maxCostUsd: null }, route: { model: "openai/gpt-test" } }));
+  const output = await adapter.run(request({ policy: { write: true }, route: { model: "openai/gpt-test" } }));
   assert.equal(calls[0].command, "fake-opencode");
-  assert.equal(calls[0].args[0], "--shim");
-  assert.ok(!calls[0].args.includes("--auto"));
-  const enforcedConfig = JSON.parse(calls[0].options.env.OPENCODE_CONFIG_CONTENT);
-  assert.equal(enforcedConfig.provider.test.name, "test");
-  assert.equal(enforcedConfig.permission["*"], "deny");
-  assert.equal(enforcedConfig.permission.write, "allow");
-  assert.equal(enforcedConfig.permission.bash, undefined);
+  assert.deepEqual(calls[0].args, ["--shim", "run", calls[0].args[2], "--format", "json", "--server", SERVER_URL, "--model", "openai/gpt-test"]);
+  assert.equal(calls[0].options.shell, false);
+  assert.match(calls[0].args[2], /"write":true/);
+  assert.deepEqual(JSON.parse(calls[0].options.env.OPENCODE_CONFIG_CONTENT), config);
   assert.equal(output.result.finalText, "wrote result");
+});
+
+test("OpenCode rejects read-only before probing either a local or attached server", async () => {
+  for (const serverUrl of [undefined, SERVER_URL]) {
+    const adapter = new OpenCodeAdapter({
+      command: "fake-opencode", serverUrl,
+      spawnFn() { assert.fail("read-only request reached the CLI"); },
+      fetchFn() { assert.fail("read-only request reached the server"); },
+    });
+    for (const overrides of [
+      { policy: undefined },
+      { policy: { write: false }, context: { graph: { graphId: "fixture" } } },
+      { policy: { write: false }, execution: { sessionId: "previous" } },
+      { policy: { write: false }, execution: { sessionId: "previous", sessionAction: "fork" } },
+      { policy: { write: false }, workflow: { spec: { task: "Review." } } },
+    ]) {
+      await assert.rejects(adapter.run(request(overrides)),
+        (error) => error.details?.kind === "policy" && error.details.field === "policy.write");
+    }
+  }
+});
+
+test("OpenCode Taskflow rejects a selected agent with tool restrictions before server startup", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-agent-policy-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const agents = join(cwd, ".pi", "agents");
+  await mkdir(agents, { recursive: true });
+  await writeFile(join(agents, "read-auditor.md"), "---\nname: read-auditor\ndescription: Read-only audit\ntools: read\n---\nReview the files.\n");
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn() { assert.fail("restricted flow reached the CLI"); },
+    fetchFn() { assert.fail("restricted flow reached the server"); },
+  });
+  await assert.rejects(adapter.run(request({ cwd, workflow: { spec: {
+    agentScope: "project",
+    name: "restricted-agent",
+    phases: [
+      { id: "first", task: "Perform a task." },
+      { id: "final", agent: "read-auditor", task: "Review the result.", final: true },
+    ],
+  } } })), /does not enforce Taskflow agent tool lists/);
+});
+
+test("OpenCode rejects dynamic nested Taskflow restrictions before launching the plan phase", async () => {
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn() { assert.fail("uninspectable flow reached the CLI"); },
+    fetchFn() { assert.fail("uninspectable flow reached the server"); },
+  });
+  const workflow = { spec: { name: "dynamic-child", phases: [
+    { id: "plan", task: "Write a FlowSpec.", output: "json" },
+    { id: "child", type: "flow", def: "{steps.plan.json}", dependsOn: ["plan"], final: true },
+  ] } };
+  await assert.rejects(adapter.run(request({ workflow })),
+    (error) => error.details?.kind === "policy" && /nested tool policy before launch.*child/.test(error.message));
+  workflow.spec.phases[1].def = [{ id: "restricted", task: "Review.", tools: ["read"] }];
+  await assert.rejects(adapter.run(request({ workflow })),
+    (error) => error.details?.kind === "policy" && /does not enforce Taskflow phase tool lists/.test(error.message));
+});
+
+test("OpenCode runs an unrestricted nested FlowSpec through V2", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-nested-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    ...managedOptions(), command: "fake-opencode",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild(streamLines("nested-session", "nested output"));
+    },
+  });
+  const output = await adapter.run(request({ cwd, workflow: { spec: {
+    name: "static-child",
+    phases: [{ id: "child", type: "flow", def: [{ id: "inner", task: "Return nested canary.", final: true }], final: true }],
+  } } }));
+  assert.equal(output.result.finalText, "nested output");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0][1], /Return nested canary/);
+  assert.ok(calls[0].includes("--server"));
 });
 
 test("OpenCode rejects workflow.nodes before launch instead of silently running it as a prompt", async () => {
@@ -416,13 +464,13 @@ test("executes a FlowSpec through the pinned taskflow handler with fake phase pr
     cwd,
     task: "Run the complete flow.",
     route: { model: "openai/gpt-test" },
-    policy: { write: true, tools: ["read", "write"], maxCostUsd: null },
+    policy: { write: true },
     workflow: {
       engine: "taskflow",
       spec: {
         name: "deterministic-flow",
         phases: [
-          { id: "inspect", type: "agent", task: "Inspect.", cwd: phaseCwd, tools: ["read"] },
+          { id: "inspect", type: "agent", task: "Inspect.", cwd: phaseCwd },
           { id: "final", type: "agent", task: "Produce the final answer.", from: ["inspect"], final: true },
         ],
       },
@@ -431,7 +479,6 @@ test("executes a FlowSpec through the pinned taskflow handler with fake phase pr
 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].options.cwd, phaseCwd);
-  assert.equal(JSON.parse(calls[0].options.env.OPENCODE_CONFIG_CONTENT).permission.write, undefined);
   assert.match(calls[0].args[1], /req-opencode-001/);
   assert.match(calls[0].args[1], /deterministic-flow/);
   assert.equal(output.result.finalText, "phase result");
@@ -449,11 +496,12 @@ test("executes a FlowSpec through the pinned taskflow handler with fake phase pr
   });
 });
 
-test("OpenCode Taskflow treats an empty deny policy as an empty phase tool list", async (t) => {
+test("OpenCode Taskflow accepts an empty deny list", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-empty-deny-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const calls = [];
   const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
     command: "fake-opencode",
     spawnFn(_command, args, options) {
       calls.push({ args, options });
@@ -467,7 +515,7 @@ test("OpenCode Taskflow treats an empty deny policy as an empty phase tool list"
     workflow: { spec: {
       name: "empty-deny-flow",
       phases: [
-        { id: "inspect", type: "agent", task: "Inspect.", tools: ["read", "write"] },
+        { id: "inspect", type: "agent", task: "Inspect." },
         { id: "final", type: "agent", task: "Return the result.", from: ["inspect"], final: true },
       ],
     } },
@@ -475,12 +523,7 @@ test("OpenCode Taskflow treats an empty deny policy as an empty phase tool list"
 
   assert.equal(output.result.finalText, "phase result");
   assert.equal(calls.length, 2);
-  for (const { args, options } of calls) {
-    assert.match(args[1], /"policy":\{"write":true,"tools":\[\]/);
-    const { permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
-    assert.equal(permission.read, "allow");
-    assert.equal(permission.write, undefined);
-  }
+  for (const { args } of calls) assert.ok(args.includes("--server"));
 });
 
 test("a workflow phase carries the shared context once with identifiers after the stable prefix", async (t) => {
@@ -505,7 +548,7 @@ test("a workflow phase carries the shared context once with identifiers after th
       spec: {
         name: "single-copy-flow",
         phases: [
-          { id: "inspect", type: "agent", task: "Inspect canary.", tools: ["read"] },
+          { id: "inspect", type: "agent", task: "Inspect canary." },
           { id: "final", type: "agent", task: "Final canary.", from: ["inspect"], final: true },
         ],
       },
@@ -559,10 +602,10 @@ test("direct OpenCode adapter calls reject unsupported harness versions before l
       requestId: "direct-harness-version",
       task: "test",
       cwd: process.cwd(),
-      route: { model: "openai/gpt-test", harnessVersion: "v3" },
+      route: { model: "openai/gpt-test", harnessVersion: "v1" },
       execution: { timeoutMs: 5_000 },
     }),
-    (error) => error.details?.kind === "validation" && /route\.harnessVersion must be v1 or v2/.test(error.message),
+    (error) => error.details?.kind === "validation" && /route\.harnessVersion must be v2 or omitted/.test(error.message),
   );
   assert.equal(launches, 0);
 });
@@ -583,23 +626,6 @@ test("propagates an external abort and kills the fake process", async () => {
   controller.abort();
   await assert.rejects(run, (error) => error?.details?.kind === "abort");
   assert.equal(child.killed, true);
-});
-
-test("V1 control fails closed without touching the active session", async () => {
-  const calls = [];
-  const adapter = new OpenCodeAdapter({
-    ...managedOptions(),
-    command: "fake-opencode",
-    spawnFn() { calls.push("spawn"); return new DelayedChild(streamLines("v1-control-session"), 100); },
-  });
-  const run = adapter.run(request());
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  await assert.rejects(
-    adapter.control({ commandId: "v1-message-1", kind: "message", delivery: "steer", message: "pause after this step", route: null }),
-    (error) => error?.details?.kind === "unsupported-control",
-  );
-  await run;
-  assert.deepEqual(calls, ["spawn"]);
 });
 
 test("V2 uses --server and model#variant, then steers through the Promise client", async () => {
@@ -639,7 +665,7 @@ test("graph nodes attach to the OpenCode background service as native sidebar se
   });
   const run = adapter.run(request({
     context: { graph: { graphId: "graph-fixture", nodeId: "reader" } },
-    route: { provider: "opencode-go", model: "deepseek-v4.1-flash", harnessVersion: "v2", thinking: "high" },
+    route: { provider: "opencode-go", model: "deepseek-v4.1-flash", thinking: "high" },
   }));
   await new Promise((resolve) => setTimeout(resolve, 10));
   await assert.rejects(
@@ -671,13 +697,92 @@ test("V2 reroute switches model and can omit a message", async () => {
   await run;
 });
 
-test("managed server is cleaned up after a V2 run", async () => {
+test("a control sent during preflight waits for the control server", async () => {
+  const clientCalls = [];
+  let releaseHelp;
+  const helpGate = new Promise((resolve) => { releaseHelp = resolve; });
+  const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
+    clientFactory: () => ({ session: {
+      async prompt(input) { clientCalls.push(["prompt", input]); },
+      async switchModel(input) { clientCalls.push(["switchModel", input]); },
+    } }),
+    command: "fake-opencode-v2",
+    spawnFn(_command, args) {
+      if (args.at(-1) === "--help") {
+        const child = new FakeChild(["  --session, -s string"], { hang: true });
+        helpGate.then(() => child.emit("close", 0, null));
+        return child;
+      }
+      return new DelayedChild(streamLines("v2-preflight-session"), 100);
+    },
+  });
+  const run = adapter.run(request({ execution: { sessionId: "v2-preflight-session" } }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const ack = adapter.control({ commandId: "v2-preflight-1", kind: "message", delivery: "steer", message: "sent during preflight", route: null });
+  releaseHelp();
+  const delivered = await ack;
+  assert.equal(delivered.sessionId, "v2-preflight-session");
+  assert.equal(clientCalls[0][0], "prompt");
+  assert.equal(clientCalls[0][1].text, "sent during preflight");
+  assert.equal(clientCalls[0][1].delivery, "steer");
+  await run;
+});
+
+test("OpenCode reports lost prompt acknowledgements and preserves an applied model switch", async () => {
+  const calls = [];
+  const control = new OpenCodeControl({ fetchFn: healthyFetch, clientFactory: () => ({ session: {
+    async switchModel(input) { calls.push(["switch", input]); },
+    async prompt(input) { calls.push(["prompt", input]); throw new Error("connection closed before acknowledgement"); },
+  } }) });
+  await control.start({ serverUrl: SERVER_URL });
+  control.setSessionId("ack-session");
+  await assert.rejects(control.control({ kind: "message", message: "first" }), (error) => {
+    assert.equal(error.details.uncertain, true);
+    assert.equal(error.details.modelSwitchApplied, undefined);
+    return true;
+  });
+  await assert.rejects(control.control({ kind: "reroute", route: { provider: "fixture", model: "new-model" }, message: "second" }), (error) => {
+    assert.equal(error.details.uncertain, true);
+    assert.equal(error.details.modelSwitchApplied, true);
+    assert.deepEqual(error.details.model, { provider: "fixture", model: "new-model", variant: undefined });
+    return true;
+  });
+  assert.deepEqual(calls.map(([kind]) => kind), ["prompt", "switch", "prompt"]);
+  assert.ok(calls.every(([, input]) => input.sessionID === "ack-session"));
+});
+
+test("OpenCode skips the prompt when the run stops during a model switch", async () => {
+  const calls = [];
+  let finishSwitch;
+  const switching = new Promise((resolve) => { finishSwitch = resolve; });
+  const control = new OpenCodeControl({ fetchFn: healthyFetch, clientFactory: () => ({ session: {
+    async switchModel(input) { calls.push(["switch", input]); await switching; },
+    async prompt(input) { calls.push(["prompt", input]); },
+  } }) });
+  await control.start({ serverUrl: SERVER_URL });
+  control.setSessionId("stop-session");
+  const pending = control.control({ kind: "reroute", route: { provider: "fixture", model: "new-model" }, message: "late" });
+  await new Promise((resolve) => setImmediate(resolve));
+  await control.stop();
+  finishSwitch();
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.details.kind, "not-ready");
+    assert.equal(error.details.modelSwitchApplied, true);
+    return true;
+  });
+  assert.deepEqual(calls.map(([kind]) => kind), ["switch"]);
+});
+
+test("default V2 handoff starts and cleans up a private server", async () => {
   let serverChild;
+  const calls = [];
   const adapter = new OpenCodeAdapter({
     command: "fake-opencode",
     serverPort: 43992,
     fetchFn: healthyFetch,
     spawnFn(command, args) {
+      calls.push(args);
       if (args.includes("serve")) {
         serverChild = new DelayedChild([], 10_000);
         return serverChild;
@@ -685,7 +790,10 @@ test("managed server is cleaned up after a V2 run", async () => {
       return new FakeChild(streamLines("managed-session"));
     },
   });
-  await adapter.run(request({ route: { provider: "openai", model: "gpt-test", harnessVersion: "v2" } }));
+  const output = await adapter.run(request());
+  assert.deepEqual(calls[0], ["serve", "--hostname", "127.0.0.1", "--port", "43992"]);
+  assert.equal(calls[1][calls[1].indexOf("--server") + 1], "http://127.0.0.1:43992");
+  assert.equal(output.route.harnessVersion, "v2");
   assert.equal(serverChild.killed, true);
 });
 
@@ -710,7 +818,6 @@ test("managed server authenticates with OPENCODE_SERVER_PASSWORD from the spawn 
   });
   await control.start({
     request: request(),
-    version: "v2",
     launch: { command: "fake-opencode-v2", args: [] },
     env: { OPENCODE_SERVER_PASSWORD: "hunter2" },
   });
@@ -771,6 +878,7 @@ test("classifies OpenCode SQLite project_id error with actionable non-destructiv
 
 test("classifies an OpenCode provider.auth billing envelope as provider-auth", async () => {
   const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
     command: "fake-opencode",
     spawnFn() {
       return new FailingFakeChild([JSON.stringify({
@@ -805,6 +913,7 @@ test("classifies an OpenCode provider.auth billing envelope as provider-auth", a
 
 test("classifies a 403 region/opt-in rejection as provider-auth", async () => {
   const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
     command: "fake-opencode",
     spawnFn() {
       return new FailingFakeChild([JSON.stringify({
@@ -832,6 +941,7 @@ test("classifies a 403 region/opt-in rejection as provider-auth", async () => {
 
 test("classifies a model-not-found envelope as unavailable", async () => {
   const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
     command: "fake-opencode",
     spawnFn() {
       return new FailingFakeChild([JSON.stringify({
@@ -860,6 +970,7 @@ test("classifies a model-not-found envelope as unavailable", async () => {
 test("provider classification never fires on healthy run text", async () => {
   const text = "the unauthorized region billing credentials_not_configured review is complete";
   const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
     command: "fake-opencode",
     spawnFn() {
       return new FakeChild(streamLines("healthy-classification-session", text));
@@ -877,6 +988,7 @@ test("spawned OpenCode inherits the parent environment for provider authorizatio
   process.env[sentinelKey] = "inherited";
   try {
     const adapter = new OpenCodeAdapter({
+      ...managedOptions(),
       command: "fake-opencode",
       spawnFn(command, args, options) {
         calls.push({ command, args, options });

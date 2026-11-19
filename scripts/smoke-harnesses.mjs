@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { harnessLaunch } from "../src/config.mjs";
+import { harnessLaunch, isOpenCodeV2Version } from "../src/config.mjs";
 import { resolveTaskflowExtensionPath } from "../src/adapters/pi.mjs";
 import { requireNativeCommand, spawnNativeCommand } from "../src/launch-command.mjs";
 import { terminateProcessTree } from "../src/process.mjs";
@@ -24,7 +24,9 @@ export function versionOf(target, { resolveLaunch = harnessLaunch, spawnSyncFn }
       : `exit=${result.status} signal=${result.signal || "none"}: ${String(result.stderr || result.stdout || "no output").slice(-500)}`;
     throw Object.assign(new Error(`${target} --version failed: ${reason}`), { code: result.error?.code });
   }
-  return String(result.stdout || result.stderr).trim().split(/\r?\n/).at(-1);
+  const version = String(result.stdout || result.stderr).trim().split(/\r?\n/).at(-1);
+  if (target === "opencode" && !isOpenCodeV2Version(version)) throw new Error("OpenCode V2 is required");
+  return version;
 }
 
 // Optional compatibility capability: verifies the installed pi-taskflow
@@ -140,9 +142,9 @@ function probePiRpc({ resolveLaunch = harnessLaunch, spawnFn = spawnNativeComman
 
 export async function smokeHarnesses({ versionProbe = versionOf, piProbe = smokePiCore, piTaskflowProbe = smokePiTaskflow, report = console.log } = {}) {
   const results = [];
-  for (const target of ["opencode2", "pi", "cursor", "claude", "codex", "gemini", "amp", "opencode"]) {
-    const required = !["opencode", "gemini", "amp"].includes(target);
-    const name = target === "opencode" ? "opencode-legacy" : target === "opencode2" ? "opencode" : target;
+  for (const target of ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp"]) {
+    const required = !["gemini", "amp"].includes(target);
+    const name = target;
     try {
       const version = await versionProbe(target);
       let taskflow = null;

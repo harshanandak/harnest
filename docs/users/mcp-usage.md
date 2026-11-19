@@ -94,7 +94,7 @@ These Codex and Claude settings require one-shot execution. In a JavaScript work
 
 `policy.tools` accepts an object with `allow`, `deny`, or both. Use exact native tool names. Deny wins when both lists name a tool. An empty allow list selects no tools on targets that support it. The existing array form keeps its previous behavior.
 
-For example, a read-only Gemini handoff can use `"policy": { "write": false, "tools": { "allow": ["read_file", "glob"], "deny": ["glob"] } }` to keep only `read_file`. Claude print also supports both lists, with `allow` limited to `Read`, `Glob`, and `Grep`. Pi and fresh local OpenCode V1 runs accept `deny` only. See the [per-target tool names and limits](supported-agents.md#per-run-policy-controls).
+For example, a read-only Gemini handoff can use `"policy": { "write": false, "tools": { "allow": ["read_file", "glob"], "deny": ["glob"] } }` to keep only `read_file`. Claude print also supports both lists, with `allow` limited to `Read`, `Glob`, and `Grep`. Pi accepts `deny` only. OpenCode V2 rejects nonempty tool lists and any explicit allow list. See the [per-target tool names and limits](supported-agents.md#per-run-policy-controls).
 
 Use `"policy": { "write": false, "mode": "plan", "sandbox": true }` with Cursor print to request read-only planning and enable its shell sandbox. Plan mode takes precedence over agent mode even with approved write access. Sandbox can also be enabled without selecting plan mode. Omit `sandbox` to inherit Cursor's settings. Harnest rejects `sandbox: false` because it could turn off configured isolation.
 

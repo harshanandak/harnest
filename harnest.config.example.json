@@ -1,7 +1,5 @@
 {
   "executables": {
-    "opencode": "opencode",
-    "opencode2": "opencode2",
     "pi": "pi",
     "cursor": "cursor-agent",
     "claude": "claude",
