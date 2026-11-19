@@ -238,7 +238,7 @@ test("OpenCode V1 applies explicit denies in the selected fresh agent", async ()
   const [scopedAgent] = Object.keys(agent);
   assert.deepEqual(args, ["run", args[1], "--format", "json", "--pure", "--dir", req.cwd, "--model", "openai/gpt-test", "--agent", scopedAgent]);
   assert.deepEqual(permission, { "*": "deny", grep: "allow", glob: "allow", read: "deny", list: "deny" });
-  assert.deepEqual(agent[scopedAgent], { mode: "primary", permission });
+  assert.deepEqual(agent[scopedAgent], { mode: "primary", permission: { read: "deny", list: "deny" } });
   assert.equal(calls.length, 2);
 });
 

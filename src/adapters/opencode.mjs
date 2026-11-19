@@ -84,10 +84,11 @@ function policyConfig(policy = {}, inlineConfig, scopedAgent) {
   }
   const denied = policy.tools?.deny ?? [];
   for (const tool of denied) allowed.delete(tool);
-  const permission = Object.fromEntries([["*", "deny"], ...[...allowed].map((tool) => [tool, "allow"]), ...denied.map((tool) => [tool, "deny"])]);
+  const denyRules = denied.map((tool) => [tool, "deny"]);
+  const permission = Object.fromEntries([["*", "deny"], ...[...allowed].map((tool) => [tool, "allow"]), ...denyRules]);
   if (scopedAgent) {
-    // V1 applies agent rules after global rules, including global allows.
-    base.agent = { ...base.agent, [scopedAgent]: { mode: "primary", permission } };
+    // V1 applies agent rules last. Add only denies at that layer.
+    base.agent = { ...base.agent, [scopedAgent]: { mode: "primary", permission: Object.fromEntries(denyRules) } };
   }
   return JSON.stringify({
     ...base,
