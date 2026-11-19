@@ -129,6 +129,8 @@ function buildArgs(request, launchArgs, outFile) {
   if (sessionId) args.push(sessionAction === "fork" ? "fork" : "resume");
   for (const { path } of attachments ?? []) args.push("-i", path);
   if (sessionId) args.push(String(sessionId));
+  // Root exec's image option is variadic. End it before the stdin prompt.
+  else if (attachments?.length) args.push("--");
   args.push("-");
   return args;
 }

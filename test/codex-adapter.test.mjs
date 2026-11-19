@@ -130,6 +130,27 @@ test("Codex rejects fork when installed help falls back to exec usage", async ()
   assert.deepEqual(calls, [["exec", "fork", "--help"]]);
 });
 
+test("Codex new-session images stop before the stdin prompt argument", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-codex-images-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const images = ["first.png", "second.png"].map((name) => join(root, name));
+  for (const path of images) writeFileSync(path, "fixture image");
+  const calls = [];
+  const spawn = fakeSpawn(calls);
+  const adapter = codexAdapter({
+    command: "fake-codex",
+    spawnFn(command, args, options) {
+      if (args.at(-1) === "--help") return new FakeChild({ stdout: "  -i, --image <FILE>...\n" });
+      return spawn(command, args, options);
+    },
+  });
+  await adapter.run(request({ execution: { attachments: images.map((path) => ({ type: "image", path })) } }));
+  const { args, child } = calls[0];
+  const directory = dirname(args[args.indexOf("-o") + 1]);
+  assert.deepEqual(args.slice(-6), ["-i", join(directory, "0-first.png"), "-i", join(directory, "1-second.png"), "--", "-"]);
+  assert.match(child.input, /Return the handoff result/);
+});
+
 test("harnessLaunch supports codex via env and default", () => {
   const launch = harnessLaunch("codex", "fake-codex");
   assert.equal(launch.command, "fake-codex");
