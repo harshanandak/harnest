@@ -10,6 +10,7 @@ import { createAdapter } from "./adapters/index.mjs";
 import { createRouteResolver } from "./routing.mjs";
 import { createModelCatalog } from "./model-catalog.mjs";
 import { JobStore } from "./job-store.mjs";
+import { EXECUTION_CONTROLS } from "./execution-controls.mjs";
 import {
   MAX_MESSAGE_BYTES,
   TERMINAL_STATES,
@@ -298,6 +299,7 @@ function nextFallbackRoute(job, error, state = {}) {
     && typeof entry.target === "string"
     && entry.route
     && typeof entry.route === "object"
+    && (entry.target === current.target || !EXECUTION_CONTROLS.some((field) => job.request.execution[field] !== undefined))
     && !sameRoute(entry)) || null;
 }
 
@@ -1767,6 +1769,8 @@ export class Companion {
         ...previous.request.execution,
         ...overrides.execution,
         sessionId: previous.receipt.sessionId || previous.request.execution.sessionId,
+        ...(previous.request.execution.sessionAction === "fork" && previous.receipt.sessionId
+          ? { sessionAction: overrides.execution?.sessionAction ?? "resume" } : {}),
       },
       metadata: {
         ...previous.request.metadata,

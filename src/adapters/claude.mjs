@@ -1,5 +1,7 @@
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
+import { executionError, validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 import { digestContext, routeControlError } from "../protocol.mjs";
 import {
@@ -98,8 +100,9 @@ function resolvedEffort(route = {}) {
 function buildArgs(request, launchArgs) {
   const args = [...launchArgs];
   const policy = request.policy || {};
-  const sessionId = request.execution?.sessionId;
+  const { sessionId, sessionAction, addDirs, instructions, maxTurns } = request.execution;
   if (sessionId) args.push("--resume", String(sessionId));
+  if (sessionAction === "fork") args.push("--fork-session");
   args.push("-p", promptFor(request));
   args.push("--output-format", "stream-json", "--verbose", "--permission-prompts", "none");
   args.push("--permission-mode", policy.write ? "acceptEdits" : "plan");
@@ -112,6 +115,12 @@ function buildArgs(request, launchArgs) {
   const effort = resolvedEffort(request.route || {});
   if (effort) args.push("--effort", effort);
   if (policy.maxCostUsd != null) args.push("--max-budget-usd", String(policy.maxCostUsd));
+  if (instructions !== undefined) args.push("--append-system-prompt", instructions);
+  if (maxTurns !== undefined) args.push("--max-turns", String(maxTurns));
+  if (addDirs?.length) {
+    if (!policy.write) args.push("--tools", "Read,Glob,Grep", "--strict-mcp-config");
+    args.push("--add-dir", ...addDirs);
+  }
   return args;
 }
 
@@ -292,6 +301,9 @@ export class ClaudeAdapter {
     const route = request.route || {};
     const controlError = routeControlError("claude", route, request.execution?.transport);
     if (controlError) throw adapterError(controlError, "policy");
+    request = validateAdapterExecution(request, "claude");
+    const { addDirs, sessionAction, instructions, maxTurns } = request.execution;
+    const fork = sessionAction === "fork";
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Claude policy not supported: ${policyCheck.reason} — ${CLAUDE_SUPPORTED_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
@@ -300,7 +312,7 @@ export class ClaudeAdapter {
     let terminal = null;
     let terminalError = null;
     let streamError = null;
-    let sessionId = request.execution?.sessionId || null;
+    let sessionId = fork ? null : request.execution.sessionId || null;
     let usage = null;
     let deltaCount = 0;
     let fastFallback = false;
@@ -362,7 +374,6 @@ export class ClaudeAdapter {
         });
       }
       const launchArgs = Array.isArray(this.launch.args) ? this.launch.args : [];
-      const args = buildArgs(request, launchArgs);
       // Explicit merge, not replacement: a read-only policy changes what the run
       // may write, never whether Claude Code can authenticate. Credential and
       // profile values are inherited and never logged.
@@ -377,6 +388,31 @@ export class ClaudeAdapter {
       if (route.serviceTier === "fast") {
         await requireRouteVersion(this.launch.command, launchArgs, processOptions, "", [2, 1, 219], "route.serviceTier");
       }
+      await requireExecutionFlags({ launch: this.launch, request, env, spawnFn: this.spawnFn, signal: execution.signal }, [], [
+        ...(addDirs?.length ? [["addDirs", "--add-dir"]] : []),
+        ...(addDirs?.length && !request.policy?.write ? [["addDirs", "--tools"], ["addDirs", "--strict-mcp-config"]] : []),
+        ...(instructions !== undefined ? [["instructions", "--append-system-prompt"]] : []),
+        ...(fork ? [["sessionAction", "--fork-session"]] : []),
+      ]);
+      if (maxTurns !== undefined) {
+        // The documented flag is hidden from help in some releases. An omitted
+        // argument lets the native parser prove support without starting a turn.
+        let supported = false;
+        try {
+          await runProcess(this.launch.command, [...launchArgs, "--max-turns"], {
+            cwd: request.cwd,
+            env,
+            spawnFn: this.spawnFn || spawnNativeCommand,
+            signal: execution.signal,
+            timeoutMs: Math.min(5_000, request.execution.timeoutMs ?? 5_000),
+          });
+        } catch (error) {
+          if (execution.signal.aborted) throw error;
+          supported = /option ['"]--max-turns <[^>]+>['"] argument missing/i.test(error?.details?.stderr ?? "");
+        }
+        if (!supported) throw executionError("maxTurns", "requires --max-turns support in the installed Claude CLI");
+      }
+      const args = buildArgs(validateAdapterExecution(request, "claude"), launchArgs);
       const result = await runProcess(this.launch.command, args, {
         ...processOptions,
         timeoutMs: request.execution?.timeoutMs,
@@ -409,6 +445,9 @@ export class ClaudeAdapter {
           stderr: String(result.stderr || "").slice(0, 4000),
         });
       }
+      if (fork && (!sessionId || sessionId === request.execution.sessionId)) {
+        throw executionError("sessionAction", "Claude did not report a new session ID for the fork");
+      }
       if (onProgress) {
         await reportProgress(onProgress, { type: "claude_stdout", text: finalText.slice(0, 2000) });
       }
@@ -432,7 +471,7 @@ export class ClaudeAdapter {
         usageSummary: summarizeUsage("claude", usage),
       };
     } catch (error) {
-      if (error instanceof NativeLaunchError || error?.name === "ClaudeAdapterError") throw error;
+      if (error instanceof NativeLaunchError || error?.name === "ClaudeAdapterError" || error?.details?.kind === "validation") throw error;
       const aborted = Boolean(error?.details?.aborted || execution.state.aborted);
       const timedOut = Boolean(error?.details?.timedOut || execution.state.timedOut);
       if (!aborted && !timedOut && !["transport", "output-limit"].includes(error?.details?.kind)) {

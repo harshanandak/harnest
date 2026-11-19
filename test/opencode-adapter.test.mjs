@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import test from "node:test";
 
 import { normalizeRequest } from "../src/protocol.mjs";
@@ -115,6 +116,36 @@ function streamLines(session = "session-001", text = "final answer") {
     }),
   ];
 }
+
+test("OpenCode forwards a fork and both file input types through native argv", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-opencode-controls-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = join(root, "input.txt");
+  const image = join(root, "input.png");
+  await writeFile(file, "fixture file");
+  await writeFile(image, "fixture image");
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args) {
+      calls.push(args);
+      if (args.at(-1) === "--help") return new FakeChild(["  --fork", "  --file <file>"]);
+      const [stagedFile, stagedImage] = [args.at(-3), args.at(-1)];
+      assert.ok(isAbsolute(stagedFile) && isAbsolute(stagedImage));
+      assert.deepEqual([basename(stagedFile), basename(stagedImage)], ["0-input.txt", "1-input.png"]);
+      assert.equal(readFileSync(stagedFile, "utf8"), "fixture file");
+      assert.equal(readFileSync(stagedImage, "utf8"), "fixture image");
+      return new FakeChild(streamLines("opencode-new"));
+    },
+  });
+  const result = await adapter.run(request({ execution: {
+    sessionAction: "fork", sessionId: "opencode-old",
+    attachments: [{ type: "file", path: file }, { type: "image", path: image }],
+  } }));
+  assert.equal(result.sessionId, "opencode-new");
+  assert.deepEqual(calls[0], ["run", "--help"]);
+  assert.deepEqual(calls[1].slice(-7), ["--session", "opencode-old", "--fork", "--file", calls[1].at(-3), "--file", calls[1].at(-1)]);
+});
 
 const SERVER_URL = "http://127.0.0.1:43991";
 function healthyFetch(url) {

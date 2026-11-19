@@ -1,9 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
+import { attachmentMimeType, executionError, readAttachment, validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -448,8 +451,9 @@ class RpcRun {
     });
   }
 
-  setPrompt(message) {
-    this.promptMessage = message;
+  setPrompt(message, images, forkSource) {
+    this.prompt = { type: "prompt", id: this.requestId, message, ...(images.length ? { images } : {}) };
+    this.forkSource = forkSource;
     return this;
   }
 
@@ -695,13 +699,19 @@ class RpcRun {
             if (!this.state?.model?.id || !this.state?.model?.provider) {
               throw new PiAdapterError("Pi did not report its default model before prompt dispatch", "policy");
             }
+            if (this.forkSource && (!this.state.sessionId || this.state.sessionId === this.forkSource)) {
+              throw executionError("sessionAction", "Pi did not report a new session ID for the fork");
+            }
+            if (this.prompt.images && !(Array.isArray(this.state.model.input) && this.state.model.input.includes("image"))) {
+              throw executionError("attachments", "Pi's active model does not advertise image input");
+            }
             rejectClaudeRoute(this.state.model);
           } catch (error) {
             this.finishReject(error);
             return;
           }
           this.promptDispatched = true;
-          this.send({ type: "prompt", id: this.requestId, message: this.promptMessage });
+          this.send(this.prompt);
         }
       }
       if (value.command === "get_session_stats") {
@@ -964,6 +974,9 @@ export class PiAdapter {
   }
 
   async run(request, options = {}) {
+    request = validateAdapterExecution(request, "pi");
+    const { sessionId, sessionAction, instructions, attachments } = request.execution;
+    const fork = sessionAction === "fork";
     if (isClaudeRoute(request.route)) rejectClaudeRoute(request.route);
     assertNoClaudeWorkflow("pi", request.workflow);
     const workflow = request.workflow ?? null;
@@ -971,9 +984,6 @@ export class PiAdapter {
     // Explicit workflow requests need the optional Taskflow package; resolve
     // (and fail) before materializing files or spawning a paid model run.
     const taskflowExtensionPath = specInfo ? resolveTaskflowExtensionPath(this.taskflowExtensionPath) : null;
-    const cleanupFlow = specInfo
-      ? await materializeFlow(request, specInfo.definition, this.materializeInlineFlows)
-      : null;
     const args = [
       "--mode",
       "rpc",
@@ -981,7 +991,7 @@ export class PiAdapter {
       ...routeArgs(request.route),
     ];
     const executable = this.launch.command;
-    if (request.execution?.sessionId) args.push("--session-id", request.execution.sessionId);
+    if (sessionId) args.push(fork ? "--fork" : "--session-id", sessionId);
     const tools = new Set(["read", "grep", "find", "ls"]);
     if (request.policy?.write) {
       const requested = request.policy.tools?.length
@@ -991,26 +1001,44 @@ export class PiAdapter {
     }
     if (specInfo) tools.add("taskflow");
     args.push("--tools", [...tools].join(","));
-    const launchArgs = [...(this.launch.args || []), ...args];
     const slashArgs = taskflowSlashArgs(request, workflow);
     const prompt = specInfo
       ? `/tf:${specInfo.name}${slashArgs ? ` ${slashArgs}` : ""}`
       : requestPrompt(request);
-    const rpc = new RpcRun({
-      executable,
-      args: launchArgs,
-      cwd: request.cwd,
-      env: mergeProcessEnv(this.env),
-      spawnFn: this.spawnFn,
-      signal: options.signal,
-      timeoutMs: request.execution?.timeoutMs || DEFAULT_TIMEOUT_MS,
-      onProgress: options.onProgress,
-      requestId: request.requestId,
-      expectTaskflow: Boolean(specInfo),
-      provider: request.route?.provider ?? null,
-    }).setPrompt(prompt);
-    this.activeRun = rpc;
+    const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
+    await requireExecutionFlags({ launch: this.launch, request, env, spawnFn: this.spawnFn, signal: options.signal }, [], [
+      ...(fork ? [["sessionAction", "--fork", "\\s+<path\\|id>"]] : []),
+      ...(instructions !== undefined ? [["instructions", "--append-system-prompt"]] : []),
+    ]);
+    const images = await Promise.all((attachments ?? []).map(async ({ path }) => ({
+      type: "image", mimeType: attachmentMimeType(path), data: (await readAttachment(path)).toString("base64"),
+    })));
+    const cleanupFlow = specInfo
+      ? await materializeFlow(request, specInfo.definition, this.materializeInlineFlows)
+      : null;
+    let scratch, rpc;
     try {
+      if (instructions !== undefined) {
+        // Pi treats the flag value as a filename when it exists.
+        scratch = await mkdtemp(join(tmpdir(), "harnest-pi-instructions-"));
+        const path = join(scratch, "instructions.txt");
+        await writeFile(path, instructions, { mode: 0o600, flag: "wx" });
+        args.push("--append-system-prompt", path);
+      }
+      rpc = new RpcRun({
+        executable,
+        args: [...(this.launch.args || []), ...args],
+        cwd: request.cwd,
+        env,
+        spawnFn: this.spawnFn,
+        signal: options.signal,
+        timeoutMs: request.execution?.timeoutMs || DEFAULT_TIMEOUT_MS,
+        onProgress: options.onProgress,
+        requestId: request.requestId,
+        expectTaskflow: Boolean(specInfo),
+        provider: request.route?.provider ?? null,
+      }).setPrompt(prompt, images, fork ? sessionId : null);
+      this.activeRun = rpc;
       const value = await rpc.run();
       const state = value.state || {};
       const model = state.model || {};
@@ -1019,7 +1047,7 @@ export class PiAdapter {
         throw new PiAdapterError("Pi final output exceeds the result limit", "output-limit", { maxChars: MAX_FINAL_TEXT_CHARS });
       }
       return {
-        sessionId: state.sessionId ?? request.execution?.sessionId ?? null,
+        sessionId: state.sessionId ?? (fork ? null : sessionId ?? null),
         workflowRunId: value.workflowRunId,
         route: {
           ...request.route,
@@ -1034,6 +1062,7 @@ export class PiAdapter {
       };
     } finally {
       if (this.activeRun === rpc) this.activeRun = null;
+      if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
       await cleanupFlow?.().catch(() => undefined);
     }
   }

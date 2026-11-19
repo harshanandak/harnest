@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { writeFileSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { CodexAdapter } from "../src/adapters/codex.mjs";
 import { harnessLaunch } from "../src/config.mjs";
@@ -79,6 +79,55 @@ function request(overrides = {}) {
 test("createAdapter supports codex target", () => {
   const adapter = createAdapter("codex", { codex: { command: "fake-codex" } });
   assert.ok(adapter instanceof CodexAdapter);
+});
+
+test("Codex applies native fork, image input, and approved workspace roots", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-codex-controls-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const imagePath = join(root, "input.png");
+  writeFileSync(imagePath, "fixture image");
+  const calls = [];
+  const spawn = fakeSpawn(calls, { stdout: streamJsonResult("codex-new") });
+  const adapter = codexAdapter({
+    command: "fake-codex",
+    spawnFn(command, args, options) {
+      if (args.at(-1) === "--help") {
+        calls.push({ args });
+        const stdout = args.includes("fork")
+          ? "Usage: codex exec fork [OPTIONS] <SESSION_ID> [PROMPT]\n  --json\n  -i, --image <FILE>\n"
+          : "  --add-dir <DIR>\n";
+        return new FakeChild({ stdout });
+      }
+      const staged = args[args.indexOf("-i") + 1];
+      assert.equal(readFileSync(staged, "utf8"), "fixture image");
+      assert.equal(staged, join(dirname(args[args.indexOf("-o") + 1]), "0-input.png"));
+      return spawn(command, args, options);
+    },
+  });
+  const output = await adapter.run(request({
+    policy: { write: true },
+    metadata: { harnest: { writeApproved: true } },
+    execution: { addDirs: [root], attachments: [{ type: "image", path: imagePath }], sessionAction: "fork", sessionId: "codex-old" },
+  }));
+  assert.equal(output.sessionId, "codex-new");
+  assert.deepEqual(calls.slice(0, 2).map(({ args }) => args), [["exec", "--help"], ["exec", "fork", "--help"]]);
+  const args = calls[2].args;
+  assert.equal(args[args.indexOf("-s") + 1], "workspace-write");
+  const staged = join(dirname(args[args.indexOf("-o") + 1]), "0-input.png");
+  assert.deepEqual(args.slice(-7), ["--add-dir", await realpath(root), "fork", "-i", staged, "codex-old", "-"]);
+});
+
+test("Codex rejects fork when installed help falls back to exec usage", async () => {
+  const calls = [];
+  const adapter = codexAdapter({
+    command: "fake-codex",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: "Usage: codex exec [OPTIONS] [PROMPT]\n --json\n" });
+    },
+  });
+  await assert.rejects(adapter.run(request({ execution: { sessionId: "codex-old", sessionAction: "fork" } })), /execution\.sessionAction is unsupported/);
+  assert.deepEqual(calls, [["exec", "fork", "--help"]]);
 });
 
 test("harnessLaunch supports codex via env and default", () => {

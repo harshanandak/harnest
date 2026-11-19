@@ -53,6 +53,36 @@ test("createAdapter supports cursor target", () => {
   assert.ok(adapter instanceof CursorAdapter);
 });
 
+test("Cursor passes both directories while retaining read-only Ask mode", async () => {
+  const { realpath } = await import("node:fs/promises");
+  const dirs = [await realpath(process.cwd()), await realpath("docs")];
+  const calls = [];
+  const adapter = new CursorAdapter({
+    command: "fake-cursor",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: args[0] === "--help" ? "  --add-dir <path>\n" : streamJsonResult("read") });
+    },
+  });
+  await adapter.run(request({ execution: { addDirs: dirs } }));
+  assert.deepEqual(calls[0], ["--help"]);
+  assert.deepEqual(calls[1].slice(-9, -1), ["--mode", "ask", "--workspace", process.cwd(), "--add-dir", dirs[0], "--add-dir", dirs[1]]);
+  assert.ok(!calls[1].includes("--force"));
+});
+
+test("Cursor rejects extra directories when the installed CLI lacks --add-dir", async () => {
+  const calls = [];
+  const adapter = new CursorAdapter({
+    command: "fake-cursor",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: "  --mode <mode>\n" });
+    },
+  });
+  await assert.rejects(adapter.run(request({ execution: { addDirs: [process.cwd()] } })), /execution\.addDirs requires --add-dir/);
+  assert.deepEqual(calls, [["--help"]]);
+});
+
 test("harnessLaunch supports cursor via env and default", () => {
   const launch = harnessLaunch("cursor", "fake-cursor");
   assert.equal(launch.command, "fake-cursor");

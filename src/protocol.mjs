@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
+import { normalizeExecutionControls } from "./execution-controls.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
 export const TARGETS = new Set(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]);
@@ -215,6 +216,7 @@ export function normalizeRequest(input) {
   const controlError = routeControlError(input.target, route, transport);
   if (controlError) throw invalid(controlError);
   const policy = normalizePolicy(input.policy);
+  const executionControls = normalizeExecutionControls({ ...input, cwd, policy });
   if (input.target === "acp") {
     if (!route.agent) throw invalid("ACP requires route.agent naming a trusted local registration");
     const unsupportedRoute = ROUTE_FIELDS.filter((field) => !ACP_ROUTE_FIELDS.includes(field) && route[field] !== undefined);
@@ -240,6 +242,7 @@ export function normalizeRequest(input) {
       timeoutMs,
       sessionId: input.execution?.sessionId ?? null,
       ...(transport === undefined ? {} : { transport }),
+      ...executionControls,
     },
     policy,
     metadata: input.metadata ?? {},

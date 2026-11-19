@@ -57,6 +57,46 @@ function request(overrides = {}) {
   });
 }
 
+test("Claude maps extra read directories, instructions, fork, and max turns to native argv", async () => {
+  const cwd = await realpath(process.cwd());
+  const calls = [];
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      calls.push(args);
+      if (args[0] === "--help") return new FakeChild({ stdout: [
+        "  --add-dir <directories...>", "  --tools <tools...>", "  --strict-mcp-config",
+        "  --append-system-prompt <prompt>", "  --fork-session",
+      ].join("\n") });
+      if (args.length === 1 && args[0] === "--max-turns") {
+        return new FakeChild({ code: 1, stderr: "error: option '--max-turns <turns>' argument missing\n" });
+      }
+      return new FakeChild({ stdout: streamJsonResult("forked", "claude-new") });
+    },
+  });
+  const output = await adapter.run(request({ execution: {
+    addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3,
+  } }));
+  assert.equal(output.sessionId, "claude-new");
+  assert.deepEqual(calls.slice(0, 2), [["--help"], ["--max-turns"]]);
+  assert.deepEqual(calls[2].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
+  assert.deepEqual(calls[2].slice(-11), [
+    "--permission-mode", "plan", "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
+    "--tools", "Read,Glob,Grep", "--strict-mcp-config", "--add-dir", cwd,
+  ]);
+});
+
+test("Claude rejects maxTurns when its parser does not recognize the flag", async () => {
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      assert.deepEqual(args, ["--max-turns"]);
+      return new FakeChild({ code: 1, stderr: "error: unknown option '--max-turns'\n" });
+    },
+  });
+  await assert.rejects(adapter.run(request({ execution: { maxTurns: 2 } })), /execution\.maxTurns requires --max-turns/);
+});
+
 async function fakeCliOnPath(t, { includeInstall = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "harnest-native-path-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

@@ -6,6 +6,12 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 
 ### Added
 
+- `execution.addDirs` passes approved extra directories to Claude, Codex, Cursor, and Gemini.
+- `execution.attachments` sends bounded local images or files to targets with native input support.
+- `execution.instructions` appends per-run system instructions in Claude and Pi.
+- `execution.sessionAction` selects native resume or fork on supported targets.
+- `execution.maxTurns` caps Claude print-mode agentic turns.
+
 - Durable handoffs to OpenCode, Pi, Cursor, Claude Code, Codex, Gemini CLI, and Amp, plus a generic ACP route for approved write work with trusted local registrations.
 - Dependency graphs and JavaScript workflows with durable status, bounded traces, cancellation, and recovery.
 - A shared per-user daemon with loopback HTTP, a stdio bridge, and login startup on Windows, macOS, and Linux. The CI budget for the daemon plus 10 clients is ≤ 320 MiB. The shared-daemon measurements were 237 MiB on Ubuntu and 214 MiB on Windows.

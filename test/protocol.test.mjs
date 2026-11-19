@@ -1,6 +1,58 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createReceipt, digestContext, normalizeRequest, terminalReceipt } from "../src/protocol.mjs";
+import { MAX_ATTACHMENT_BYTES } from "../src/execution-controls.mjs";
+
+test("execution controls validate paths, limits, targets, transport, and write scope", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "harnest-controls-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cwd = join(root, "work");
+  const extra = join(root, "extra");
+  await Promise.all([mkdir(cwd), mkdir(extra)]);
+  const alias = join(cwd, "linked-extra");
+  await symlink(extra, alias, process.platform === "win32" ? "junction" : "dir");
+  const file = join(root, "input.png");
+  const oversized = join(root, "large.png");
+  await Promise.all([writeFile(file, "image"), writeFile(oversized, Buffer.alloc(MAX_ATTACHMENT_BYTES + 1))]);
+  const base = { requestId: "execution-controls", target: "claude", task: "test", cwd };
+  const check = (execution, overrides = {}) => normalizeRequest({ ...base, ...overrides, execution });
+  const approved = { policy: { write: true }, metadata: { harnest: { writeApproved: true } } };
+
+  assert.deepEqual(check({ addDirs: [alias], maxTurns: 3, instructions: "guide" }).execution.addDirs, [await realpath(extra)]);
+  assert.deepEqual(check({ addDirs: [alias] }, approved).execution.addDirs, [await realpath(extra)]);
+  assert.throws(() => check({ addDirs: [alias] }, { policy: { write: true } }), /external write roots require/);
+  assert.throws(() => check({ addDirs: [extra] }, { target: "codex" }), /requires policy\.write=true/);
+  assert.throws(() => check({ addDirs: [extra] }, { target: "pi" }), /execution\.addDirs is unsupported/);
+  assert.throws(() => check({ addDirs: Array(9).fill(extra) }), /at most 8/);
+  assert.throws(() => check({ addDirs: ["relative"] }), /absolute paths/);
+  assert.throws(() => check({ addDirs: [file] }), /existing directory/);
+  assert.throws(() => check({ addDirs: [join(root, "missing")] }), /existing directory/);
+
+  const image = (path) => ({ type: "image", path });
+  const attach = (path) => ({ attachments: [image(path)] });
+  const codex = { target: "codex" };
+  assert.deepEqual(check(attach(file), codex).execution.attachments, [image(await realpath(file))]);
+  assert.throws(() => check(attach(file)), /execution\.attachments is unsupported/);
+  assert.throws(() => check(attach("relative.png"), codex), /absolute paths/);
+  assert.throws(() => check(attach(extra), codex), /regular file/);
+  assert.throws(() => check(attach(join(root, "missing.png")), codex), /existing file/);
+  assert.throws(() => check(attach(oversized), codex), /at most 262144 bytes/);
+  assert.throws(() => check({ attachments: Array(5).fill(image(file)) }, codex), /at most 4/);
+  assert.throws(() => check({ attachments: [{ type: "file", path: file }] }, codex), /only image/);
+  assert.throws(() => check({ attachments: [{ type: "file", path: file }] }, { target: "pi" }), /only image/);
+
+  assert.throws(() => check({ instructions: "é".repeat(4001) }), /8000 UTF-8 bytes/);
+  assert.throws(() => check({ instructions: "guide" }, codex), /execution\.instructions is unsupported/);
+  assert.throws(() => check({ sessionAction: "fork" }), /requires an explicit sessionId/);
+  assert.throws(() => check({ sessionAction: "fork", sessionId: "old" }, { target: "cursor" }), /execution\.sessionAction is unsupported/);
+  assert.equal(check({ sessionAction: "resume", sessionId: "old" }, { target: "cursor" }).execution.sessionAction, "resume");
+  assert.throws(() => check({ sessionAction: "fork", sessionId: "old", transport: "session" }), /unsupported.*session transport/);
+  assert.throws(() => check({ maxTurns: 1.5 }), /positive safe integer/);
+  assert.throws(() => check({ maxTurns: 1 }, { target: "pi" }), /execution\.maxTurns is unsupported/);
+});
 
 test("context digest is stable across object key order", () => {
   assert.equal(digestContext({ b: 2, a: 1 }), digestContext({ a: 1, b: 2 }));
