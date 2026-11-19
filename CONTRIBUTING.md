@@ -41,6 +41,7 @@ GitHub CI runs these on Linux, Windows, and macOS for every pull request, and it
 - Keep each pull request to one change, and explain the problem, the fix, and how you verified it.
 - Add a line for user-visible changes to [CHANGELOG.md](CHANGELOG.md), under an `Unreleased` heading at the top (create it if it is missing).
 - Never include credentials, tokens, private source, session transcripts, or machine-specific paths in code, tests, logs, or descriptions.
+- Changes to `hooks/`, `scripts/install-*`, `scripts/setup.mjs`, the plugin manifests, `agents/`, `codex-agents/`, `opencode-agents/`, `skills/`, and `pi-extension/` run on users' machines when they install or use Harnest. They get the strictest review. Do not add network calls, downloads, or new executables to them without discussing it in an issue first.
 
 ## Security
 
