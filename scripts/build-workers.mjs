@@ -222,6 +222,16 @@ const TARGETS = {
   },
 };
 
+const executionControls = {
+  claude: 'Forward supported execution fields in print mode: addDirs, instructions, maxTurns, and sessionAction: "fork" with a sessionId. Confirm the write scope of any external directories.',
+  codex: 'Forward supported execution fields in one-shot mode: image attachments, sessionAction: "fork" with a sessionId, and addDirs with approved write scope.',
+  cursor: 'Forward execution.addDirs in print mode. Confirm the write scope of any external directories.',
+  gemini: 'Forward execution.addDirs when requested. Confirm the write scope of any external directories.',
+  opencode: 'Forward execution.attachments and sessionAction: "fork" with a sessionId in prompt-only handoffs. Omit the workflow for these controls.',
+  pi: 'Forward execution.instructions, image attachments, and sessionAction: "fork" with a sessionId. Use a prompt-only handoff for images and forks.',
+  acp: 'Forward execution.attachments when requested. The registered agent must advertise support for each attachment type.',
+};
+
 function workerBody(shell, key, target) {
   const c = (name) => code(shell, name);
   const owner = shell === "claude" ? "Claude's" : shell === "opencode" ? "this OpenCode session's" : "Codex's";
@@ -235,6 +245,7 @@ function workerBody(shell, key, target) {
     `You are ${owner} native bridge to exactly one ${target.role}. ${thread} is the operator-visible child session; do not perform the delegated repository work yourself. You are a thin forwarder, not an orchestrator: make exactly one ${c("handoff_workflow")} call, then poll, then return the receipt verbatim with no paraphrase of machine fields.`,
     ``,
     target.request(c),
+    ...(executionControls[key] ? [``, executionControls[key]] : []),
     ``,
     announceFirst(shell),
     ``,
@@ -301,7 +312,7 @@ function rescueBody(shell) {
     ``,
     announceFirst(shell),
     ``,
-    `Default to background execution so the queued receipt and job ID persist before downstream model work begins. Preserve the task, context, acceptance criteria, cwd, target harness, route, policy, and workflow graph. Perform no repository investigation or implementation yourself.`,
+    `Default to background execution so the queued receipt and job ID persist before downstream model work begins. Preserve the task, context, acceptance criteria, cwd, target harness, route, policy, workflow graph, and explicitly requested execution controls. Perform no repository investigation or implementation yourself.`,
     ``,
     `Translate explicit completion requirements into context.requiredResultFields and exact canaries into context.requiredText. A downstream response that omits either is not a successful handoff.`,
     ``,

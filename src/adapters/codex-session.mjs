@@ -9,6 +9,7 @@
 // transport below is a bounded request map plus an incremental line framer so a
 // wedged peer cannot grow memory without limit.
 
+import { validateAdapterExecution } from "../execution-controls.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { resolve as resolvePath } from "node:path";
 
@@ -1555,6 +1556,7 @@ export class CodexSessionAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "codex", "session");
     if (!request || typeof request !== "object" || Array.isArray(request)) {
       throw new TypeError("request must be an object");
     }

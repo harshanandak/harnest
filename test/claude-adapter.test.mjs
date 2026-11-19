@@ -57,6 +57,49 @@ function request(overrides = {}) {
   });
 }
 
+test("Claude combines a named fast agent with extra directories, instructions, fork, and max turns", async () => {
+  const cwd = await realpath(process.cwd());
+  const calls = [];
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      calls.push(args);
+      if (args[0] === "--version") return new FakeChild({ stdout: "2.1.219 (Claude Code)\n" });
+      if (args[0] === "--help") return new FakeChild({ stdout: [
+        "  --add-dir <directories...>", "  --tools <tools...>", "  --strict-mcp-config",
+        "  --append-system-prompt <prompt>", "  --fork-session",
+      ].join("\n") });
+      if (args.length === 1 && args[0] === "--max-turns") {
+        return new FakeChild({ code: 1, stderr: "error: option '--max-turns <turns>' argument missing\n" });
+      }
+      return new FakeChild({ stdout: streamJsonResult("forked", "claude-new", { fast_mode_state: "on" }) });
+    },
+  });
+  const output = await adapter.run(request({
+    route: { agent: "reviewer", serviceTier: "fast" },
+    execution: { addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3 },
+  }));
+  assert.equal(output.sessionId, "claude-new");
+  assert.deepEqual(calls.slice(0, 3), [["--version"], ["--help"], ["--max-turns"]]);
+  assert.deepEqual(calls[3].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
+  assert.deepEqual(calls[3].slice(-15), [
+    "--permission-mode", "plan", "--agent", "reviewer", "--settings", '{"fastMode":true}',
+    "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
+    "--tools", "Read,Glob,Grep", "--strict-mcp-config", "--add-dir", cwd,
+  ]);
+});
+
+test("Claude rejects maxTurns when its parser does not recognize the flag", async () => {
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      assert.deepEqual(args, ["--max-turns"]);
+      return new FakeChild({ code: 1, stderr: "error: unknown option '--max-turns'\n" });
+    },
+  });
+  await assert.rejects(adapter.run(request({ execution: { maxTurns: 2 } })), /execution\.maxTurns requires --max-turns/);
+});
+
 async function fakeCliOnPath(t, { includeInstall = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "harnest-native-path-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

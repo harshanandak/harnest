@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createRuntimeServices } from "./runtime-services.mjs";
 import { runtimeInfo } from "./runtime-info.mjs";
 import { readLocalConfig } from "./config.mjs";
-import { metadataInputSchema, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
+import { metadataInputSchema, nativeExecutionInputFields, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
 import { registerDynamicTools } from "./dynamic-tools.mjs";
 import { registerRoutingTools } from "./routing-tools.mjs";
 
@@ -67,7 +67,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     execution: z.object({
       background: z.boolean().optional(),
       timeoutMs: z.number().describe("Positive integer up to 86400000; validated by the protocol for structured errors.").optional(),
-      sessionId: z.string().optional(),
+      ...nativeExecutionInputFields,
       transport: z.enum(["oneshot", "session"]).optional().describe("Session transport uses the native interactive protocol; unsupported controls never silently fall back to one-shot execution."),
     }).strict().optional(),
     policy: policyInputSchema.optional(),

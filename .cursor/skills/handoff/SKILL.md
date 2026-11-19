@@ -6,6 +6,10 @@ argument-hint: "<target=opencode|pi|cursor|claude|codex|gemini|amp|acp> <task>"
 
 # Workflow handoff
 
+Forward the caller’s `execution` fields unchanged on a single handoff. Use the default transport for native controls. `addDirs` accepts up to eight existing absolute directories in Claude, Codex, Cursor, and Gemini. Confirm external write scope before setting `metadata.harnest.writeApproved`. Codex requires write policy for `addDirs`.
+
+Use prompt-only handoffs for attachments and forks. `attachments` accepts up to four absolute paths, each up to 256 KiB. Codex and Pi accept images. OpenCode and capable ACP agents also accept files. `instructions` appends up to 8,000 UTF-8 bytes in Claude and Pi. `sessionAction: "fork"` needs a `sessionId` and native support in Claude, Codex, OpenCode, or Pi. `maxTurns` is a positive integer for Claude print mode.
+
 For a long-running single handoff on a host with visible background tasks, use the lead-owned [single-job observer](references/workflow-observer.md#single-job-observation). Launch through MCP once, then let the observer process wait. Restricted bridge workers cannot launch a shell monitor; use them for bounded work that fits their turn budget. Do not increase that budget to simulate a persistent observer.
 
 For a multi-agent graph with dependencies, mixed harnesses, or retry from a failed step, read [agent graphs](references/agent-graphs.md) before constructing requests. For task-shaped harnesses — fan-out and synthesis, adversarial verification, per-item implement/verify/fix pipelines, tournaments, quarantine triage, and batching past 256 nodes — read [dynamic workflows](references/dynamic-workflows.md) before designing the graph. `handoff_graph_*` coordinates the graph; each node remains a complete handoff. The single-handoff instructions below apply to individual nodes, not to the entire mixed-harness graph.

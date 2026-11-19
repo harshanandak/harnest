@@ -289,6 +289,64 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 86400000
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "addDirs": {
+                "description": "Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval.",
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 1024
+                }
+              },
+              "attachments": {
+                "description": "Absolute local paths, up to 256 KiB each. Codex and Pi accept images. OpenCode and capable ACP agents accept images and files.",
+                "maxItems": 4,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "image",
+                        "file"
+                      ]
+                    },
+                    "path": {
+                      "type": "string",
+                      "maxLength": 1024
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "instructions": {
+                "description": "Append up to 8000 UTF-8 bytes to the Claude or Pi system prompt.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              "sessionAction": {
+                "description": "Requires sessionId. Resume is the default. Fork uses native support on Claude, Codex, OpenCode, or Pi.",
+                "type": "string",
+                "enum": [
+                  "resume",
+                  "fork"
+                ]
+              },
+              "maxTurns": {
+                "description": "Maximum Claude print-mode agentic turns.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
               }
             },
             "additionalProperties": false

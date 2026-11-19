@@ -1,3 +1,4 @@
+import { validateAdapterExecution } from "../execution-controls.mjs";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { assertAdapterRoute } from "../model-policy.mjs";
@@ -337,6 +338,7 @@ export class AmpAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "amp");
     assertPromptOnlyWorkflow("amp", request?.workflow);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
     if (this.platform !== "linux" && this.platform !== "darwin") {

@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { CODEX_QUOTA_SOURCE, probeCodexQuota } from "../codex-quota.mjs";
+import { executionError, stageAttachments, validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 import { digestContext, routeControlError } from "../protocol.mjs";
@@ -110,7 +112,7 @@ function quotaWarning(quota) {
 function buildArgs(request, launchArgs, outFile) {
   const args = [...launchArgs, "exec"];
   const policy = request.policy || {};
-  const sessionId = request.execution?.sessionId;
+  const { sessionId, sessionAction, addDirs, attachments } = request.execution;
   args.push("-C", request.cwd);
   args.push("-s", policy.write ? "workspace-write" : "read-only");
   const model = resolvedModel(request.route || {});
@@ -123,7 +125,13 @@ function buildArgs(request, launchArgs, outFile) {
   if (serviceTier) args.push("--strict-config", "-c", `service_tier="${serviceTier}"`);
   if (serviceTier === "fast" || serviceTier === "priority") args.push("--enable", "fast_mode");
   args.push("--json", "-o", outFile);
-  if (sessionId) args.push("resume", String(sessionId));
+  for (const dir of addDirs ?? []) args.push("--add-dir", dir);
+  // Profile and directory flags belong to exec. Continue with subcommand-local image flags.
+  if (sessionId) args.push(sessionAction === "fork" ? "fork" : "resume");
+  for (const { path } of attachments ?? []) args.push("-i", path);
+  if (sessionId) args.push(String(sessionId));
+  // Root exec's image option is variadic. End it before the stdin prompt.
+  else if (attachments?.length) args.push("--");
   args.push("-");
   return args;
 }
@@ -387,6 +395,9 @@ export class CodexAdapter {
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
     const controlError = routeControlError("codex", request.route, request.execution?.transport);
     if (controlError) throw adapterError(controlError, "policy");
+    request = validateAdapterExecution(request, "codex");
+    const { sessionId, sessionAction, addDirs, attachments } = request.execution;
+    const fork = sessionAction === "fork";
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Codex policy not supported: ${policyCheck.reason} — ${CODEX_SUPPORTED_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
@@ -394,7 +405,7 @@ export class CodexAdapter {
     const execution = executionSignal(signal, request.execution?.timeoutMs);
     let scratch = null;
     let outFile = null;
-    const found = { sessionId: request.execution?.sessionId || null, deltaCount: 0, toolCount: 0, usage: null, turnFailed: false };
+    const found = { sessionId: fork ? null : sessionId || null, deltaCount: 0, toolCount: 0, usage: null, turnFailed: false };
     let quota = unknownQuota("not-probed");
     let quotaEventCount = 0;
     let streamError = null;
@@ -418,6 +429,17 @@ export class CodexAdapter {
         signal: execution.signal,
       };
       await verifyRouteControls(this.launch.command, launchArgs, request.route || {}, processOptions);
+      const probe = { launch: this.launch, request, env: processOptions.env, spawnFn: this.spawnFn, signal: execution.signal };
+      await requireExecutionFlags(probe, ["exec"], [
+        ...(addDirs?.length ? [["addDirs", "--add-dir"]] : []),
+        ...(!sessionId && attachments?.length ? [["attachments", "--image"]] : []),
+      ]);
+      if (sessionId) {
+        await requireExecutionFlags(probe, ["exec", fork ? "fork" : "resume"], [
+          ...(fork ? [["sessionAction", "--json"]] : []),
+          ...(attachments?.length ? [["attachments", "--image"]] : []),
+        ], fork ? /^Usage: codex exec fork\s/m : undefined);
+      }
       try {
         quota = await this.quotaProbeFn({
           launch: this.launch,
@@ -443,7 +465,9 @@ export class CodexAdapter {
       }
       scratch = await mkdtemp(join(tmpdir(), "harnest-codex-"));
       outFile = join(scratch, "final.txt");
-      const args = buildArgs(request, launchArgs, outFile);
+      request = validateAdapterExecution(request, "codex");
+      const staged = await stageAttachments(request.execution.attachments, scratch);
+      const args = buildArgs({ ...request, execution: { ...request.execution, attachments: staged } }, launchArgs, outFile);
       const result = await runProcess(this.launch.command, args, {
         ...processOptions,
         timeoutMs: request.execution?.timeoutMs,
@@ -484,6 +508,9 @@ export class CodexAdapter {
           ...warningDetails(diagnostics.warnings),
         });
       }
+      if (fork && (!found.sessionId || found.sessionId === sessionId)) {
+        throw executionError("sessionAction", "Codex did not report a new session ID for the fork");
+      }
       if (onProgress) {
         await reportProgress(onProgress, { type: "codex_stdout", text: finalText.slice(0, 2000) });
       }
@@ -513,7 +540,7 @@ export class CodexAdapter {
         usageSummary: summarizeUsage("codex", found.usage),
       };
     } catch (error) {
-      if (error instanceof NativeLaunchError || error?.name === "CodexAdapterError") throw error;
+      if (error instanceof NativeLaunchError || error?.name === "CodexAdapterError" || error?.details?.kind === "validation") throw error;
       const aborted = Boolean(error?.details?.aborted || execution.state.aborted);
       const timedOut = Boolean(error?.details?.timedOut || execution.state.timedOut);
       const diagnostics = codexStderrDiagnostics(error?.details?.stderr);

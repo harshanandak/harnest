@@ -41,6 +41,20 @@ Ask for file and line evidence in the task or acceptance criteria. Add receipt a
 
 A foreground timeout above the safe MCP wait is converted to a background job. Prefer `background: true` for work that can take more than one tool turn.
 
+## Native execution controls
+
+Set these fields in the `execution` object of a single `handoff_workflow` request. Omit fields the downstream target cannot honor. Harnest rejects unsupported combinations before sending the prompt.
+
+| Field | How to use it |
+| --- | --- |
+| `addDirs` | Pass up to eight existing, absolute directories to Claude, Codex, Cursor, or Gemini. When write policy is enabled, confirm the scope of any directory outside `cwd` and set `metadata.harnest.writeApproved: true`. With read-only policy, Claude exposes only Read, Glob, and Grep and disables configured MCP servers for this launch. Cursor keeps Ask mode and Gemini keeps its read-tool allowlist. Codex requires write policy because its native flag adds writable roots. |
+| `attachments` | Pass up to four entries such as `{"type":"image","path":"/absolute/path/to/screenshot.png"}`. Each must be a regular local file at most 256 KiB. Images use PNG, JPEG, GIF, or WebP extensions, and the selected model must support the format. Codex and Pi accept images. OpenCode accepts images and files. ACP requires the agent to advertise image or embedded resource support for the corresponding type. Use a prompt-only handoff. |
+| `instructions` | Append nonempty text up to 8,000 UTF-8 bytes to the system prompt in Claude print mode or Pi RPC. |
+| `sessionAction` | With `sessionId` set, omit this field or use `"resume"` to continue the session. Use `"fork"` with Claude, Codex, OpenCode, or Pi to start a new native session from it. Use a prompt-only handoff and read the new ID from the receipt. |
+| `maxTurns` | Set a positive integer to cap Claude agentic turns through the installed print CLI. |
+
+These native controls use the default transport. The persistent `execution.transport: "session"` path accepts ordinary resume.
+
 ## Approved write work
 
 Use one normalized policy field and include the guarded-host approval marker after the lead has confirmed the exact scope:

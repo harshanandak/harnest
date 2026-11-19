@@ -2,6 +2,21 @@
 
 The lead client is the application connected to Harnest through MCP. The downstream target is the agent that executes a handoff. They are independent choices: a Codex lead can hand work to Pi, for example.
 
+## Per-run execution controls
+
+| Target | Extra directories | Attachments | System instructions | Session fork | Turn limit |
+| --- | --- | --- | --- | --- | --- |
+| Claude | `--add-dir` | | `--append-system-prompt` | `--resume` and `--fork-session` | `--max-turns` |
+| Codex | `--add-dir` with write policy | `-i` images | | `exec fork` | |
+| Cursor | `--add-dir` | | | | |
+| Gemini | `--include-directories` | | | | |
+| OpenCode | | `--file` images and files | | `--session` and `--fork` | |
+| Pi | | RPC `prompt.images` | `--append-system-prompt` | `--fork` with a session ID | |
+| ACP | | Advertised image and embedded resource blocks | | | |
+| Amp | | | | | |
+
+Blank cells indicate unsupported controls. The [MCP usage guide](mcp-usage.md#native-execution-controls) describes validation, write approval, and transport requirements.
+
 ## Named downstream targets
 
 | Target value | Agent | Supported shape | Main boundary |

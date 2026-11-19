@@ -26,6 +26,7 @@
 // - Unknown usage counters stay null. ACP reports session context window and
 //   cumulative cost, not always token in/out.
 
+import { validateAdapterExecution } from "../execution-controls.mjs";
 import { aborted } from "node:util";
 
 import { harnessLaunch } from "../config.mjs";
@@ -1447,6 +1448,7 @@ export class CursorSessionAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "cursor", "session");
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
     assertNoGraph(request.workflow);
     assertNoClaudeRoute("cursor", request.route);

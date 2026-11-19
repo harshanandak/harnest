@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -93,6 +93,22 @@ function fakePolicy() {
     },
   };
 }
+
+test("Gemini adds canonical directories under the read-only policy", async () => {
+  const dirs = [await realpath(process.cwd()), await realpath("docs")];
+  let argv;
+  const adapter = new GeminiAdapter({
+    command: "fake-gemini",
+    policyPreparer: fakePolicy(),
+    spawnFn(_command, args) {
+      argv = args;
+      return new FakeChild({ stdout: successfulStream() });
+    },
+  });
+  const output = await adapter.run(request({ execution: { addDirs: dirs } }));
+  assert.deepEqual(argv.slice(-4), ["--include-directories", dirs[0], "--include-directories", dirs[1]]);
+  assert.equal(output.execution.effectivePolicy.write, false);
+});
 
 test("Gemini streams a native terminal result and sends the prompt through stdin", async () => {
   const calls = [];

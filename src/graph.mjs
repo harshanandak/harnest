@@ -111,10 +111,17 @@ export class GraphRunner {
     const prepared = [];
     for (const node of spec.nodes) {
       const automatic = node.requestedTarget === "auto";
-      const base = normalizeRequest({ ...node.request, contextDigest: undefined, context: {
+      const { pendingExecution, ...preparedNode } = node;
+      const { sessionId = node.request.execution.sessionId, ...controls } = pendingExecution ?? {};
+      const execution = { ...node.request.execution, sessionId };
+      if (controls.sessionAction === "resume") {
+        execution.sessionAction = controls.sessionAction;
+        delete controls.sessionAction;
+      }
+      const base = normalizeRequest({ ...node.request, execution, contextDigest: undefined, context: {
         ...node.request.context, graph: { graphId, nodeId: node.id, requestId: spec.requestId, task: spec.task, upstream: {} },
       } });
-      const resolved = normalizeRequest(await this.companion.routeResolver(base));
+      let resolved = normalizeRequest(await this.companion.routeResolver(base));
       // The resolver selects target/model for automatic nodes only. Every
       // caller-owned pin, identity, cwd, context, timeout and policy bound must
       // survive unchanged; a resolver that rewrites them is rejected before any
@@ -122,6 +129,7 @@ export class GraphRunner {
       if (resolved.requestId !== base.requestId || resolved.contextDigest !== base.contextDigest || resolved.task !== base.task) throw graphError("identity", `resolved node ${node.id} changed request identity`);
       if (resolved.cwd !== node.request.cwd) throw graphError("validation", `resolved node ${node.id} changed the prevalidated cwd`);
       if (resolved.execution.timeoutMs !== base.execution.timeoutMs) throw graphError("validation", `resolved node ${node.id} changed the requested timeout`);
+      if (stableJson(resolved.execution) !== stableJson(base.execution)) throw graphError("validation", `resolved node ${node.id} changed the requested execution controls`);
       if (!automatic && resolved.target !== node.request.target) throw graphError("routing", `resolved node ${node.id} changed an explicit target`);
       // Every route field the caller actually supplied is a pin, including
       // serverUrl and thinking; presence, not truthiness, decides. An auto
@@ -135,7 +143,10 @@ export class GraphRunner {
       assertGraphLeaf(resolved);
       if (resolved.workflow != null) throw graphError("policy", `resolved node ${node.id} added a workflow`);
       if (stableJson(resolved.policy) !== stableJson(node.request.policy)) throw graphError("policy", `resolved node ${node.id} changed graph policy`);
-      prepared.push({ ...node, request: resolved });
+      if (Object.keys(controls).length) {
+        resolved = normalizeRequest({ ...resolved, execution: { ...resolved.execution, ...controls } });
+      }
+      prepared.push({ ...preparedNode, request: resolved });
     }
     return { spec: { ...spec, nodes: prepared }, graphId, digest };
   }
@@ -399,19 +410,29 @@ export class GraphRunner {
               const running = record.nodes.filter((n) => n.state === "running");
               if (running.length >= record.spec.execution.maxConcurrency) break;
               const spec = record.spec.nodes.find((n) => n.id === node.id);
-              if (running.some((n) => { const other = record.spec.nodes.find((s) => s.id === n.id); return (spec.request.policy.write || other.request.policy.write) && cwdOverlaps(spec.request.cwd, other.request.cwd); })) continue;
               if (Date.now() >= record.deadlineAt) break;
               const previous = node.attempts.at(-1);
+              const { execution } = spec.request;
+              const sessionId = previous?.sessionId ?? execution.sessionId;
+              const sessionAction = execution.sessionAction === "fork" && sessionId !== execution.sessionId
+                ? "resume" : execution.sessionAction;
+              const roots = [spec.request.cwd, ...(execution.addDirs ?? [])];
+              if (running.some((active) => {
+                const other = record.spec.nodes.find((n) => n.id === active.id).request;
+                if (sessionId && other.target === spec.request.target && active.attempts.at(-1)?.sessionId === sessionId) return true;
+                if (!spec.request.policy.write && !other.policy.write) return false;
+                return [other.cwd, ...(other.execution.addDirs ?? [])].some((root) => roots.some((path) => cwdOverlaps(root, path)));
+              })) continue;
               const requestId = childIdFor(id, node.id, node.attempts.length + 1);
               const upstream = Object.fromEntries(dependencies.map((dep) => [dep.id, { jobId: dep.jobId, target: dep.receipt.target, route: dep.receipt.route, result: dep.receipt.result }]));
               let request;
               try {
-                request = normalizeRequest({ ...spec.request, contextDigest: undefined, requestId, execution: { ...spec.request.execution, background: true, sessionId: previous?.sessionId ?? null }, context: {
+                request = normalizeRequest({ ...spec.request, contextDigest: undefined, requestId, execution: { ...execution, background: true, sessionId, sessionAction }, context: {
                   ...spec.request.context, graph: { graphId: id, nodeId: node.id, requestId: record.requestId, task: record.spec.task, upstream },
                 } });
               } catch (error) { node.state = "failed"; node.error = compactError(error); continue; }
               node.state = "running"; node.requestId = requestId;
-              node.attempts.push({ attempt: node.attempts.length + 1, requestId, jobId: null, sessionId: previous?.sessionId ?? null, continuation: previous?.sessionId ? "native-session" : "fresh", state: "dispatching", scheduledAt: now(), startedAt: null });
+              node.attempts.push({ attempt: node.attempts.length + 1, requestId, jobId: null, sessionId, continuation: sessionId ? "native-session" : "fresh", state: "dispatching", scheduledAt: now(), startedAt: null });
               dispatches.push({ node, request });
             }
             // One durable intent batch precedes concurrent leaf launches. Hold

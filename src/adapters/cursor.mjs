@@ -1,5 +1,7 @@
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
+import { validateAdapterExecution } from "../execution-controls.mjs";
+import { requireExecutionFlags } from "./execution-help.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 import { digestContext } from "../protocol.mjs";
@@ -103,6 +105,7 @@ function buildArgs(request, launchArgs) {
   }
   if (model) args.push("--model", model);
   args.push("--workspace", request.cwd);
+  for (const dir of request.execution?.addDirs ?? []) args.push("--add-dir", dir);
   args.push(promptFor(request));
   return args;
 }
@@ -313,6 +316,7 @@ export class CursorAdapter {
     assertPromptOnlyWorkflow("cursor", request?.workflow);
     assertNoClaudeRoute("cursor", request?.route);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    request = validateAdapterExecution(request, "cursor");
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Cursor policy not supported: ${policyCheck.reason} — ${CURSOR_SUPPORTED_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
@@ -372,11 +376,13 @@ export class CursorAdapter {
         });
       }
       const launchArgs = Array.isArray(this.launch.args) ? this.launch.args : [];
-      const args = buildArgs(request, launchArgs);
       // Explicit merge, not replacement: a read-only policy changes what the run
       // may write, never whether cursor-agent can authenticate. Credential and
       // profile values are inherited and never logged.
       const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
+      const probe = { launch: this.launch, request, env, spawnFn: this.spawnFn, signal: execution.signal };
+      await requireExecutionFlags(probe, [], request.execution.addDirs?.length ? [["addDirs", "--add-dir"]] : []);
+      const args = buildArgs(validateAdapterExecution(request, "cursor"), launchArgs);
       const result = await runProcess(this.launch.command, args, {
         cwd: request.cwd,
         env,
@@ -439,7 +445,7 @@ export class CursorAdapter {
         usageSummary: summarizeUsage("cursor", usage),
       };
     } catch (error) {
-      if (error instanceof NativeLaunchError || error?.name === "CursorAdapterError") throw attachExecution(error, executionDetails);
+      if (error instanceof NativeLaunchError || error?.name === "CursorAdapterError" || error?.details?.kind === "validation") throw attachExecution(error, executionDetails);
       const aborted = Boolean(error?.details?.aborted || execution.state.aborted);
       const timedOut = Boolean(error?.details?.timedOut || execution.state.timedOut);
       if (!aborted && !timedOut && !["transport", "output-limit"].includes(error?.details?.kind)) {

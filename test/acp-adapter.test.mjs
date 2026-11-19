@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { ACPAdapter, AcpAdapterError } from "../src/adapters/acp.mjs";
 import { createFakeAcpSpawn } from "./fixtures/acp-process.mjs";
@@ -70,6 +74,51 @@ function startV2Foreground(child, sessionId, messageId) {
     update: { sessionUpdate: "state_update", state: "running" },
   });
 }
+
+test("ACP v1 embeds both advertised attachment types in the native prompt", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-acp-controls-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const image = join(cwd, "input.png");
+  const file = join(cwd, "input.txt");
+  await Promise.all([writeFile(image, "image bytes"), writeFile(file, "file bytes")]);
+  const fake = createFakeAcpSpawn((message, child) => {
+    if (message.method === "initialize") {
+      child.respond(message, initializeResult(1, { promptCapabilities: { image: true, embeddedContext: true } }));
+    } else if (message.method === "session/new") {
+      child.respond(message, { sessionId: "acp-session" });
+    } else if (message.method === "session/prompt") {
+      child.notify("session/update", {
+        sessionId: "acp-session",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "received" } },
+      });
+      child.respond(message, { stopReason: "end_turn" });
+    }
+  });
+  const adapter = new ACPAdapter(adapterOptions(fake, { protocolVersion: 1 }));
+  const output = await adapter.run(request({
+    cwd, execution: { attachments: [{ type: "image", path: image }, { type: "file", path: file }] },
+  }));
+  assert.equal(output.result.finalText, "received");
+  const prompt = fake.children[0].received.find((item) => item.method === "session/prompt").params.prompt;
+  assert.equal(prompt[0].type, "text");
+  assert.deepEqual(prompt.slice(1), [
+    { type: "image", mimeType: "image/png", data: Buffer.from("image bytes").toString("base64") },
+    { type: "resource", resource: { uri: pathToFileURL(await realpath(file)).href, blob: Buffer.from("file bytes").toString("base64") } },
+  ]);
+});
+
+test("ACP v2 rejects attachment types its agent did not advertise before creating a session", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-acp-capabilities-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const path = join(cwd, "input.txt");
+  await writeFile(path, "file bytes");
+  const fake = createFakeAcpSpawn((message, child) => {
+    if (message.method === "initialize") child.respond(message, initializeResult(2, { session: { prompt: { image: {} } } }));
+  });
+  const adapter = new ACPAdapter(adapterOptions(fake));
+  await assert.rejects(adapter.run(request({ cwd, execution: { attachments: [{ type: "file", path }] } })), /did not advertise embeddedContext/);
+  assert.deepEqual(fake.children[0].received.map(({ method }) => method), ["initialize"]);
+});
 
 test("ACP v2 waits for idle completion, streams with backpressure, and returns native identity", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

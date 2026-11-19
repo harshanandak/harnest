@@ -1,3 +1,4 @@
+import { validateAdapterExecution } from "../execution-controls.mjs";
 import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { harnessLaunch } from "../config.mjs";
@@ -1452,6 +1453,7 @@ export class ClaudeSessionAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "claude", "session");
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
     assertSessionWorkflow(request?.workflow);
     const controlError = routeControlError("claude", request.route, "session");

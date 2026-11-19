@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { attachmentMimeType, executionError, readAttachment, validateAdapterExecution } from "../execution-controls.mjs";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import { resolveAcpAgent } from "../acp-registry.mjs";
@@ -612,7 +614,7 @@ function normalizedError(error, { state, deadline, agentId } = {}) {
   if (deadline?.timedOut && result?.details?.kind === "abort") {
     result = adapterError("ACP execution timed out", "timeout", { timedOut: true, aborted: false });
   }
-  if (!(result instanceof AcpAdapterError)) {
+  if (!(result instanceof AcpAdapterError) && result?.details?.kind !== "validation") {
     if (result instanceof AcpRpcError) {
       const classification = classifyProviderFailure({ message: result.message, status: result.data?.status ?? null });
       result = classification
@@ -694,6 +696,7 @@ export class ACPAdapter {
   }
 
   async run(request, { signal, onProgress } = {}) {
+    request = validateAdapterExecution(request, "acp");
     assertPolicy(request);
     const requestedResumeId = request.execution?.sessionId;
     const resumeId = requestedResumeId === undefined || requestedResumeId === null || requestedResumeId === ""
@@ -829,6 +832,19 @@ export class ACPAdapter {
       }
       if (requestedVersion === 2 && negotiatedVersion === 1) fallbackWithoutServices = true;
       capabilities = agentCapabilities(negotiatedVersion, initializeResult);
+      const attachments = request.execution.attachments ?? [];
+      const supported = negotiatedVersion === 2 ? capabilities.session?.prompt : capabilities.promptCapabilities;
+      for (const { type } of attachments) {
+        const capability = type === "image" ? "image" : "embeddedContext";
+        if (!(negotiatedVersion === 2 ? isObject(supported?.[capability]) : supported?.[capability] === true)) {
+          throw executionError("attachments", `ACP agent did not advertise ${capability}`);
+        }
+      }
+      const content = await Promise.all(attachments.map(async ({ type, path }) => {
+        const data = (await readAttachment(path)).toString("base64");
+        if (type === "image") return { type, mimeType: attachmentMimeType(path), data };
+        return { type: "resource", resource: { uri: pathToFileURL(path).href, blob: data } };
+      }));
       identity = agentInfo(negotiatedVersion, initializeResult);
       if (negotiatedVersion === 2 && (!isObject(initializeResult?.info)
         || !hasText(initializeResult.info.name) || !hasText(initializeResult.info.version))) {
@@ -925,7 +941,7 @@ export class ACPAdapter {
       const promptTimeoutMs = Math.min(2_147_483_647, executionTimeoutMs + this.cancelTimeoutMs + 1_000);
       promptPromise = transport.request("session/prompt", {
         sessionId: state.sessionId,
-        prompt: [{ type: "text", text: promptText(request) }],
+        prompt: [{ type: "text", text: promptText(request) }, ...content],
       }, { timeoutMs: promptTimeoutMs });
       terminalAbort = abortFailure(deadline.signal);
       promptResponse = await Promise.race([
