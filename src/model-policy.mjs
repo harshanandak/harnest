@@ -1,4 +1,4 @@
-import { ACP_ROUTE_FIELDS, hasToolPolicy, routeControlError } from "./protocol.mjs";
+import { ACP_ROUTE_FIELDS, HARNESS_VERSIONS, hasToolPolicy, routeControlError } from "./protocol.mjs";
 
 export function isClaudeRoute(route) {
   const value = route && typeof route === "object" ? route : {};
@@ -21,6 +21,9 @@ export function assertNoClaudeRoute(target, route) {
 
 export function adapterRouteRejectionReasons(target, route) {
   const reasons = [];
+  if (target === "opencode" && route?.harnessVersion !== undefined && !HARNESS_VERSIONS.includes(route.harnessVersion)) {
+    reasons.push("opencode-version");
+  }
   if (!["claude", "acp"].includes(target) && isClaudeRoute(route)) reasons.push("claude-model");
   if (target === "gemini") {
     const provider = typeof route?.provider === "string" ? route.provider.toLowerCase() : null;
@@ -54,8 +57,13 @@ export function adapterRouteRejectionReasons(target, route) {
 }
 
 export function assertAdapterRoute(target, route) {
-  assertNoClaudeRoute(target, route);
   const reasons = adapterRouteRejectionReasons(target, route);
+  if (reasons.includes("opencode-version")) {
+    throw Object.assign(new Error("route.harnessVersion must be v2 or omitted; OpenCode V1 is unsupported"), {
+      details: { kind: "validation", field: "route.harnessVersion" },
+    });
+  }
+  assertNoClaudeRoute(target, route);
   if (reasons.includes("gemini-provider")) {
     throw Object.assign(new Error("Gemini route.provider must be google, gemini, google-gemini, or google/gemini"), {
       name: "GeminiAdapterError",
@@ -104,23 +112,31 @@ export function assertAdapterRoute(target, route) {
   }
 }
 
-export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}) {
+function hasPhaseToolPolicy(value) {
+  if (!value || typeof value !== "object") return false;
+  if (typeof value.id === "string" && Array.isArray(value.tools) && value.tools.length) return true;
+  return Object.values(value).some(hasPhaseToolPolicy);
+}
+
+export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}, workflow) {
   const reasons = [];
   if (["amp", "acp"].includes(target) && policy.write !== true) reasons.push("read-only");
   if (hasToolPolicy(policy.tools)) {
     const legacy = Array.isArray(policy.tools);
     if (["amp", "acp", "codex", "cursor"].includes(target)
       || (["claude", "gemini"].includes(target) && (legacy || execution.transport === "session"))
-      || (["opencode", "pi"].includes(target) && !legacy && policy.tools.allow !== undefined)) reasons.push("granular-tools");
+      || (target === "pi" && !legacy && policy.tools.allow !== undefined)
+      || (target === "opencode" && (legacy || policy.tools.allow !== undefined || policy.tools.deny?.length))) reasons.push("granular-tools");
   }
+  if (target === "opencode" && hasPhaseToolPolicy(workflow?.spec)) reasons.push("taskflow-tools");
   if (policy.mode !== undefined && (target !== "cursor" || execution.transport === "session")) reasons.push("policy.mode");
   if (policy.sandbox !== undefined && (target !== "cursor" || execution.transport === "session" || policy.sandbox === false)) reasons.push("policy.sandbox");
   if (["gemini", "amp", "acp"].includes(target) && policy.maxCostUsd != null) reasons.push("cost-budget");
   return reasons;
 }
 
-export function assertAdapterPolicy(target, policy = {}, execution) {
-  const reasons = adapterPolicyRejectionReasons(target, policy, execution);
+export function assertAdapterPolicy(target, policy = {}, execution, workflow) {
+  const reasons = adapterPolicyRejectionReasons(target, policy, execution, workflow);
   if (reasons.includes("read-only")) {
     const name = target === "acp" ? "ACP" : "Amp";
     throw Object.assign(new Error(`${name} cannot enforce a read-only request; set policy.write true only when workspace writes are intended`), {
@@ -129,10 +145,20 @@ export function assertAdapterPolicy(target, policy = {}, execution) {
     });
   }
   if (reasons.includes("granular-tools")) {
+    if (target === "opencode") {
+      throw Object.assign(new Error("OpenCode V2 does not enforce granular policy.tools; its server owns tool permissions"), {
+        details: { kind: "policy", field: "policy.tools" },
+      });
+    }
     const name = target === "acp" ? "ACP" : target[0].toUpperCase() + target.slice(1);
     throw Object.assign(new Error(`${name} does not support granular policy.tools in this form or transport`), {
       name: `${name}AdapterError`,
       details: { kind: "policy", field: "policy.tools" },
+    });
+  }
+  if (reasons.includes("taskflow-tools")) {
+    throw Object.assign(new Error("OpenCode V2 does not enforce Taskflow phase tool lists"), {
+      details: { kind: "policy", field: "workflow.spec" },
     });
   }
   const cursorControl = reasons.find((reason) => reason.startsWith("policy."));

@@ -224,7 +224,7 @@ A **lead client** connects to Harnest through MCP. A **downstream agent** runs t
 | --- | --- | --- |
 | Claude Code | Daemon HTTP via the plugin's header helper | `claude` supports read and approved write, session resume, and live controls on session transport. |
 | Codex | Stdio bridge via the host installer | `codex` supports read-only and approved workspace-write, session resume, and live controls on session transport. Native Windows Codex setup has an upstream payload limit; see [release limits](docs/users/limits.md). |
-| OpenCode | Daemon HTTP via the integration installer | `opencode` supports read and approved write, optional Taskflow, and live steer and reroute on V2. |
+| OpenCode | Daemon HTTP via the integration installer | `opencode` requires OpenCode V2. It supports prompt handoffs, optional Taskflow, and server-attached live controls. The server owns tool permissions. |
 | Pi | Daemon HTTP via the extension | `pi` supports read and approved write, optional Taskflow, and live steer and reroute. |
 | Cursor | Stdio bridge via the integration installer | `cursor` supports read and approved write, session resume, and optional session transport. UI subagents need their own MCP registration. |
 | Gemini CLI | MCP configuration | `gemini` requires CLI v0.62.0. Read and approved write are available with native-session follow-up. Inherited include directories limit filesystem containment. |

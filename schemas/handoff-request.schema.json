@@ -37,7 +37,7 @@
         "agent": { "type": "string" },
         "variant": { "type": "string" },
         "thinking": { "type": ["string", "boolean"] },
-        "harnessVersion": { "type": "string", "enum": ["v1", "v2"], "description": "OpenCode version selector. Other targets may reject this field according to their adapter contract." },
+        "harnessVersion": { "type": "string", "enum": ["v2"], "description": "OpenCode V2 is used when this field is omitted. Other targets may reject this field according to their adapter contract." },
         "serverUrl": { "type": "string", "minLength": 1, "description": "OpenCode private server URL." },
         "serviceTier": { "type": "string", "enum": ["default", "fast", "priority", "flex"], "description": "Native one-shot service tier. Claude accepts only fast." },
         "profile": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$", "description": "Codex one-shot native config profile name." },

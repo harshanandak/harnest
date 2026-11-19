@@ -209,15 +209,14 @@ test("normalization preserves supported server and boolean thinking route fields
   assert.deepEqual(request.route, { serverUrl: "http://127.0.0.1:4096", thinking: true });
 });
 
-test("normalization accepts only OpenCode harness versions v1 and v2", () => {
+test("normalization accepts omitted or explicit OpenCode V2", () => {
   const base = { requestId: "harness-version-contract", target: "opencode", task: "test", cwd: process.cwd() };
   assert.equal(normalizeRequest({ ...base }).route.harnessVersion, undefined);
-  assert.equal(normalizeRequest({ ...base, route: { harnessVersion: "v1" } }).route.harnessVersion, "v1");
   assert.equal(normalizeRequest({ ...base, route: { harnessVersion: "v2" } }).route.harnessVersion, "v2");
-  for (const harnessVersion of ["v3", "V2", "session", ""]) {
+  for (const harnessVersion of ["v1", "v3", "V2", "session", ""]) {
     assert.throws(
       () => normalizeRequest({ ...base, route: { harnessVersion } }),
-      /route\.harnessVersion must be v1 or v2/,
+      /route\.harnessVersion must be v2 or omitted/,
     );
   }
 });

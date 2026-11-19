@@ -18,9 +18,9 @@ const stats = { tokens: { total: 17 }, cost: 0.01 };
 function request(target, overrides = {}) {
   return {
     requestId: `stream-${target}`, target, cwd: process.cwd(), task: "Return the final result.",
-    context: {}, contextDigest: "a".repeat(64), workflow: null,
+    context: target === "opencode" ? { graph: { graphId: "fixture" } } : {}, contextDigest: "a".repeat(64), workflow: null,
     route: { provider: "openai", model: "test-model" },
-    execution: { timeoutMs: 10_000, sessionId: "resumed-session" },
+    execution: { timeoutMs: 10_000, sessionId: target === "opencode" ? null : "resumed-session" },
     policy: { write: false, tools: [] }, ...overrides,
   };
 }
@@ -178,6 +178,7 @@ for (const target of Object.keys(adapters)) {
 for (const [code, errorMessage, kind] of [[0, null, null], [0, "Authentication required", "provider-auth"], [1, "Authentication required", "provider-auth"], [1, "early protocol failure", "downstream"]]) {
   test(`OpenCode real child keeps early ${kind || "success"} evidence beyond the stdout tail on exit ${code}`, { timeout: 20_000 }, async () => {
     const script = String.raw`
+      if (process.argv.includes("--version")) { console.log("opencode v2.2.1"); process.exit(0); }
       const { once } = require('node:events');
       async function emit(value) { if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain'); }
       (async () => {
@@ -209,6 +210,7 @@ for (const [code, errorMessage, kind] of [[0, null, null], [0, "Authentication r
 for (const taskflow of [false, true]) {
   test(`Pi real RPC child preserves early Taskflow identity and ${taskflow ? "saved-flow" : "post-steer"} final output through a large stream`, { timeout: 20_000 }, async () => {
     const script = String.raw`
+      if (process.argv.includes("--version")) { console.log("opencode v2.2.1"); process.exit(0); }
       const { once } = require('node:events');
       const { createInterface } = require('node:readline');
       async function emit(value) { if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain'); }

@@ -156,15 +156,14 @@ test("fleet steer modes match target control semantics", async (t) => {
     await waitForProgress(companion, g, await startJob(companion, "fleet-pi", "pi"));
     await waitForProgress(companion, g, await startJob(companion, "fleet-codex", "codex", { provider: "openai", model: "m" }));
     await waitForProgress(companion, g, await startJob(companion, "fleet-v2", "opencode", { provider: "p", model: "m", harnessVersion: "v2" }));
-    await waitForProgress(companion, g, await startJob(companion, "fleet-v1", "opencode", { provider: "p", model: "m" }));
+    await waitForProgress(companion, g, await startJob(companion, "fleet-default", "opencode", { provider: "p", model: "m" }));
     const fleet = await companion.fleet({ state: "running", recent: 0 });
     const byRequest = new Map(fleet.agents.map((a) => [a.requestId, a]));
     assert.equal(byRequest.get("fleet-pi").steer.mode, "live");
     assert.equal(byRequest.get("fleet-codex").steer.mode, "resume");
     assert.match(byRequest.get("fleet-codex").steer.hint, /one-shot/);
     assert.equal(byRequest.get("fleet-v2").steer.mode, "live");
-    assert.equal(byRequest.get("fleet-v1").steer.mode, "resume");
-    assert.match(byRequest.get("fleet-v1").steer.hint, /V1 controls fail closed/);
+    assert.equal(byRequest.get("fleet-default").steer.mode, "live");
   } finally {
     g.release();
     await Promise.allSettled([...companion.running.values()].map(({ promise }) => promise));

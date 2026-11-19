@@ -157,9 +157,7 @@ live steering, fastest effective loop. Route elsewhere only for what Pi lacks:
   events, `-m` model flag, `--sandbox` mapping, and `exec resume` follow-ups.
   The optional browser-task starter rule prefers Codex. The one-shot CLI
   routes have no verified computer-use capability.
-- **opencode:** OpenCode Go high-limit catalogs and v2 live control. Note the
-  auto lane assumes the v1 path (no live control); pin `route.harnessVersion`
-  `v2` with `capabilities.liveControl` for steerable runs.
+- **opencode:** OpenCode Go high-limit catalogs and V2 live control on server-attached handoffs.
 - **cursor:** NAMED cheap models only (`cursor-cheap` grok lane,
   `cursor-flagship`, …). The bare Cursor default earns no auto lane — without
   a name it adds nothing over Pi.
@@ -372,7 +370,7 @@ Generic ACP is excluded from read-only compare and review for the same reason: i
 | Target | Model flag | Default when omitted | Notes |
 |---|---|---|---|
 | Generic ACP | optional advertised model ID | registered agent default | `route.agent` selects the trusted registration. The native session must advertise any requested `route.model`, `route.variant`, and `route.options`. The route is write-only, excluded from bare auto, and resumes through the observed `execution.sessionId` when the agent supports it. |
-| OpenCode | optional (policy-selected) | policy candidate | A bare target ranks only OpenCode candidates and policy fills `route.model`; set it explicitly only when the user names a model. Never rely on interactive/default-model state. `route.harnessVersion: v2` required for live steer/reroute; V1 controls fail closed. |
+| OpenCode | optional (policy-selected) | policy candidate | A bare target ranks only OpenCode candidates and policy fills `route.model`; set it explicitly only when the user names a model. Never rely on interactive/default-model state. Omit `route.harnessVersion` or set it to `v2`. |
 | Pi | optional | profile default | Omit for profile default; pass through when the user names one. `thinking` must suit the model (DeepSeek V4 routes use `high`/`xhigh`). |
 | Cursor | optional | Cursor default | Passed verbatim as `cursor-agent --model`. Discover with `cursor-agent --list-models`. Only earns a lane with a NAMED cheap model (grok/composer); the bare default adds nothing over Pi. |
 | Claude | optional | config chain | Passed verbatim as `claude --model` (alias or full ID: `sonnet`, `opus`, `claude-opus-5`). Verify the actual model from `modelUsage` — org restrictions can substitute. The ONLY home for Claude models. |

@@ -1,5 +1,5 @@
 // Pure pre-flight validator for harnest_handoff_workflow arguments.
-// Dependency-free so the installed V1 and V2 entrypoints share the same guard.
+// Dependency-free so the installed OpenCode V2 plugin can load it directly.
 export const HANDOFF_WORKFLOW_TOOL = "harnest_handoff_workflow"
 
 // Dependency-free absolute-path check (no node:path import): POSIX root,

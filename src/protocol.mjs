@@ -13,7 +13,7 @@ export const MAX_ROUTE_OPTIONS = 16;
 export const MAX_ROUTE_OPTION_ID = 128;
 export const MAX_ROUTE_OPTION_VALUE = 256;
 export const RESERVED_ROUTE_OPTION_IDS = Object.freeze(["__proto__", "prototype", "constructor"]);
-export const HARNESS_VERSIONS = Object.freeze(["v1", "v2"]);
+export const HARNESS_VERSIONS = Object.freeze(["v2"]);
 export const POLICY_FIELDS = Object.freeze(["write", "readOnly", "allowWrites", "tools", "maxCostUsd", "mode", "sandbox"]);
 export const EXACT_TOOL_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 function invalid(message) {
@@ -75,7 +75,7 @@ export function normalizeRoute(route, label = "route") {
     throw invalid(`${label}.thinking must be a non-empty string or boolean`);
   }
   if (route.harnessVersion !== undefined && !HARNESS_VERSIONS.includes(route.harnessVersion)) {
-    throw invalid(`${label}.harnessVersion must be v1 or v2`);
+    throw invalid(`${label}.harnessVersion must be v2 or omitted; OpenCode V1 is unsupported`);
   }
   if (route.options === undefined) return route;
   const options = route.options;

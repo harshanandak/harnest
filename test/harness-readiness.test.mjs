@@ -13,13 +13,13 @@ test("version probe preserves the real missing executable code and reason", () =
   }), (error) => error.code === "ENOENT" && /ENOENT/.test(error.message) && /spawnSync/.test(error.message));
 });
 
-test("readiness reports all current targets after failures, with legacy and Taskflow explicitly optional", async () => {
+test("readiness reports all current targets after failures, with Taskflow explicitly optional", async () => {
   const lines = [];
   const called = [];
   const result = await smokeHarnesses({
     versionProbe(target) {
       called.push(target);
-      if (["opencode2", "opencode", "claude"].includes(target)) throw Object.assign(new Error("fixture missing"), { code: "ENOENT" });
+      if (["opencode", "claude"].includes(target)) throw Object.assign(new Error("fixture missing"), { code: "ENOENT" });
       return "fixture-version";
     },
     piProbe: async () => { throw new Error("fixture pi core failure"); },
@@ -27,10 +27,9 @@ test("readiness reports all current targets after failures, with legacy and Task
     report: (line) => lines.push(line),
   });
   assert.equal(result.ok, false);
-  assert.deepEqual(called, ["opencode2", "pi", "cursor", "claude", "codex", "gemini", "amp", "opencode"]);
+  assert.deepEqual(called, ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp"]);
   assert.deepEqual(result.results.filter((entry) => entry.required).map((entry) => entry.name), ["opencode", "pi", "cursor", "claude", "codex"]);
   assert.ok(lines.some((line) => /target=opencode required=true status=failed.*ENOENT/.test(line)));
-  assert.ok(lines.some((line) => /target=opencode-legacy required=false status=optional-unavailable/.test(line)));
   assert.ok(lines.some((line) => /target=pi .*fixture pi core failure/.test(line)));
   assert.ok(lines.some((line) => /target=codex required=true status=ready/.test(line)));
   assert.ok(lines.some((line) => /target=gemini required=false status=ready/.test(line)));
@@ -69,22 +68,11 @@ test("Pi core readiness does not require the /tf command", async (t) => {
   assert.equal(closed, true);
 });
 
-test("missing optional legacy OpenCode does not fail healthy current harnesses", async () => {
-  let piCalls = 0;
-  let taskflowCalls = 0;
-  const result = await smokeHarnesses({
-    versionProbe(target) {
-      if (target === "opencode") throw Object.assign(new Error("missing legacy"), { code: "ENOENT" });
-      return "fixture-version";
-    },
-    piProbe: async () => { piCalls += 1; },
-    piTaskflowProbe: async () => { taskflowCalls += 1; },
-    report() {},
-  });
-  assert.equal(result.ok, true);
-  assert.equal(piCalls, 1);
-  assert.equal(taskflowCalls, 1);
-  assert.equal(result.results.filter((entry) => entry.ok && entry.required).length, 5);
+test("OpenCode readiness rejects a V1 executable", () => {
+  assert.throws(() => versionOf("opencode", {
+    resolveLaunch: () => ({ command: "opencode", args: [] }),
+    spawnSyncFn: () => ({ status: 0, stdout: "1.18.18" }),
+  }), /OpenCode V2 is required/);
 });
 
 for (const mode of ["ready", "missing", "hang", "exit"]) {
@@ -136,7 +124,7 @@ test("non-object Pi startup JSON cannot interrupt all-target checks or child cle
     report() {},
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(targets, ["opencode2", "pi", "cursor", "claude", "codex", "gemini", "amp", "opencode"]);
+  assert.deepEqual(targets, ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp"]);
   assert.equal(closed, true);
   assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" });
 });

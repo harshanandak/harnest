@@ -128,8 +128,9 @@ const opencodeAdapter = new OpenCodeAdapter({
     return new FakeChild(null, opencodeLines);
   },
 });
-const opencodeOutput = await opencodeAdapter.run(request("opencode"));
+const opencodeOutput = await opencodeAdapter.run(request("opencode", { context: { graph: { graphId: "fixture" } } }));
 assert.equal(opencodeOutput.result.finalText, "native opencode answer");
+assert.equal(opencodeOutput.route.harnessVersion, "v2");
 assert.equal(opencodeSpawned, 1);
 
 // Explicit OpenCode workflow without the optional package fails before spawn.
@@ -148,25 +149,5 @@ await assert.rejects(
   expectTaskflowFailure("taskflow-mcp-core"),
 );
 assert.equal(opencodeWorkflowSpawned, 0, "a missing optional dependency must fail before spawning the harness");
-
-// A V2 spec request must fail before the control server starts: the optional
-// core is loaded ahead of controlRuntime.start, so no process is spawned.
-let opencodeV2Spawned = 0;
-const opencodeV2Workflow = new OpenCodeAdapter({
-  command: "synthetic-opencode",
-  fetchFn: () => Promise.resolve({ ok: true, status: 200 }),
-  spawnFn() {
-    opencodeV2Spawned += 1;
-    return new FakeChild(null, opencodeLines);
-  },
-});
-await assert.rejects(
-  opencodeV2Workflow.run(request("opencode", {
-    route: { model: "fixture/model", harnessVersion: "v2" },
-    workflow: { engine: "taskflow", spec: { name: "blocked-v2", phases: [{ id: "final", task: "Run", final: true }] } },
-  })),
-  expectTaskflowFailure("taskflow-mcp-core"),
-);
-assert.equal(opencodeV2Spawned, 0, "V2 workflow must not start a control server before the optional dependency check");
 
 console.log("DIRECT_RUN_OK");

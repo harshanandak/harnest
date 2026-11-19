@@ -33,7 +33,7 @@ test("host info snapshot describes the OpenCode launch path and control semantic
   assert.equal(info.writeApproval.marker, "metadata.harnest.writeApproved=true");
   assert.match(info.nestedHandoffs, /cannot widen/);
   assert.equal(info.controlSemantics.acknowledged, "applied");
-  assert.match(info.controlSemantics.v1Opencode, /fail closed/);
+  assert.match(info.controlSemantics.opencode, /server-attached handoffs/);
   assert.match(info.controlSemantics.acp, /rejects live controls/);
 });
 
@@ -49,9 +49,9 @@ test("every OpenCode worker agent is a restricted subagent with a launch descrip
     assert.match(raw, /^---\n[\s\S]+^---/m, `${name} must carry frontmatter`);
     assert.match(raw, /^mode: subagent$/m, `${name} must be a subagent`);
     assert.match(raw, /^description: /m, `${name} must describe when to use it`);
-    assert.match(raw, /^  bash: deny$/m, `${name} must deny bash`);
-    assert.match(raw, /^  edit: deny$/m, `${name} must deny edits`);
-    assert.match(raw, /^  task: deny$/m, `${name} must not nest subagents`);
+    for (const action of ["shell", "edit", "subagent"]) {
+      assert.ok(raw.includes(`  - action: ${action}\n    resource: "*"\n    effect: deny`), `${name} must deny ${action}`);
+    }
     assert.match(raw, /harnest_handoff_workflow/, `${name} must name the MCP tool with its prefix`);
   }
 });

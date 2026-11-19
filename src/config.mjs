@@ -40,6 +40,17 @@ function windowsOpenCodeV2DirectLaunch() {
   return null;
 }
 
+function openCodeLaunch() {
+  return windowsOpenCodeV2DirectLaunch()
+    || resolveTrustedCommand("opencode2")
+    || windowsPowerShellShim("opencode2")
+    || "opencode";
+}
+
+export function isOpenCodeV2Version(output) {
+  return /^(?:opencode\s+)?v?2\.\d+\.\d+(?:[-+][\w.+-]+)?$/i.test(output.trim());
+}
+
 function parseCursorVersion(name) {
   const match = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-(\d{2})-(\d{2})-(\d{2}))?-[a-f0-9]+$/.exec(name);
   if (!match) return null;
@@ -124,13 +135,12 @@ export function harnessCommand(target, injected) {
   return harnessLaunch(target, injected).command;
 }
 
-export function harnessLaunch(target, injected) {
+export function harnessLaunch(target, injected, { env = process.env, config } = {}) {
   if (injected) {
     return typeof injected === "string" ? { command: injected, args: [] } : injected;
   }
   const envName = {
-    opencode: "HARNEST_OPENCODE",
-    opencode2: "HARNEST_OPENCODE_V2",
+    opencode: "HARNEST_OPENCODE_V2",
     pi: "HARNEST_PI",
     cursor: "HARNEST_CURSOR",
     claude: "HARNEST_CLAUDE",
@@ -140,10 +150,7 @@ export function harnessLaunch(target, injected) {
   }[target];
   if (!envName) throw new TypeError(`unsupported harness launch target: ${target}`);
   const defaults = {
-    opencode: "opencode",
-    get opencode2() {
-      return windowsOpenCodeV2DirectLaunch() || windowsPowerShellShim("opencode2") || "opencode2";
-    },
+    get opencode() { return openCodeLaunch(); },
     // Pi RPC needs the Node entrypoint so the npm shim cannot drop piped stdin.
     get pi() {
       return windowsNodePackageLaunch("pi", ["@earendil-works", "pi-coding-agent", "dist", "cli.js"])
@@ -157,8 +164,9 @@ export function harnessLaunch(target, injected) {
     get gemini() { return windowsNodePackageLaunch("gemini", ["@google", "gemini-cli", "dist", "index.js"]) || "gemini"; },
     amp: "amp",
   };
-  const environmentValue = process.env[envName];
-  const localValue = readLocalConfig().executables?.[target];
+  const localKey = target === "opencode" ? "opencode2" : target;
+  const environmentValue = env[envName];
+  const localValue = (config ?? readLocalConfig()).executables?.[localKey];
   const configured = environmentValue || localValue || defaults[target] || target;
   let launch = typeof configured === "string" ? { command: configured, args: [] } : configured;
   const isAbsolute = (value) => typeof value === "string"
@@ -171,27 +179,16 @@ export function harnessLaunch(target, injected) {
     const fallbackLaunch = typeof fallback === "string" ? { command: fallback, args: [] } : fallback;
     const fallbackUsable = isAbsolute(fallbackLaunch?.command) ? existsSync(fallbackLaunch.command) : resolveTrustedCommand(fallbackLaunch?.command);
     if (fallbackUsable) {
-      const source = environmentValue ? envName : localValue ? `executables.${target}` : "automatic detection";
+      const source = environmentValue ? envName : localValue ? `executables.${localKey}` : "automatic detection";
       launch = { ...fallbackLaunch, fallbackFrom: source, missing: launch.command };
     } else {
-      const source = environmentValue ? envName : localValue ? `executables.${target}` : "automatic detection";
+      const source = environmentValue ? envName : localValue ? `executables.${localKey}` : "automatic detection";
       throw Object.assign(new Error(`configured ${target} executable does not exist: ${launch.command}`), {
         details: { kind: "not-ready", configured: launch.command, source, hint: `fix ${source} or unset it so automatic detection can run` },
       });
     }
   }
   return launch;
-}
-
-export function openCodeEnvironment(version, injected = {}, source = process.env) {
-  const isolatedV1Data = version === "v1"
-    ? source.HARNEST_OPENCODE_V1_DATA_HOME
-    : null;
-  return {
-    ...source,
-    ...(isolatedV1Data ? { XDG_DATA_HOME: isolatedV1Data } : {}),
-    ...injected,
-  };
 }
 
 export function pluginRoot() {

@@ -59,7 +59,7 @@ caps at 100. `displayed`, `hasMore`, and `countsScope: "all-matching-jobs"` dist
 the displayed list from the counts. This is a polling view, not an atomic snapshot.
 
 Each displayed agent includes `ownership.ownerId`, `pid`, `host`, and `local`. Pi and
-OpenCode (current) report `steer.mode: "live"` only in the Harnest process that owns their
+OpenCode V2 report `steer.mode: "live"` only in the Harnest process that owns their
 adapter. Other processes report `owner-required`. Send message/reroute calls through
 the originating Harnest process; another MCP connection can inspect the job and request
 cancellation but cannot forward live controls. Rejected cross-process controls include
@@ -104,8 +104,7 @@ its existing production board directory.
 
 | Target | Live mechanism | Steering |
 |---|---|---|
-| OpenCode (current) | adapter progress events fold into the trace; live `steer`/`follow_up`/`reroute` apply at the next step/turn/model-request (host-attached graph nodes are owned by the scheduler, so controls there fail closed as `unsupported-control`) | `handoff_message` / `handoff_reroute` (`applied` = acknowledged) |
-| OpenCode V1 | trace only | controls fail closed — use V2 |
+| OpenCode V2 | adapter progress events fold into the trace; live `steer`/`follow_up`/`reroute` apply at the next step/turn/model-request (host-attached graph nodes are owned by the scheduler, so controls there fail closed as `unsupported-control`) | `handoff_message` / `handoff_reroute` (`applied` = acknowledged) |
 | Pi | JSONL RPC progress folds into the trace; live steer/reroute supported | `handoff_message` / `handoff_reroute` |
 | Cursor | `cursor-agent --output-format stream-json --stream-partial-output` deltas fold into the trace as `cursor_delta` events, so trace polling IS live streaming | one-shot: controls fail closed; thinking rides in `route.model` (for example `claude-opus-5-thinking-high`); follow up by resuming with `execution.sessionId` |
 | Claude | `claude -p --output-format stream-json --verbose` assistant deltas fold into the trace as `claude_delta` events (plus `claude_permission_denied` markers), so trace polling IS live streaming; terminal `result` envelope carries `session_id`, token usage, `total_cost_usd`, and `permission_denials` | one-shot: controls fail closed; `route.thinking` maps to `--effort` (`low`\|`medium`\|`high`\|`xhigh`\|`max`; `off`/`minimal` are dropped); follow up by resuming with `execution.sessionId` |

@@ -38,7 +38,7 @@ The installer backs up every changed file and prints a manifest-specific reverse
 node scripts/install-opencode-integration.mjs --restore "<printed-manifest-path>"
 ```
 
-Restart OpenCode after install, update, or restore. The installer preserves the layout of an existing V1 MCP configuration. Use the installed MCP tools directly or the host's worker agents when a visible child session is useful.
+Restart OpenCode after install, update, or restore. Use OpenCode V2. Migrate an existing flat MCP or singular plugin configuration before running the installer. It rejects those layouts before changing files. See the [OpenCode migration guide](https://opencode.ai/docs/migrate-v1/). Use the installed MCP tools directly or the host's worker agents when a visible child session is useful.
 
 ## Pi
 

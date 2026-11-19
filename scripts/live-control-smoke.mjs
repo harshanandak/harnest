@@ -5,9 +5,9 @@ import { randomUUID } from "node:crypto";
 import { Companion } from "../src/companion.mjs";
 import { JobStore } from "../src/job-store.mjs";
 
-const [target, provider, model, harnessVersion, mode] = process.argv.slice(2);
+const [target, provider, model, mode] = process.argv.slice(2);
 if (!target || !provider || !model) {
-  throw new Error("usage: node scripts/live-control-smoke.mjs <opencode|pi> <provider> <model> [v1|v2]");
+  throw new Error("usage: node scripts/live-control-smoke.mjs <opencode|pi> <provider> <model> [no-control]");
 }
 
 const root = await mkdtemp(join(tmpdir(), "harnest-live-control-"));
@@ -21,7 +21,7 @@ try {
     task: "First run a shell command that waits for 15 seconds without changing files. Then reply exactly ORIGINAL_RESULT.",
     cwd: process.cwd(),
     context: { expectedControlMarker: "STEER_APPLIED" },
-    route: { provider, model, ...(harnessVersion ? { harnessVersion } : {}) },
+    route: { provider, model },
     execution: { background: true, timeoutMs: 180_000 },
     policy: { write: false },
   });
@@ -41,7 +41,7 @@ try {
   if ((acknowledgement && acknowledgement.state !== "applied") || receipt.state !== "completed" || !finalText.includes(expected)) {
     throw new Error(JSON.stringify({ acknowledgement, receipt }, null, 2));
   }
-  console.log(`${mode === "no-control" ? "LIVE_HANDOFF_OK" : "LIVE_CONTROL_OK"} target=${target} harness=${harnessVersion || "default"} state=${receipt.state}`);
+  console.log(`${mode === "no-control" ? "LIVE_HANDOFF_OK" : "LIVE_CONTROL_OK"} target=${target} state=${receipt.state}`);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

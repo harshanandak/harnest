@@ -29,12 +29,12 @@ test("trusted PATH resolution covers every native adapter default command", asyn
   const path = ["", ".", "..", "relative-bin", windows ? `"${bin}"` : bin].join(delimiter);
   const env = windows ? { Path: path, PathExt: ".CMD;.exe" } : { PATH: path };
   const commands = {
-    claude: "claude", codex: "codex", cursor: "cursor-agent", opencode: "opencode", opencode2: "opencode2",
+    claude: "claude", codex: "codex", cursor: "cursor-agent", opencode: "opencode",
     pi: "pi", gemini: "gemini", amp: "amp",
   };
   await withEnv("PATH", bin, async () => {
     for (const [target, name] of Object.entries(commands)) {
-      const override = target === "opencode2" ? "HARNEST_OPENCODE_V2" : `HARNEST_${target.toUpperCase()}`;
+      const override = target === "opencode" ? "HARNEST_OPENCODE_V2" : `HARNEST_${target.toUpperCase()}`;
       await withEnv(override, undefined, async () => {
         const { command } = harnessLaunch(target);
         assert.equal(command, name);
@@ -58,7 +58,7 @@ test("OpenCode V2 resolves the native binary behind the renamed opencode command
     await writeFile(join(bin, shim), "# npm shim");
     await writeFile(native, "fixture");
     await withEnv("PATH", bin, () => withEnv("HARNEST_OPENCODE_V2", undefined, async () => {
-      assert.deepEqual(harnessLaunch("opencode2"), { command: native, args: [] }, `${binary} layout must resolve`);
+      assert.deepEqual(harnessLaunch("opencode"), { command: native, args: [] }, `${binary} layout must resolve`);
     }));
   }
 });
@@ -71,7 +71,7 @@ test("a stale executable pin falls back to detection and fails only when nothing
   await writeFile(join(bin, "opencode.ps1"), "# npm shim");
   await writeFile(native, "fixture");
   await withEnv("PATH", bin, () => withEnv("HARNEST_OPENCODE_V2", "C:\\definitely\\missing\\opencode2.exe", async () => {
-    const launch = harnessLaunch("opencode2");
+    const launch = harnessLaunch("opencode");
     assert.equal(launch.command, native, "a missing pin must fall back to current detection");
     assert.equal(launch.fallbackFrom, "HARNEST_OPENCODE_V2");
     assert.match(launch.missing, /missing\\opencode2\.exe/);
@@ -79,7 +79,7 @@ test("a stale executable pin falls back to detection and fails only when nothing
   const empty = await mkdtemp(join(tmpdir(), "harnest-stale-pin-empty-"));
   t.after(() => rm(empty, { recursive: true, force: true }));
   await withEnv("PATH", empty, () => withEnv("HARNEST_OPENCODE_V2", "C:\\definitely\\missing\\opencode2.exe", async () => {
-    assert.throws(() => harnessLaunch("opencode2"), (error) => {
+    assert.throws(() => harnessLaunch("opencode"), (error) => {
       assert.match(error.message, /does not exist/);
       assert.equal(error.details.kind, "not-ready");
       assert.match(error.details.source, /HARNEST_OPENCODE_V2/);

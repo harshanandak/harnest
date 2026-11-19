@@ -24,7 +24,6 @@ export function assertGraphLeaf(request) {
   if (target === "opencode" && !route.model) throw graphError("validation", "OpenCode graph node requires explicit route.model");
   if (target !== "acp" && route.model && !/^[a-zA-Z0-9._/[\]=,+-]+$/.test(route.model)) throw graphError("validation", `invalid ${target} route.model`);
   if (route.provider && !/^[a-zA-Z0-9._/-]+$/.test(route.provider)) throw graphError("validation", `invalid ${target} route.provider`);
-  if (route.harnessVersion && !["v1", "v2"].includes(route.harnessVersion)) throw graphError("validation", "invalid harnessVersion");
 }
 
 function object(value, label) {

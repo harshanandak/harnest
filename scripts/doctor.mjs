@@ -44,7 +44,6 @@ const resolveLaunch = (target) => {
 };
 const resolved = {
   opencode: resolveLaunch("opencode"),
-  opencode2: resolveLaunch("opencode2"),
   pi: resolveLaunch("pi"),
   cursor: resolveLaunch("cursor"),
   claude: resolveLaunch("claude"),
@@ -59,7 +58,6 @@ const checks = {
   plugin: `${manifest.name}@${manifest.version}`,
   node: process.version,
   opencode: await describeLaunch(resolved.opencode),
-  opencode2: await describeLaunch(resolved.opencode2),
   pi: await describeLaunch(resolved.pi, ["--version", "--offline"], 30_000),
   cursor: await describeLaunch(resolved.cursor),
   claude: await describeLaunch(resolved.claude),

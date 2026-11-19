@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createRuntimeServices } from "./runtime-services.mjs";
 import { runtimeInfo } from "./runtime-info.mjs";
 import { readLocalConfig } from "./config.mjs";
+import { HARNESS_VERSIONS } from "./protocol.mjs";
 import { metadataInputSchema, nativeExecutionInputFields, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
 import { registerDynamicTools } from "./dynamic-tools.mjs";
 import { registerRoutingTools } from "./routing-tools.mjs";
@@ -124,7 +125,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     {
       title: "Hand off a complete workflow",
       description:
-        "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is opt-in through route.agent and accepts advertised model, variant, and options controls. ACP is write-only and rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. For bounded independent work longer than one turn — not quick questions or in-session edits. Use policy.tools with explicit allow and deny names for Claude print or Gemini, and deny only for Pi or fresh local OpenCode V1. Cursor print supports policy.mode=plan and policy.sandbox=true. Use background=true for durable status/result retrieval. A foreground execution.timeoutMs above the safe MCP foreground wait (55s, below the common 60s client tool timeout) is converted to a durable background job automatically; its receipt carries execution.foregroundConverted=true and the caller polls handoff_status instead of waiting. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
+        "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is opt-in through route.agent and accepts advertised model, variant, and options controls. ACP is write-only and rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. For bounded independent work longer than one turn — not quick questions or in-session edits. Use policy.tools with explicit allow and deny names for Claude print or Gemini, and deny only for Pi. OpenCode delegates tool permissions to its server. Cursor print supports policy.mode=plan and policy.sandbox=true. Use background=true for durable status/result retrieval. A foreground execution.timeoutMs above the safe MCP foreground wait (55s, below the common 60s client tool timeout) is converted to a durable background job automatically; its receipt carries execution.foregroundConverted=true and the caller polls handoff_status instead of waiting. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
       inputSchema: z.object({ request: requestSchema }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -385,7 +386,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
           model: z.string().trim().min(1),
           variant: z.string().trim().min(1).optional(),
           thinking: z.union([z.string(), z.boolean()]).optional(),
-          harnessVersion: z.enum(["v1", "v2"]).optional(),
+          harnessVersion: z.enum(HARNESS_VERSIONS).optional(),
         }).strict(),
         message: z.string().trim().min(1).optional(),
         delivery: z.enum(["steer", "follow_up"]).optional(),
@@ -484,7 +485,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
             cursor: "Call handoff_workflow directly as an MCP tool (Cursor MCP servers are team/workspace configured). For visibility, run one cursor-worker background agent per handoff and poll status/trace; Cursor subagents do not inherit UI MCP servers in automations, so prefer direct calls.",
           },
           workers: [
-            { agent: "opencode-worker", target: "opencode", notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. Native policy.tools.deny requires a fresh local V1.18.18 run. Live steer/reroute requires V2." },
+            { agent: "opencode-worker", target: "opencode", notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. OpenCode V2 supports live steering on server-attached handoffs. Its server owns tool permissions." },
             { agent: "pi-worker", target: "pi", notes: "Route or profile default is fine. Supports exact built-in policy.tools.deny on prompt-only runs. Live steer/reroute supported." },
             { agent: "cursor-worker", target: "cursor", notes: "One-shot print mode with stream-json deltas in trace. Read-only defaults to ask and approved write defaults to --force unless policy controls apply. Supports policy.mode=plan and policy.sandbox=true. Resume via execution.sessionId; no live message/reroute." },
             { agent: "claude-worker", target: "claude", notes: "One-shot print mode with stream-json deltas in trace. Read-only maps to --permission-mode plan; write uses acceptEdits. Supports route.agent, route.serviceTier fast, explicit policy.tools.allow and deny, and maxCostUsd via --max-budget-usd. Resume via execution.sessionId; no live message/reroute." },
@@ -496,7 +497,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
           controlSemantics: {
             acknowledged: "applied",
             uncertain: "transport acknowledgement lost; reconcile from downstream trace",
-            v1Opencode: "live message/reroute fail closed by design; use V2 or Pi",
+            opencode: "server-attached handoffs support live message/reroute; shared-service graph nodes use graph controls",
             cursor: "oneshot rejects live controls; session uses ACP cancellation and negotiated model reroute, but rejects mid-turn messages",
             claude: "oneshot rejects live controls; session uses SDK streaming guidance with UUID consumption evidence and native setModel acknowledgement",
             codex: "oneshot rejects live controls; session uses app-server turn/steer and owned next-turn messages",

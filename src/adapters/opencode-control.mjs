@@ -46,10 +46,6 @@ function responseStatus(response) {
   return Number.isFinite(status) ? status : null;
 }
 
-function normalizeVersion(value) {
-  return value === "v2" ? "v2" : "v1";
-}
-
 function modelParts(route = {}) {
   const provider = String(route.provider || "").trim();
   let model = String(route.model || "").trim();
@@ -58,11 +54,6 @@ function modelParts(route = {}) {
   return { provider, model, variant: variant ? String(variant) : undefined };
 }
 
-/**
- * Owns the short-lived private OpenCode server used by an adapter run. V1 is
- * controlled over the legacy HTTP surface; V2 uses the generated Promise
- * client and its durable inbox delivery modes.
- */
 export class OpenCodeControl {
   constructor(options = {}) {
     this.options = options;
@@ -74,7 +65,6 @@ export class OpenCodeControl {
     this.serverChild = null;
     this.serverUrl = null;
     this.sessionId = null;
-    this.version = "v1";
     this.ready = false;
     this.serverClosed = false;
     this.serverExit = null;
@@ -85,8 +75,7 @@ export class OpenCodeControl {
     this.closePromise = null;
   }
 
-  async start({ request, version, launch, env, signal, serverUrl } = {}) {
-    this.version = normalizeVersion(version || request?.route?.harnessVersion);
+  async start({ request, launch, env, signal, serverUrl } = {}) {
     this.serverUrl = serverUrl || request?.route?.serverUrl || null;
     const serverEnv = env || process.env;
     // A spawn environment that already carries OPENCODE_SERVER_PASSWORD (or
@@ -98,18 +87,17 @@ export class OpenCodeControl {
     if (this.serverUrl) {
       await this.waitReady(signal);
       this.ready = true;
-      this.client = this.version === "v2" ? this.clientFactory({ baseUrl: this.serverUrl, headers: this.authHeaders() }) : null;
+      this.client = this.clientFactory({ baseUrl: this.serverUrl, headers: this.authHeaders() });
       return this.serverUrl;
     }
 
     const host = "127.0.0.1";
     const port = this.options.port || await freePort(host);
-    const launchConfig = typeof launch === "string" ? { command: launch, args: [] } : (launch || { command: "opencode", args: [] });
+    const launchConfig = typeof launch === "string" ? { command: launch, args: [] } : launch;
     const args = [
       ...(Array.isArray(launchConfig.args) ? launchConfig.args : []),
       "serve", "--hostname", host, "--port", String(port),
     ];
-    if (this.version === "v1") args.push("--pure");
     const child = this.spawnFn(launchConfig.command, args, {
       cwd: request?.cwd,
       env: serverEnv,
@@ -144,7 +132,7 @@ export class OpenCodeControl {
     try {
       await this.waitReady(signal);
       this.ready = true;
-      this.client = this.version === "v2" ? this.clientFactory({ baseUrl: this.serverUrl, headers: this.authHeaders() }) : null;
+      this.client = this.clientFactory({ baseUrl: this.serverUrl, headers: this.authHeaders() });
       return this.serverUrl;
     } catch (error) {
       await this.stop();
@@ -169,14 +157,12 @@ export class OpenCodeControl {
           stderr: this.serverStderr || null,
         });
       }
-      for (const path of this.version === "v2" ? ["/api/health", "/global/health"] : ["/global/health", "/api/health"]) {
-        try {
-          const response = await this.fetchFn(joinUrl(this.serverUrl, path), { method: "GET", headers: this.authHeaders(), signal });
-          if (responseOk(response)) return response;
-          lastError = new Error(`health returned HTTP ${responseStatus(response) ?? "unknown"}`);
-        } catch (error) {
-          lastError = error;
-        }
+      try {
+        const response = await this.fetchFn(joinUrl(this.serverUrl, "/api/health"), { method: "GET", headers: this.authHeaders(), signal });
+        if (responseOk(response)) return response;
+        lastError = new Error(`health returned HTTP ${responseStatus(response) ?? "unknown"}`);
+      } catch (error) {
+        lastError = error;
       }
       await sleep(this.pollMs);
     }
@@ -207,7 +193,7 @@ export class OpenCodeControl {
     return this.sessionId;
   }
 
-  async #v2Request(command, sessionId) {
+  async #send(command, sessionId) {
     if (!this.client?.session) throw new OpenCodeControlError("OpenCode V2 client is not ready", "not-ready");
     let model = null;
     if (command.kind === "reroute") {
@@ -238,11 +224,8 @@ export class OpenCodeControl {
 
   async control(command, signal) {
     if (!this.ready || !this.serverUrl) throw new OpenCodeControlError("OpenCode control server is not ready", "not-ready");
-    if (this.version === "v1") {
-      throw new OpenCodeControlError("OpenCode V1 live control is unsafe in 1.18.18; use current OpenCode or Pi", "unsupported-control");
-    }
     const sessionId = await this.waitForSession(signal);
-    return this.#v2Request(command, sessionId);
+    return this.#send(command, sessionId);
   }
 
   async stop() {

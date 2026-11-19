@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { validateHandoffWorkflowArgs } from "../opencode-plugin/validate-workflow.mjs";
-import plugin, { HarnestPlugin, resultPayload } from "../opencode-plugin/harnest.mjs";
+import plugin, { resultPayload } from "../opencode-plugin/harnest.mjs";
 
 const TOOL = "harnest_handoff_workflow";
 
@@ -205,14 +205,6 @@ test("compaction recovers persisted identifiers and trace cursor after plugin re
   const other = { sessionID: "ses-b", system: [] };
   await second.hooks.compaction(other);
   assert.equal(other.system.length, 1);
-});
-
-test("V1 server is separate and validates output.args", async () => {
-  assert.equal(plugin.server, HarnestPlugin);
-  const legacy = await plugin.server();
-  await legacy["tool.execute.before"]({ tool: TOOL }, { args: { request: validRequest() } });
-  await assert.rejects(legacy["tool.execute.before"]({ tool: TOOL, args: validRequest() }, { args: {} }), /request/);
-  assert.equal(JSON.parse(await legacy.tool.handoff_host_info.execute({}, { sessionID: "v1" })).sessionID, "v1");
 });
 
 test("graph identity and every dispatched child survive host compaction", async () => {

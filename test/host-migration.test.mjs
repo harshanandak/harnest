@@ -85,7 +85,7 @@ test("OpenCode migration preserves V2 server settings and plugin options and res
   assert.deepEqual(next.mcp.servers.existing, existing);
   assert.equal(next.mcp.servers["agent-companion"], undefined);
   assert.equal(next.mcp.servers.harnest.disabled, true);
-  assert.deepEqual(next.plugins, ["agent-companion-helper", { package: "./plugins/harnest", options: { keep: true } }]);
+  assert.deepEqual(next.plugins, [{ package: "./plugins/harnest", options: { keep: true } }, "agent-companion-helper"]);
   await restoreIntegration(result.manifest);
   assert.equal(await read(path), raw);
 });

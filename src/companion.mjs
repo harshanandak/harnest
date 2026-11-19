@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createAdapter } from "./adapters/index.mjs";
 import { createRouteResolver } from "./routing.mjs";
 import { createModelCatalog } from "./model-catalog.mjs";
+import { assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
 import { JobStore } from "./job-store.mjs";
 import { EXECUTION_CONTROLS } from "./execution-controls.mjs";
 import {
@@ -305,8 +306,8 @@ function nextFallbackRoute(job, error, state = {}) {
 
 // How to steer this job right now: live controls only exist on RUNNING
 // Pi / OpenCode-V2 runs (a queued job has no adapter/RPC channel yet, so it
-// reports pending, not live). One-shot targets (cursor/claude/codex) and
-// OpenCode V1 fail closed — steer them by resuming once settled. Terminal
+// reports pending, not live). One-shot targets (cursor/claude/codex)
+// steer by resuming once settled. Terminal
 // jobs always steer via resume (write-capable retries need lead approval).
 export function steerFor(receipt, ownership) {
   const interactive = receipt.execution?.transport === "session" && ["claude", "codex", "cursor"].includes(receipt.target);
@@ -327,7 +328,8 @@ export function steerFor(receipt, ownership) {
   if (receipt.cancellation?.state === "requested") {
     return { mode: "pending", hint: "cancellation requested; poll handoff_status for owner acknowledgement before resuming" };
   }
-  if (ownership && !ownership.local && (interactive || receipt.target === "pi" || (receipt.target === "opencode" && receipt.route?.harnessVersion === "v2"))) {
+  const openCode = receipt.target === "opencode" && receipt.route?.harnessVersion !== "v1";
+  if (ownership && !ownership.local && (interactive || receipt.target === "pi" || openCode)) {
     return {
       mode: "owner-required",
       hint: "send handoff_message/reroute through the originating Harnest process (see ownership); this process can inspect or request cancellation, but cannot forward live controls",
@@ -337,22 +339,10 @@ export function steerFor(receipt, ownership) {
     if (receipt.target === "cursor") return { mode: "live", hint: "Cursor ACP supports cancellation and negotiated model reroute; mid-turn messages are unsupported. Inspect native acknowledgements." };
     return { mode: "live", hint: "protocol session controls are available; inspect acknowledgement evidence, since queued or SDK-delivered messages do not prove consumption" };
   }
-  if (receipt.target === "pi") {
+  if (receipt.target === "pi" || openCode) {
     return {
       mode: "live",
       hint: "handoff_message with a fresh commandId; only applied counts as acknowledged",
-    };
-  }
-  if (receipt.target === "opencode") {
-    if (receipt.route?.harnessVersion === "v2") {
-      return {
-        mode: "live",
-        hint: "handoff_message with a fresh commandId; only applied counts as acknowledged",
-      };
-    }
-    return {
-      mode: "resume",
-      hint: "V1 controls fail closed; resume continues the OpenCode session with a follow-up run",
     };
   }
   return {
@@ -420,6 +410,10 @@ export class Companion {
     if (this.closed) throw Object.assign(new Error("Harnest is shutting down"), { details: { kind: "not-active" } });
     const normalized = normalizeRequest(input);
     const request = options.routeResolved ? normalized : await this.routeResolver(normalized);
+    if (request.target === "opencode") {
+      assertAdapterRoute(request.target, request.route);
+      assertAdapterPolicy(request.target, request.policy, request.execution, request.workflow);
+    }
     const cwd = await stat(request.cwd).catch(() => null);
     if (!cwd?.isDirectory()) throw Object.assign(new TypeError(`cwd is not a directory: ${request.cwd}`), { details: { kind: "validation", hint: "cwd must be an existing absolute directory" } });
 
@@ -1133,6 +1127,10 @@ export class Companion {
           openAttemptUsage();
         }
         const attempt = currentAttempt;
+        if (job.request.target === "opencode") {
+          assertAdapterRoute(job.request.target, job.request.route);
+          assertAdapterPolicy(job.request.target, job.request.policy, job.request.execution, job.request.workflow);
+        }
         const create = () => this.adapterFactory(job.request.target, this.adapterOptions, job.request);
         if (job.request.execution.transport === "session" && ["claude", "codex", "cursor"].includes(job.request.target)) {
           sessionLease = await this.sessionPool.acquire(job.request, create);

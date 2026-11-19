@@ -431,7 +431,7 @@ function explicitMatches(requestRoute, candidate) {
 function rejectionReasons(candidate, request, directive, contextTokens, now) {
   const reasons = [
     ...adapterRouteRejectionReasons(candidate.target, candidate.route),
-    ...adapterPolicyRejectionReasons(candidate.target, request.policy, request.execution),
+    ...adapterPolicyRejectionReasons(candidate.target, request.policy, request.execution, request.workflow),
   ];
   const capabilities = candidate.capabilities;
   const health = candidate.health;
@@ -653,19 +653,19 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
   if (hasNativeRouteControls(request.target, request.route) && request.target !== "auto") {
     const route = withThinking(mergeObject(directive.route, request.route), request.target);
     assertAdapterRoute(request.target, route);
-    assertAdapterPolicy(request.target, request.policy, request.execution);
+    assertAdapterPolicy(request.target, request.policy, request.execution, request.workflow);
     return { target: request.target, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (mode === "pin" || (hasExplicitRoute(request) && mode !== "auto" && mode !== "prefer")) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
-    assertAdapterPolicy(pinTarget, request.policy, request.execution);
+    assertAdapterPolicy(pinTarget, request.policy, request.execution, request.workflow);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (hasExplicitRoute(request) && request.metadata?.routing?.mode == null) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
-    assertAdapterPolicy(pinTarget, request.policy, request.execution);
+    assertAdapterPolicy(pinTarget, request.policy, request.execution, request.workflow);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
 
@@ -705,11 +705,11 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
       ...(request.route?.thinking != null ? { thinking: request.route.thinking } : {}),
     }, fallbackTarget);
     assertAdapterRoute(fallbackTarget, route);
-    assertAdapterPolicy(fallbackTarget, request.policy, request.execution);
+    assertAdapterPolicy(fallbackTarget, request.policy, request.execution, request.workflow);
     const incompatible = rejected.filter((entry) => !entry.reasons.includes("target")
       && entry.reasons.some((reason) => [
         "claude-model", "thinking-control", "gemini-provider", "gemini-model", "gemini-route-control",
-        "amp-route-control", "amp-variant", "acp-route-control", "native-route-control", "granular-tools", "cost-budget", "read-only",
+        "amp-route-control", "amp-variant", "acp-route-control", "opencode-version", "native-route-control", "granular-tools", "taskflow-tools", "cost-budget", "read-only",
       ].includes(reason)));
     if (incompatible.length) {
       throw Object.assign(new Error(`no adapter-compatible routing candidate: ${[...new Set(incompatible.flatMap((entry) => entry.reasons))].join(", ")}`), {
@@ -724,7 +724,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
   }
   const finalTarget = preferredTarget || selected.candidate.target;
   const configuredRoute = selected.candidate.route;
-  assertAdapterPolicy(finalTarget, request.policy, request.execution);
+  assertAdapterPolicy(finalTarget, request.policy, request.execution, request.workflow);
   return {
     target: finalTarget,
     route: configuredRoute,

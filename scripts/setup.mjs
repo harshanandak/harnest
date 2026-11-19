@@ -74,7 +74,8 @@ async function setup(args) {
     return;
   }
 
-  await setupDaemon({ noAutostart: flags.includes("--no-autostart") });
+  const prepareDaemon = () => setupDaemon({ noAutostart: flags.includes("--no-autostart") });
+  if (host !== "opencode") await prepareDaemon();
   const manual = manualBridgeConfig(host);
   if (manual) {
     console.log(`Edit ${manual.path}\n${manual.merge}\n\n${manual.snippet(bridgeEntry())}\n\n${manual.verify}`);
@@ -88,7 +89,7 @@ async function setup(args) {
       await installPluginHost(host, { project: project ?? process.cwd() });
       break;
     case "opencode":
-      result = await installIntegration(openCodeConfigDir());
+      result = await installIntegration(openCodeConfigDir(), { prepareDaemon });
       if (result.manifest) console.log('Reverse path: node scripts/install-opencode-integration.mjs --restore "' + result.manifest + '"');
       break;
     case "cursor":

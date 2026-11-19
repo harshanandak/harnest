@@ -142,8 +142,8 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.equal(request.properties.route.additionalProperties, false);
   assert.deepEqual(Object.keys(request.properties.execution.properties), ["background", "timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns", "transport"]);
   assert.equal(request.properties.execution.additionalProperties, false);
-  assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"], description: "OpenCode only: v1 or v2." });
-  assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"] });
+  assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"], description: "OpenCode only: v2 or omitted." });
+  assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"] });
   const policy = request.properties.policy;
   assert.deepEqual(Object.keys(policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
   const [legacyTools, explicitTools] = policy.properties.tools.anyOf;

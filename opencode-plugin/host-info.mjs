@@ -2,7 +2,7 @@ const WORKERS = [
   {
     agent: "opencode-worker",
     target: "opencode",
-    notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. Live steer/reroute requires route.harnessVersion v2; V1 controls fail closed.",
+    notes: "Name the target (or auto) and policy picks the model; set route.model only when the user names one. OpenCode V2 supports live steering on server-attached handoffs. Its server owns tool permissions.",
   },
   {
     agent: "pi-worker",
@@ -94,7 +94,7 @@ export function hostInfoSnapshot(env = process.env) {
     controlSemantics: {
       acknowledged: "applied",
       uncertain: "transport acknowledgement lost; reconcile from downstream trace",
-      v1Opencode: "live message/reroute fail closed by design",
+      opencode: "server-attached handoffs support live message/reroute; shared-service graph nodes use graph controls",
       cursor: "oneshot rejects live controls; session uses ACP cancel/model negotiation and rejects mid-turn messages",
       claude: "oneshot rejects live controls; session uses SDK streaming guidance with consumption evidence and acknowledged setModel",
       codex: "oneshot rejects live controls; session uses app-server turn/steer and owned queued follow-ups",

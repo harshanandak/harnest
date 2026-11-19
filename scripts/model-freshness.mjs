@@ -9,14 +9,17 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { harnessLaunch } from "../src/config.mjs";
-import { requireNativeCommand, resolveTrustedCommand } from "../src/launch-command.mjs";
+import { harnessLaunch, isOpenCodeV2Version } from "../src/config.mjs";
+import { requireNativeCommand } from "../src/launch-command.mjs";
 import { freshnessReport } from "../src/model-families.mjs";
 
 export function liveCatalog() {
-  let launch = harnessLaunch("opencode");
-  if (process.platform === "win32" && !resolveTrustedCommand(launch.command)) launch = harnessLaunch("opencode2");
-  return execFileSync(requireNativeCommand(launch.command), [...(launch.args || []), "models"], {
+  const launch = harnessLaunch("opencode");
+  const command = requireNativeCommand(launch.command);
+  const args = launch.args ?? [];
+  const version = execFileSync(command, [...args, "--version"], { encoding: "utf8", timeout: 5_000 });
+  if (!isOpenCodeV2Version(version)) throw new Error("OpenCode V2 is required for model discovery");
+  return execFileSync(command, [...args, "models"], {
     encoding: "utf8", timeout: 60_000,
   });
 }
