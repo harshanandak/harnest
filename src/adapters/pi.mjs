@@ -1006,13 +1006,17 @@ export class PiAdapter {
       ? `/tf:${specInfo.name}${slashArgs ? ` ${slashArgs}` : ""}`
       : requestPrompt(request);
     const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
-    await requireExecutionFlags({ launch: this.launch, request, env, spawnFn: this.spawnFn, signal: options.signal }, [], [
-      ...(fork ? [["sessionAction", "--fork", "\\s+<path\\|id>"]] : []),
-      ...(instructions !== undefined ? [["instructions", "--append-system-prompt"]] : []),
-    ]);
-    const images = await Promise.all((attachments ?? []).map(async ({ path }) => ({
-      type: "image", mimeType: attachmentMimeType(path), data: (await readAttachment(path)).toString("base64"),
-    })));
+    if (fork || instructions !== undefined) {
+      await requireExecutionFlags({ launch: this.launch, request, env, spawnFn: this.spawnFn, signal: options.signal }, [], [
+        ...(fork ? [["sessionAction", "--fork", "\\s+<path\\|id>"]] : []),
+        ...(instructions !== undefined ? [["instructions", "--append-system-prompt"]] : []),
+      ]);
+    }
+    const images = attachments?.length
+      ? await Promise.all(attachments.map(async ({ path }) => ({
+        type: "image", mimeType: attachmentMimeType(path), data: (await readAttachment(path)).toString("base64"),
+      })))
+      : [];
     const cleanupFlow = specInfo
       ? await materializeFlow(request, specInfo.definition, this.materializeInlineFlows)
       : null;
