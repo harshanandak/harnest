@@ -112,7 +112,7 @@ const extensionSource = async () => {
     .replace("__HARNEST_DYNAMIC_VIEW_URL__", new URL("../src/dynamic-view.mjs", import.meta.url).href)
     .replace("__HARNEST_LAUNCH_COMMAND_URL__", new URL("../src/launch-command.mjs", import.meta.url).href)
     .replace("__HARNEST_GRAPH_VIEW_URL__", new URL("../scripts/graph-view.mjs", import.meta.url).href)
-    .replace('"@earendil-works/pi-ai"', JSON.stringify(import.meta.resolve("@earendil-works/pi-ai")))
+    .replace('"@earendil-works/pi-ai"', JSON.stringify(new URL("./fixtures/pi-ai-string-enum.mjs", import.meta.url).href))
     .replace('"typebox"', JSON.stringify(import.meta.resolve("typebox")));
 };
 

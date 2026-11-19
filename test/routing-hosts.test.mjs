@@ -50,7 +50,7 @@ async function piRoutingTools(t, directory, policyPath, { recover = false } = {}
     __HARNEST_GRAPH_VIEW_URL__: "../scripts/graph-view.mjs",
   })) source = source.replace(placeholder, new URL(relative, import.meta.url).href);
   source = source.replace("__HARNEST_DAEMON_CLIENT_URL__", clientUrl)
-    .replace('"@earendil-works/pi-ai"', JSON.stringify(import.meta.resolve("@earendil-works/pi-ai")))
+    .replace('"@earendil-works/pi-ai"', JSON.stringify(new URL("./fixtures/pi-ai-string-enum.mjs", import.meta.url).href))
     .replace('"typebox"', JSON.stringify(import.meta.resolve("typebox")));
   const { default: extension } = await import(asModule(source));
   const tools = new Map();
