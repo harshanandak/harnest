@@ -797,7 +797,7 @@ test("default V2 handoff starts and cleans up a private server", async () => {
   assert.equal(serverChild.killed, true);
 });
 
-test("managed server readiness uses /global/health, where OpenCode V2 serves health", async () => {
+test("attached server readiness uses /global/health, where OpenCode V2 serves health", async () => {
   const probed = [];
   const control = new OpenCodeControl({
     fetchFn(url) { probed.push(new URL(url).pathname); return healthyFetch(url); },
