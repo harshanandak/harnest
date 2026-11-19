@@ -133,7 +133,8 @@ export async function normalizeGraph(input) {
       },
     });
     if (node.target === "auto") request.metadata = { ...request.metadata, routing: { ...request.metadata.routing, mode: "auto" } };
-    // The Pi placeholder cannot validate controls intended for the resolved target.
+    // Retain the caller's execution options for the graph digest. Preparation
+    // separates the routing inputs from controls that need the resolved target.
     const pendingExecution = node.target === "auto" && Object.keys(nativeExecution).length ? nativeExecution : undefined;
     nodes.push({ id, dependsOn, requestedTarget: node.target, request, ...(pendingExecution ? { pendingExecution } : {}) });
   }

@@ -111,7 +111,14 @@ export class GraphRunner {
     const prepared = [];
     for (const node of spec.nodes) {
       const automatic = node.requestedTarget === "auto";
-      const base = normalizeRequest({ ...node.request, contextDigest: undefined, context: {
+      const { pendingExecution, ...preparedNode } = node;
+      const { sessionId = node.request.execution.sessionId, ...controls } = pendingExecution ?? {};
+      const execution = { ...node.request.execution, sessionId };
+      if (controls.sessionAction === "resume") {
+        execution.sessionAction = controls.sessionAction;
+        delete controls.sessionAction;
+      }
+      const base = normalizeRequest({ ...node.request, execution, contextDigest: undefined, context: {
         ...node.request.context, graph: { graphId, nodeId: node.id, requestId: spec.requestId, task: spec.task, upstream: {} },
       } });
       let resolved = normalizeRequest(await this.companion.routeResolver(base));
@@ -136,9 +143,8 @@ export class GraphRunner {
       assertGraphLeaf(resolved);
       if (resolved.workflow != null) throw graphError("policy", `resolved node ${node.id} added a workflow`);
       if (stableJson(resolved.policy) !== stableJson(node.request.policy)) throw graphError("policy", `resolved node ${node.id} changed graph policy`);
-      const { pendingExecution, ...preparedNode } = node;
-      if (pendingExecution) {
-        resolved = normalizeRequest({ ...resolved, execution: { ...resolved.execution, ...pendingExecution } });
+      if (Object.keys(controls).length) {
+        resolved = normalizeRequest({ ...resolved, execution: { ...resolved.execution, ...controls } });
       }
       prepared.push({ ...preparedNode, request: resolved });
     }

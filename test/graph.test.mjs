@@ -9,6 +9,7 @@ import { JobStore } from "../src/job-store.mjs";
 import { GraphRunner } from "../src/graph.mjs";
 import { GraphStore } from "../src/graph-store.mjs";
 import { childIdFor } from "../src/graph-protocol.mjs";
+import { createRouteResolver } from "../src/routing.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const node = (id, dependsOn = [], extra = {}) => ({ id, task: id, target: "pi", dependsOn, ...extra });
@@ -87,6 +88,33 @@ test("automatic graph routing accepts a variant-only Amp route", async (t) => {
   const result = await f.runner.start(f.graph([node("amp", [], { target: "auto" })], { policy: { write: true } }));
   assert.equal(result.state, "completed", JSON.stringify(result.errors));
   assert.deepEqual(seen, [{ variant: "low" }]);
+});
+
+test("explicit and automatic graph nodes both apply session routing policy", async (t) => {
+  const sessionId = "fixture-session";
+  const routeResolver = createRouteResolver({
+    config: { routing: {
+      global: { defaults: { route: { model: "global-model" } } },
+      sessions: { [sessionId]: { defaults: { route: { model: "session-model" } } } },
+    } },
+    env: {},
+    userPolicy: {},
+  });
+  const seen = [];
+  const f = await fixture(t, async (request) => {
+    seen.push([request.task, [request.route.model, request.execution.sessionId]]);
+    return { result: { finalText: "ok" } };
+  }, { routeResolver });
+  const result = await f.runner.start(f.graph([
+    node("explicit", [], { target: "pi", execution: { sessionId } }),
+    node("automatic", [], { target: "auto", execution: { sessionId } }),
+  ]));
+  assert.equal(result.state, "completed", JSON.stringify(result.errors));
+  assert.equal(seen.length, 2);
+  assert.deepEqual(Object.fromEntries(seen), {
+    explicit: ["session-model", sessionId],
+    automatic: ["session-model", sessionId],
+  });
 });
 
 test("graph resume refuses an ACP child whose owned-process cleanup is unverified", async (t) => {
