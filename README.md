@@ -76,7 +76,7 @@ Install and set up Harnest (https://github.com/harshanandak/harnest) on this mac
    git clone --branch v0.1.0 https://github.com/harshanandak/harnest.git <directory>
    cd <directory>
    bun install --frozen-lockfile --omit optional
-4. Run `bun run setup --help` and find the host name that matches you. Setup also installs a background daemon that starts at login. Ask me before running it, and add --no-autostart if I say no. Then run `bun run setup <host>`.
+4. Run `bun run setup --help` and find the host name that matches you. Setup also installs a background daemon that starts at login. Ask me before running it, and add --no-autostart if I say no. Then run `bun run setup <host>`. If you are Cursor, also ask me for the absolute path of the project I use you in and add `--project "<that path>"`, so the project files go there instead of into the Harnest checkout.
 5. Run `bun run doctor --host <host>`. Fix what you can and report anything still failing.
 6. Check which downstream agent CLIs from the README's "Supported clients and downstream agents" table are on PATH. Do not install them or log in to them. Tell me which ones I still need to install or log in to.
 
