@@ -1,5 +1,5 @@
 /**
- * harnest - Pi extension bridging this session to durable OpenCode/Pi/Cursor/Claude/Codex/Gemini/Amp/ACP handoffs.
+ * harnest - Pi extension bridging this session to durable OpenCode/Pi/Cursor/Claude/Codex/Amp/ACP handoffs.
  *
  * Registers:
  *   - tools handoff_*          : same surface as the Claude/Codex/OpenCode MCP server
@@ -32,7 +32,7 @@ const callDaemon = async (name, args, key) => {
   catch (error) { readiness = null; throw error; }
 };
 
-const READ_ONLY_TARGETS = ["pi", "cursor", "claude", "codex", "gemini"];
+const READ_ONLY_TARGETS = ["pi", "cursor", "claude", "codex"];
 
 // Bounded local truncation (no new runtime imports): tool outputs must stay
 // small; the full trace always remains pageable via handoff_trace.
@@ -216,12 +216,10 @@ const HandoffRouteSchema = Type.Object({
 const ExactToolNames = Type.Array(Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_.-]*$" }));
 const HandoffPolicySchema = Type.Object({
   write: Type.Optional(Type.Boolean({ description: "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true." })),
-  readOnly: Type.Optional(Type.Boolean({ description: "Legacy alias for !write; must not contradict write or allowWrites." })),
-  allowWrites: Type.Optional(Type.Boolean({ description: "Legacy alias for write; must not contradict write or readOnly." })),
   tools: Type.Optional(Type.Union([
     Type.Array(Type.String({ minLength: 1 })),
     Type.Object({ allow: Type.Optional(ExactToolNames), deny: Type.Optional(ExactToolNames) }, { additionalProperties: false, minProperties: 1 }),
-  ], { description: "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi supports deny only. OpenCode delegates tool permissions to its server." })),
+  ], { description: "Legacy list or exact native allow and deny names. Claude print supports both lists. Pi supports deny only. OpenCode delegates tool permissions to its server." })),
   mode: Type.Optional(Type.Literal("plan", { description: "Cursor print only. Selects read-only plan mode regardless of write authorization." })),
   sandbox: Type.Optional(Type.Boolean({ description: "Cursor print only. True enables native isolation. False is rejected." })),
   maxCostUsd: Type.Optional(Type.Number({ minimum: 0 })),
@@ -236,7 +234,7 @@ const HandoffMetadataSchema = Type.Object({
 
 const NativeExecutionFields = {
   sessionId: Type.Optional(Type.String({ description: "Resume token from a prior receipt." })),
-  addDirs: Type.Optional(Type.Array(Type.String({ maxLength: 1024 }), { maxItems: 8, description: "Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval." })),
+  addDirs: Type.Optional(Type.Array(Type.String({ maxLength: 1024 }), { maxItems: 8, description: "Existing absolute directories for Claude, Codex, or Cursor. Codex requires write policy. External write roots require confirmed write approval." })),
   attachments: Type.Optional(Type.Array(Type.Object({
     type: StringEnum(["image", "file"]),
     path: Type.String({ maxLength: 1024 }),
@@ -249,12 +247,11 @@ const NativeExecutionFields = {
 const RequestSchema = Type.Object({
   protocolVersion: Type.Optional(Type.Literal("1.0")),
   requestId: Type.String({ minLength: 1, description: "Stable caller-generated recovery key; required before any downstream work starts." }),
-  target: StringEnum(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"], { description: "Downstream harness that owns the whole run. Generic ACP requires route.agent and approved write policy." }),
+  target: StringEnum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"], { description: "Downstream harness that owns the whole run. Generic ACP requires route.agent and approved write policy." }),
   task: Type.String({ minLength: 1, description: "Exact task text for the downstream workflow." }),
   cwd: Type.String({ minLength: 1, description: "Absolute working directory for the run." }),
   context: Type.Optional(Type.Any({ description: "Context capsule; digest is computed and round-tripped." })),
   contextDigest: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })),
-  workflow: Type.Optional(Type.Any({ description: "Taskflow graph (null for a single leaf)." })),
   route: Type.Optional(HandoffRouteSchema),
   execution: Type.Optional(Type.Object({
     background: Type.Optional(Type.Boolean({ description: "Default true for long runs; poll status/trace then." })),
@@ -264,7 +261,7 @@ const RequestSchema = Type.Object({
   }, { additionalProperties: false })),
   policy: Type.Optional(HandoffPolicySchema),
   metadata: Type.Optional(HandoffMetadataSchema),
-}, { additionalProperties: false, description: "Complete Harnest request containing target, task, absolute cwd, context, workflow, route, execution, and policy." });
+}, { additionalProperties: false, description: "Complete Harnest request containing target, task, absolute cwd, context, route, execution, and policy." });
 
 const ReadOnlyRequestSchema = Type.Object({
   ...RequestSchema.properties,
@@ -292,7 +289,7 @@ const GraphSchema = Type.Object({
   }, { additionalProperties: false })),
   nodes: Type.Array(Type.Object({
     id: Type.String({ minLength: 1, maxLength: 64, pattern: NODE_ID_PATTERN }),
-    target: StringEnum(["auto", "pi", "claude", "codex", "opencode", "cursor", "gemini", "amp", "acp"]),
+    target: StringEnum(["auto", "pi", "claude", "codex", "opencode", "cursor", "amp", "acp"]),
     task: Type.String({ minLength: 1 }),
     dependsOn: Type.Optional(Type.Array(Type.String({ pattern: NODE_ID_PATTERN }), { maxItems: 256 })),
     route: Type.Optional(HandoffRouteSchema),
@@ -771,7 +768,7 @@ export default function harnestExtension(pi) {
     name: "handoff_workflow",
     label: "Hand off workflow",
     description:
-      "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is write-only and accepts advertised model, variant, and options controls after route.agent selects a trusted registration. ACP rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. Use explicit tool lists with Claude print or Gemini, deny only with Pi, and plan or sandbox controls with Cursor print. OpenCode delegates tool permissions to its server. Use execution.background=true for durable status/result retrieval. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
+      "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is write-only and accepts advertised model, variant, and options controls after route.agent selects a trusted registration. ACP rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. Use explicit tool lists with Claude print, deny only with Pi, and plan or sandbox controls with Cursor print. OpenCode delegates tool permissions to its server. Use execution.background=true for durable status/result retrieval. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
     promptSnippet: "Delegate a whole workflow to a downstream harness via handoff_workflow",
     promptGuidelines: [
       "Use handoff_workflow with execution.background=true when the task runs longer than one turn; then poll handoff_status and handoff_trace, and finish with handoff_result.",
@@ -897,7 +894,7 @@ export default function harnestExtension(pi) {
     parameters: Type.Object({
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })),
       state: Type.Optional(StringEnum(["queued", "running", "completed", "failed", "cancelled", "partial"])),
-      target: Type.Optional(StringEnum(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"])),
+      target: Type.Optional(StringEnum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"])),
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
@@ -909,7 +906,7 @@ export default function harnestExtension(pi) {
     name: "handoff_message",
     label: "Steer handoff",
     description:
-      "Durably steer the next agent step (delivery=steer) or queue a follow-up (delivery=follow_up). Only applied counts as acknowledged. One-shot targets (Cursor, Claude print mode, Codex exec, Gemini, Amp, generic ACP) reject this as unsupported-control.",
+      "Durably steer the next agent step (delivery=steer) or queue a follow-up (delivery=follow_up). Only applied counts as acknowledged. One-shot targets (Cursor, Claude print mode, Codex exec, Amp, generic ACP) reject this as unsupported-control.",
     promptSnippet: "Steer a running handoff via handoff_message",
     promptGuidelines: [
       "Use handoff_message with a fresh commandId per guidance; treat only applied as acknowledged and never reuse a commandId.",
@@ -1065,7 +1062,7 @@ export default function harnestExtension(pi) {
     parameters: Type.Object({
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })),
       state: Type.Optional(StringEnum(["queued", "running", "completed", "failed", "cancelled", "partial"])),
-      target: Type.Optional(StringEnum(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"])),
+      target: Type.Optional(StringEnum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"])),
       recent: Type.Optional(Type.Number({ minimum: 0, maximum: 10 })),
     }),
     async execute(_id, params, signal) {
@@ -1110,7 +1107,7 @@ export default function harnestExtension(pi) {
         },
         writeApproval: {
           marker: "metadata.harnest.writeApproved=true",
-          appliesTo: "write-capable handoff_workflow and handoff_graph_start calls on guarded hosts, including policy.write=true, policy.readOnly=false, and policy.allowWrites=true",
+          appliesTo: "write-capable handoff_workflow and handoff_graph_start calls on guarded hosts with policy.write=true",
           scope: "The lead confirms the intended write scope before setting the marker; there is no separate writeScope protocol field.",
         },
         nestedHandoffs: "A nested handoff remains subject to the child host's approval and sandbox restrictions and cannot widen them.",
@@ -1120,7 +1117,6 @@ export default function harnestExtension(pi) {
           cursor: "oneshot rejects live controls; session uses ACP cancel/model negotiation, not mid-turn messaging",
           claude: "oneshot rejects live controls; session uses SDK streaming guidance with consumption evidence",
           codex: "oneshot rejects live controls; session uses app-server turn/steer and owned queued follow-ups",
-          gemini: "oneshot rejects live controls; session transport is unsupported",
           amp: "oneshot rejects live controls; session transport is unsupported",
           acp: "generic attached ACP supports cancellation only; message and reroute controls are unsupported",
         },

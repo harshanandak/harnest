@@ -30,7 +30,7 @@ export const TIER_NAMES = Object.freeze(Object.keys(TIERS));
 const POLICY_FIELDS = new Set(["defaults", "candidates", "rules", "mode", "weights", "route", "require", "prefer", "avoid", "target", "maxCostUsd", "deadlineMs", "contextTokens", "tier", "harnessOrder", "models", "difficulty", "allowOpenRouter", "allowTrainingEndpoints", "fallbacks", "modelVersion"]);
 const DIRECTIVE_FIELDS = new Set(["mode", "weights", "route", "require", "prefer", "avoid", "target", "maxCostUsd", "deadlineMs", "contextTokens", "tier", "harnessOrder", "models", "difficulty", "allowOpenRouter", "allowTrainingEndpoints", "fallbacks", "modelVersion"]);
 const RULE_FIELDS = new Set(["id", "priority", "when", "apply"]);
-const WHEN_FIELDS = new Set(["taskAny", "taskAll", "target", "provider", "model", "write", "hasWorkflow", "sessionId", "minContextTokens", "maxContextTokens", "metadata", "tier", "difficulty"]);
+const WHEN_FIELDS = new Set(["taskAny", "taskAll", "target", "provider", "model", "write", "sessionId", "minContextTokens", "maxContextTokens", "metadata", "tier", "difficulty"]);
 export const DIFFICULTIES = Object.freeze(["trivial", "bounded", "hard"]);
 // Free/contributor endpoints (e.g. *-contributor, *-free) may train vendor
 // models on prompts/completions. Never matched by accident: only an explicit
@@ -56,9 +56,9 @@ export function defaultThinking(tier, difficulty) {
 }
 const CANDIDATE_FIELDS = new Set(["id", "target", "route", "scores", "model", "harness", "subsidy", "capabilities", "health", "tags", "available", "costUsd", "latencyMs", "priority"]);
 const ROUTE_FIELDS = new Set(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serviceTier", "profile", "options"]);
-const REQUIRE_FIELDS = new Set(["liveControl", "taskflow", "provider", "minContextTokens", "computerUse"]);
+const REQUIRE_FIELDS = new Set(["liveControl", "provider", "minContextTokens", "computerUse"]);
 const PREFERENCE_FIELDS = new Set(["ids", "targets", "providers", "models", "tags"]);
-const CAPABILITY_FIELDS = new Set(["readOnly", "write", "taskflow", "liveControl", "maxContextTokens", "computerUse", "thinking"]);
+const CAPABILITY_FIELDS = new Set(["readOnly", "write", "liveControl", "maxContextTokens", "computerUse", "thinking"]);
 const MODEL_FIELDS = new Set(["intelligence", "taste", "speed", "costEff", "decisiveness"]);
 const HARNESS_MOD_FIELDS = new Set(["speedMod", "efficiencyMod"]);
 const HEALTH_FIELDS = new Set(["status", "retryAfter", "headroom", "source"]);
@@ -190,7 +190,7 @@ function normalizeCandidate(raw, scope, index, previous = null) {
   if (has(raw, "capabilities")) {
     requireObject(raw.capabilities, `${label}.capabilities`);
     rejectUnknown(raw.capabilities, CAPABILITY_FIELDS, `${label}.capabilities`);
-    for (const key of ["readOnly", "write", "taskflow", "liveControl", "computerUse"]) {
+    for (const key of ["readOnly", "write", "liveControl", "computerUse"]) {
       if (has(raw.capabilities, key) && typeof raw.capabilities[key] !== "boolean") throw new TypeError(`${label}.capabilities.${key} must be a boolean`);
     }
     if (has(raw.capabilities, "maxContextTokens")) requireNumber(raw.capabilities.maxContextTokens, `${label}.capabilities.maxContextTokens`, { min: 0 });
@@ -278,7 +278,6 @@ function ruleMatches(rule, request, contextTokens) {
   if (when.provider != null && when.provider !== request.route?.provider) return false;
   if (when.model != null && when.model !== request.route?.model) return false;
   if (when.write != null && Boolean(when.write) !== request.policy.write) return false;
-  if (when.hasWorkflow != null && Boolean(when.hasWorkflow) !== Boolean(request.workflow)) return false;
   if (when.sessionId != null && when.sessionId !== request.execution.sessionId) return false;
   if (when.tier != null && when.tier !== request.metadata?.routing?.tier) return false;
   if (when.difficulty != null && when.difficulty !== request.metadata?.routing?.difficulty) return false;
@@ -328,7 +327,7 @@ function validateDirective(value, label) {
   if (has(value, "require")) {
     requireObject(value.require, `${label}.require`);
     rejectUnknown(value.require, REQUIRE_FIELDS, `${label}.require`);
-    for (const key of ["liveControl", "taskflow", "computerUse"]) {
+    for (const key of ["liveControl", "computerUse"]) {
       if (has(value.require, key) && typeof value.require[key] !== "boolean") throw new TypeError(`${label}.require.${key} must be a boolean`);
     }
     if (has(value.require, "provider")) requireString(value.require.provider, `${label}.require.provider`);
@@ -349,9 +348,7 @@ function validateWhen(value, label) {
   for (const key of ["target", "provider", "model", "sessionId"]) if (has(value, key)) requireString(value[key], `${label}.${key}`);
   if (has(value, "tier") && !TIER_NAMES.includes(value.tier)) throw new TypeError(`${label}.tier must be one of ${TIER_NAMES.join(", ")}`);
   if (has(value, "difficulty") && !DIFFICULTIES.includes(value.difficulty)) throw new TypeError(`${label}.difficulty must be one of ${DIFFICULTIES.join(", ")}`);
-  for (const key of ["write", "hasWorkflow"]) {
-    if (has(value, key) && typeof value[key] !== "boolean") throw new TypeError(`${label}.${key} must be a boolean`);
-  }
+  if (has(value, "write") && typeof value.write !== "boolean") throw new TypeError(`${label}.write must be a boolean`);
   for (const key of ["minContextTokens", "maxContextTokens"]) if (has(value, key)) requireNumber(value[key], `${label}.${key}`, { min: 0 });
   if (has(value, "metadata")) {
     requireObject(value.metadata, `${label}.metadata`);
@@ -431,7 +428,7 @@ function explicitMatches(requestRoute, candidate) {
 function rejectionReasons(candidate, request, directive, contextTokens, now, openCodeServerUrl) {
   const reasons = [
     ...adapterRouteRejectionReasons(candidate.target, candidate.route),
-    ...adapterPolicyRejectionReasons(candidate.target, request.policy, request.execution, request.workflow),
+    ...adapterPolicyRejectionReasons(candidate.target, request.policy, request.execution),
   ];
   const capabilities = candidate.capabilities;
   const health = candidate.health;
@@ -445,7 +442,6 @@ function rejectionReasons(candidate, request, directive, contextTokens, now, ope
   if (directive.target && candidate.target !== directive.target) reasons.push("target");
   if (request.policy.write && capabilities.write !== true) reasons.push("write");
   if (!request.policy.write && capabilities.readOnly === false && !reasons.includes("read-only")) reasons.push("read-only");
-  if (request.workflow && capabilities.taskflow === false) reasons.push("taskflow");
   if (directive.require.liveControl === true && (capabilities.liveControl !== true
     || (candidate.target === "opencode" && openCodeUsesSharedService({ ...request, route: candidate.route }, openCodeServerUrl)))) reasons.push("live-control");
   if (directive.require.computerUse === true && capabilities.computerUse !== true) reasons.push("computer-use");
@@ -457,7 +453,6 @@ function rejectionReasons(candidate, request, directive, contextTokens, now, ope
     && Array.isArray(capabilities.thinking) && !capabilities.thinking.includes(wantedThinking)) {
     reasons.push("thinking-level");
   }
-  if (directive.require.taskflow === true && capabilities.taskflow !== true) reasons.push("taskflow-required");
   if (directive.require.provider && candidate.route.provider !== directive.require.provider) reasons.push("provider");
   // OpenRouter billing gate: subscriptions are always cheaper than OpenRouter
   // API billing, so an OpenRouter-backed lane is eligible ONLY on explicit
@@ -622,7 +617,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
     ? defaultThinking(directive.tier, directive.difficulty)
     : null;
   const derivedThinkingAllowed = (target, capabilities) =>
-    !["cursor", "gemini", "amp", "acp"].includes(target)
+    !["cursor", "amp", "acp"].includes(target)
     && (!Array.isArray(capabilities?.thinking) || capabilities.thinking.includes(thinkingDefault));
   const withThinking = (route, target, capabilities) =>
     thinkingDefault && route.thinking == null && derivedThinkingAllowed(target, capabilities)
@@ -662,21 +657,21 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
   if (hasNativeRouteControls(request.target, request.route) && request.target !== "auto") {
     const route = withThinking(mergeObject(directive.route, request.route), request.target);
     assertAdapterRoute(request.target, route);
-    assertAdapterPolicy(request.target, request.policy, request.execution, request.workflow);
+    assertAdapterPolicy(request.target, request.policy, request.execution);
     assertLiveControl(request.target, route);
     return { target: request.target, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (mode === "pin" || (hasExplicitRoute(request) && mode !== "auto" && mode !== "prefer")) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
-    assertAdapterPolicy(pinTarget, request.policy, request.execution, request.workflow);
+    assertAdapterPolicy(pinTarget, request.policy, request.execution);
     assertLiveControl(pinTarget, route);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (hasExplicitRoute(request) && request.metadata?.routing?.mode == null) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
-    assertAdapterPolicy(pinTarget, request.policy, request.execution, request.workflow);
+    assertAdapterPolicy(pinTarget, request.policy, request.execution);
     assertLiveControl(pinTarget, route);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
@@ -717,12 +712,12 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
       ...(request.route?.thinking != null ? { thinking: request.route.thinking } : {}),
     }, fallbackTarget);
     assertAdapterRoute(fallbackTarget, route);
-    assertAdapterPolicy(fallbackTarget, request.policy, request.execution, request.workflow);
+    assertAdapterPolicy(fallbackTarget, request.policy, request.execution);
     assertLiveControl(fallbackTarget, route);
     const incompatible = rejected.filter((entry) => !entry.reasons.includes("target")
       && entry.reasons.some((reason) => [
-        "claude-model", "thinking-control", "gemini-provider", "gemini-model", "gemini-route-control",
-        "amp-route-control", "amp-variant", "acp-route-control", "opencode-version", "native-route-control", "granular-tools", "taskflow-tools", "cost-budget", "read-only",
+        "claude-model", "thinking-control",
+        "amp-route-control", "amp-variant", "acp-route-control", "opencode-version", "native-route-control", "granular-tools", "cost-budget", "read-only",
       ].includes(reason)));
     if (incompatible.length) {
       throw Object.assign(new Error(`no adapter-compatible routing candidate: ${[...new Set(incompatible.flatMap((entry) => entry.reasons))].join(", ")}`), {
@@ -737,7 +732,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
   }
   const finalTarget = preferredTarget || selected.candidate.target;
   const configuredRoute = selected.candidate.route;
-  assertAdapterPolicy(finalTarget, request.policy, request.execution, request.workflow);
+  assertAdapterPolicy(finalTarget, request.policy, request.execution);
   return {
     target: finalTarget,
     route: configuredRoute,

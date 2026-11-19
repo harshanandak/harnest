@@ -86,32 +86,18 @@ test("normalization requires a caller-owned recovery ID", () => {
   );
 });
 
-test("policy aliases readOnly/allowWrites are accepted when unambiguous and rejected when contradictory", () => {
-  const base = { requestId: "policy-alias-request", target: "pi", task: "test", cwd: process.cwd() };
-  // alias-only: readOnly:false => write:true
-  assert.equal(normalizeRequest({ ...base, policy: { readOnly: false } }).policy.write, true);
-  // alias-only: readOnly:true => write:false
-  assert.equal(normalizeRequest({ ...base, policy: { readOnly: true } }).policy.write, false);
-  // alias-only: allowWrites:true => write:true
-  assert.equal(normalizeRequest({ ...base, policy: { allowWrites: true } }).policy.write, true);
-  // alias-only: allowWrites:false => write:false
-  assert.equal(normalizeRequest({ ...base, policy: { allowWrites: false } }).policy.write, false);
-  // both aliases agreeing => accepted
-  assert.equal(normalizeRequest({ ...base, policy: { readOnly: true, allowWrites: false } }).policy.write, false);
-  assert.equal(normalizeRequest({ ...base, policy: { readOnly: false, allowWrites: true } }).policy.write, true);
-  // alias contradicting explicit write => reject
-  assert.throws(() => normalizeRequest({ ...base, policy: { write: true, readOnly: true } }), /contradict/);
-  assert.throws(() => normalizeRequest({ ...base, policy: { write: false, allowWrites: true } }), /contradict/);
-  assert.throws(() => normalizeRequest({ ...base, policy: { write: true, allowWrites: false } }), /contradict/);
-  // contradictory aliases => reject
-  assert.throws(() => normalizeRequest({ ...base, policy: { readOnly: true, allowWrites: true } }), /contradict/);
-  assert.throws(() => normalizeRequest({ ...base, policy: { readOnly: false, allowWrites: false } }), /contradict/);
+test("policy.write is boolean and defaults to false", () => {
+  const base = { requestId: "write-policy", target: "pi", task: "test", cwd: process.cwd() };
+  assert.equal(normalizeRequest(base).policy.write, false);
+  assert.equal(normalizeRequest({ ...base, policy: { write: true } }).policy.write, true);
+  assert.throws(() => normalizeRequest({ ...base, policy: { write: "true" } }), /policy\.write must be a boolean/);
 });
 
-test("legacy aliases are not silently ignored to read-only", () => {
-  const base = { requestId: "policy-alias-not-ignored", target: "opencode", task: "test", cwd: process.cwd(), route: { model: "openai/gpt-test" } };
-  const withAlias = normalizeRequest({ ...base, policy: { allowWrites: true, tools: ["write"] } });
-  assert.equal(withAlias.policy.write, true, "allowWrites:true must not normalize to read-only");
+test("single handoff requests reject a workflow field", () => {
+  const base = { requestId: "prompt-only", target: "pi", task: "test", cwd: process.cwd() };
+  for (const workflow of [{ spec: {} }, { nodes: [] }, null]) {
+    assert.throws(() => normalizeRequest({ ...base, workflow }), /request\.workflow is unsupported/);
+  }
 });
 
 test("explicit tool lists retain their meaning through request normalization", () => {
@@ -126,13 +112,13 @@ test("explicit tool lists retain their meaning through request normalization", (
 
 test("Cursor policy controls have strict shapes and reject other targets or session transport", () => {
   const base = { requestId: "cursor-controls", target: "cursor", task: "test", cwd: process.cwd() };
-  assert.deepEqual(normalizeRequest({ ...base, policy: { readOnly: true, mode: "plan", sandbox: true } }).policy, {
+  assert.deepEqual(normalizeRequest({ ...base, policy: { write: false, mode: "plan", sandbox: true } }).policy, {
     write: false, tools: [], mode: "plan", sandbox: true, maxCostUsd: null,
   });
   assert.throws(() => normalizeRequest({ ...base, policy: { mode: "agent" } }), /policy\.mode must be plan/);
   assert.throws(() => normalizeRequest({ ...base, policy: { sandbox: "enabled" } }), /policy\.sandbox must be a boolean/);
   for (const policy of [{ mode: "plan" }, { sandbox: true }]) {
-    for (const target of ["claude", "codex", "pi", "opencode", "gemini", "amp", "acp"]) {
+    for (const target of ["claude", "codex", "pi", "opencode", "amp", "acp"]) {
       assert.throws(() => normalizeRequest({ ...base, target, policy }), /only by Cursor print mode/);
     }
     assert.throws(() => normalizeRequest({ ...base, execution: { transport: "session" }, policy }), /only by Cursor print mode/);
@@ -147,7 +133,7 @@ test("normalization rejects unsupported route and policy keys with the accepted 
   );
   assert.throws(
     () => normalizeRequest({ ...base, policy: { permissions: "write" } }),
-    /policy\.permissions is unsupported; expected one of write, readOnly, allowWrites, tools, maxCostUsd, mode, sandbox/,
+    /policy\.permissions is unsupported; expected one of write, tools, maxCostUsd, mode, sandbox/,
   );
 });
 

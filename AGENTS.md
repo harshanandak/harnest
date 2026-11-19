@@ -7,7 +7,7 @@ This repository implements durable handoffs and mixed-harness agent graphs. Each
 1. Read `README.md` for supported user flows.
 2. Read `docs/architecture.md` before changing boundaries or persistence.
 3. Read `docs/adapter-contract.md` before changing an adapter.
-4. Run `npm test`, `npm run smoke:mcp`, and the plugin validator before reporting completion.
+4. Run `bun run test`, `bun run smoke:mcp`, and the plugin validator before reporting completion.
 
 ## Invariants
 
@@ -25,7 +25,7 @@ The premium lead remains the planning, review, and integration owner.
 
 ## Durable handoffs (Codex)
 
-- For off-host work needing a visible child thread, spawn the matching worker (`opencode_worker`, `pi_worker`, `cursor_worker`, `claude_worker`, `gemini_worker`, `amp_worker`, `acp_worker`); otherwise call `handoff_workflow` directly as an MCP tool. Use the single generic `acp_worker` only for an explicitly trusted registered agent and approved write-capable work. Codex entry is `$handoff`, not a slash command. There is deliberately no `codex_worker` for Codex-to-Codex self-handoff — call the tool directly instead. (Claude and OpenCode leads do have `codex-worker` bridges for handing work TO Codex.)
+- For off-host work needing a visible child thread, spawn the matching worker (`opencode_worker`, `pi_worker`, `cursor_worker`, `claude_worker`, `amp_worker`, `acp_worker`); otherwise call `handoff_workflow` directly as an MCP tool. Use the single generic `acp_worker` only for an explicitly trusted registered agent and approved write-capable work. Codex entry is `$handoff`, not a slash command. There is deliberately no `codex_worker` for Codex-to-Codex self-handoff — call the tool directly instead. (Claude and OpenCode leads do have `codex-worker` bridges for handing work TO Codex.)
 - Bridges are thin forwarders: one handoff call, poll `handoff_trace` with `afterSequence`, return the receipt verbatim.
 - Cap fan-out at 6 concurrent workers unless `.codex/config.toml` raises `agents.max_concurrent_threads_per_session`.
 - Codex plugins cannot bundle agents: run `scripts/install-native-agents.ps1` (or `.sh`, or `-Project`) after plugin install, then restart Codex.

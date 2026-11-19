@@ -79,8 +79,8 @@ test("ACP is opt-in, write-only, agent-selected, and rejects unimplemented route
     request({ route: {} }),
     request({ policy: { write: false } }),
     request({ route: { agent: "fixture", provider: "invented" } }),
-    request({ workflow: { spec: {} } }),
   ]) assert.throws(() => normalizeRequest(bad), /ACP|acp/i);
+  assert.throws(() => normalizeRequest(request({ workflow: { spec: {} } })), /request.workflow is unsupported/);
 
   assert.deepEqual(adapterRouteRejectionReasons("acp", { agent: "fixture" }), []);
   const controls = { agent: "fixture", model: "native-model", variant: "native-mode", options: { review: false } };
@@ -144,7 +144,7 @@ test("routing keeps ACP out of bare auto and preserves route.agent as the regist
       target: "acp",
       route: { agent: "fixture" },
       scores: { quality: 5, speed: 5, efficiency: 5, reliability: 5 },
-      capabilities: { readOnly: false, write: true, taskflow: false, liveControl: false },
+      capabilities: { readOnly: false, write: true, liveControl: false },
     }],
   } }], { now: () => 0 });
   assert.equal(decision.target, "acp");

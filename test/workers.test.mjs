@@ -14,16 +14,15 @@ const agentsDir = join(root, "agents");
 const codexDir = join(root, "codex-agents");
 const opencodeDir = join(root, "opencode-agents");
 
-const TARGETS = ["pi", "opencode", "cursor", "claude", "codex", "gemini", "amp", "acp"];
-const OPENCODE_COLOR = { pi: "accent", opencode: "info", cursor: "accent", claude: "accent", codex: "accent", gemini: "accent", amp: "accent", acp: "accent" };
-const OPENCODE_STEPS = { pi: 120, opencode: 120, cursor: 60, claude: 60, codex: 60, gemini: 60, amp: 60, acp: 60 };
+const TARGETS = ["pi", "opencode", "cursor", "claude", "codex", "amp", "acp"];
+const OPENCODE_COLOR = { pi: "accent", opencode: "info", cursor: "accent", claude: "accent", codex: "accent", amp: "accent", acp: "accent" };
+const OPENCODE_STEPS = { pi: 120, opencode: 120, cursor: 60, claude: 60, codex: 60, amp: 60, acp: 60 };
 const VERIFY = {
   pi: "Pi session or workflow identity",
   opencode: "OpenCode session or workflow identity",
   cursor: "Cursor session/workflow identity",
   claude: "Claude session/workflow identity",
   codex: "Codex session/workflow identity",
-  gemini: "Gemini session/workflow identity",
   amp: "Amp session/workflow identity",
   acp: "ACP agent and native session identity",
 };
@@ -73,7 +72,7 @@ for (const key of TARGETS) {
   });
 }
 
-for (const key of ["pi", "opencode", "cursor", "claude", "gemini", "amp", "acp"]) {
+for (const key of ["pi", "opencode", "cursor", "claude", "amp", "acp"]) {
   test(`codex-agents/${key}_worker.toml matches its Claude shell`, async () => {
     const toml = await readFile(join(codexDir, `${key}_worker.toml`), "utf8");
     const md = await readFile(join(agentsDir, `${key}-worker.md`), "utf8");
@@ -105,12 +104,12 @@ for (const key of ["pi", "opencode", "cursor", "claude", "gemini", "amp", "acp"]
 }
 
 test("one-shot targets steer via resume in both shells, live targets via message", async () => {
-  for (const key of ["cursor", "claude", "codex", "gemini", "amp", "acp"]) {
+  for (const key of ["cursor", "claude", "codex", "amp", "acp"]) {
     const md = await readFile(join(agentsDir, `${key}-worker.md`), "utf8");
     assert.match(md, /fail closed as unsupported-control/);
     assert.match(md, /resume it as a follow-up with execution\.sessionId/);
   }
-  for (const key of ["cursor", "claude", "gemini", "amp", "acp"]) {
+  for (const key of ["cursor", "claude", "amp", "acp"]) {
     const toml = await readFile(join(codexDir, `${key}_worker.toml`), "utf8");
     assert.match(toml, /fail closed as unsupported-control/);
     assert.match(toml, /resume it as a follow-up with execution\.sessionId/);
@@ -122,7 +121,7 @@ test("one-shot targets steer via resume in both shells, live targets via message
 });
 
 test("new one-shot targets reject persistent session transport instead of weakening the request", async () => {
-  for (const key of ["gemini", "amp", "acp"]) {
+  for (const key of ["amp", "acp"]) {
     for (const path of [join(agentsDir, `${key}-worker.md`), join(codexDir, `${key}_worker.toml`), join(opencodeDir, `${key}-worker.md`)]) {
       const raw = await readFile(path, "utf8");
       assert.match(raw, /execution\.transport=session.*unsupported/i, `${key} must reject session transport`);
@@ -142,19 +141,11 @@ test("generic ACP workers preserve selection, trust, and write-only boundaries",
     assert.match(raw, /not.*read-only guarantee/i);
     assert.match(raw, /Native authentication remains native/i);
     assert.match(raw, /Unsupported negotiated capabilities or client callbacks fail explicitly/i);
-    assert.doesNotMatch(raw, /Devin,.*Gemini|agent list|known agents/i, "generic worker must not carry a registry-agent allowlist");
+    assert.doesNotMatch(raw, /agent list|known agents/i, "generic worker must not carry a registry-agent allowlist");
   }
 });
 
-test("Gemini and Amp workers preserve the approved native policy contracts", async () => {
-  for (const path of [join(agentsDir, "gemini-worker.md"), join(codexDir, "gemini_worker.toml"), join(opencodeDir, "gemini-worker.md")]) {
-    const raw = await readFile(path, "utf8");
-    assert.match(raw, /exactly Gemini CLI v0\.62\.0/);
-    assert.match(raw, /fixed safe read-tool allowlist and excludes shell and writes/);
-    assert.match(raw, /run_shell_command for build\/test plus write_file and replace/);
-    assert.match(raw, /Unknown tools, plan exit, MCP, extensions, and hooks stay denied/);
-    assert.match(raw, /not a filesystem sandbox or read boundary/);
-  }
+test("Amp workers preserve the approved native policy contracts", async () => {
   for (const path of [join(agentsDir, "amp-worker.md"), join(codexDir, "amp_worker.toml"), join(opencodeDir, "amp-worker.md")]) {
     const raw = await readFile(path, "utf8");
     assert.match(raw, /policy\.write=true with empty tools and null maxCostUsd/);
@@ -213,7 +204,7 @@ for (const key of TARGETS) {
 }
 
 test("opencode shell steers one-shot targets via resume, live targets via message", async () => {
-  for (const key of ["cursor", "claude", "codex", "gemini", "amp", "acp"]) {
+  for (const key of ["cursor", "claude", "codex", "amp", "acp"]) {
     const raw = await readFile(join(opencodeDir, `${key}-worker.md`), "utf8");
     assert.match(raw, /fail closed as `unsupported-control`/);
     assert.match(raw, /resume it as a follow-up with execution\.sessionId/);
@@ -236,7 +227,7 @@ test("builder regenerates all worker files identically (no hand edits)", async (
   const files = [
     ...TARGETS.map((key) => join(agentsDir, `${key}-worker.md`)),
     join(agentsDir, "workflow-rescue.md"),
-    ...["pi", "opencode", "cursor", "claude", "gemini", "amp", "acp"].map((key) => join(codexDir, `${key}_worker.toml`)),
+    ...["pi", "opencode", "cursor", "claude", "amp", "acp"].map((key) => join(codexDir, `${key}_worker.toml`)),
     ...TARGETS.map((key) => join(opencodeDir, `${key}-worker.md`)),
   ];
   const before = await Promise.all(files.map((file) => readFile(file, "utf8")));

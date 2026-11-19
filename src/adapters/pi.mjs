@@ -1,8 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { attachmentMimeType, executionError, readAttachment, validateAdapterExecution } from "../execution-controls.mjs";
@@ -18,7 +17,7 @@ import {
 import { normalizePolicyControls } from "../protocol.mjs";
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
-import { isClaudeRoute, assertNoClaudeWorkflow } from "../model-policy.mjs";
+import { isClaudeRoute } from "../model-policy.mjs";
 export { isClaudeRoute } from "../model-policy.mjs";
 
 const DEFAULT_TIMEOUT_MS = 3_600_000;
@@ -48,8 +47,7 @@ function diagnostic(value) {
 
 function retainedState(value) {
   if (!isObject(value)) return null;
-  // Taskflow state contains phase transcripts. Only identity, route, status and
-  // usage are needed after the event has been delivered to onProgress.
+  // Retain identity, route, status and usage after delivering progress.
   return Object.fromEntries(["sessionId", "model", "thinkingLevel", "workflowRunId", "runId", "status", "totalUsage", "usage"]
     .filter((key) => value[key] !== undefined).map((key) => [key, value[key]]));
 }
@@ -60,48 +58,6 @@ export class PiAdapterError extends Error {
     this.name = "PiAdapterError";
     this.details = { kind, ...details };
   }
-}
-
-/**
- * Taskflow is an optional compatibility path for explicit workflow.spec /
- * workflow.nodes requests. Resolve it only for those requests so a plain Pi
- * task never requires the package to be installed.
- */
-export function resolveTaskflowExtensionPath(override) {
-  if (typeof override === "string" && override.trim()) return override;
-  let cause;
-  try {
-    return fileURLToPath(import.meta.resolve("pi-taskflow"));
-  } catch (error) {
-    cause = error;
-  }
-  if (cause?.code === "ERR_MODULE_NOT_FOUND") {
-    throw new PiAdapterError(
-      "Pi Taskflow compatibility requires the optional pi-taskflow package",
-      "missing-optional-dependency",
-      {
-        dependency: "pi-taskflow",
-        hint: "install optional dependencies (npm install --include=optional) or npm install pi-taskflow@0.2.10",
-        cause: boundedProviderText(cause?.message || String(cause)),
-      },
-    );
-  }
-  if (cause?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED") {
-    throw new PiAdapterError(
-      "The installed pi-taskflow does not expose its extension entry (expected 0.2.10)",
-      "missing-optional-dependency",
-      {
-        dependency: "pi-taskflow",
-        hint: "install the pinned version: npm install pi-taskflow@0.2.10",
-        cause: boundedProviderText(cause?.message || String(cause)),
-      },
-    );
-  }
-  throw new PiAdapterError(
-    `Pi Taskflow extension resolution failed: ${boundedProviderText(cause?.message || String(cause))}`,
-    "downstream",
-    { dependency: "pi-taskflow", cause: boundedProviderText(cause?.message || String(cause)) },
-  );
 }
 
 // Claude models run only in the Claude Code CLI (target "claude"). Pi must
@@ -162,11 +118,6 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function safeFlowFileName(name) {
-  const safe = String(name).replace(/[^\w.-]+/g, "_").replace(/^\.+/, "_");
-  return safe || "_";
-}
-
 function routeArgs(route = {}) {
   const args = [];
   if (typeof route.provider === "string" && route.provider.trim()) {
@@ -181,102 +132,6 @@ function routeArgs(route = {}) {
   return args;
 }
 
-function taskflowDefinition(workflow, request) {
-  const nodes = Array.isArray(workflow?.nodes)
-    ? workflow.nodes.filter((node) => isObject(node) && typeof node.id === "string")
-    : [];
-  if (!isObject(workflow?.spec) && !nodes.length) return null;
-  const definition = isObject(workflow?.spec)
-    ? structuredClone(workflow.spec)
-    : {
-      name: workflow?.name,
-      phases: nodes.map((node) => {
-        const dependsOn = Array.isArray(node.dependsOn) ? node.dependsOn.filter((id) => typeof id === "string") : [];
-        const upstream = dependsOn.length
-          ? `\n\nUpstream outputs:\n${dependsOn.map((id) => `{steps.${id}.output}`).join("\n")}`
-          : "";
-        return {
-          id: node.id,
-          type: node.type || "agent",
-          agent: node.agent || (request.policy?.write ? "executor" : "analyst"),
-          task: `${node.prompt || node.task || "Complete this workflow phase."}${upstream}`,
-          dependsOn,
-        };
-      }),
-    };
-  const phases = Array.isArray(definition.phases) ? definition.phases : [];
-  const dependedOn = new Set(phases.flatMap((phase) => Array.isArray(phase.dependsOn) ? phase.dependsOn : []));
-  const sinks = phases.filter((phase) => !dependedOn.has(phase.id));
-  if (sinks.length === 1 && !phases.some((phase) => phase.final)) sinks[0].final = true;
-  if (sinks.length > 1 && !phases.some((phase) => phase.final)) {
-    phases.push({
-      id: "harnest-final",
-      type: "reduce",
-      agent: "final-arbiter",
-      from: sinks.map((phase) => phase.id),
-      dependsOn: sinks.map((phase) => phase.id),
-      task: `Combine the upstream outputs into the required final completion envelope.\n${sinks.map((phase) => `{steps.${phase.id}.output}`).join("\n")}`,
-      final: true,
-    });
-  }
-  const requiredFields = Array.isArray(request.context?.requiredResultFields)
-    ? request.context.requiredResultFields.filter((field) => typeof field === "string")
-    : [];
-  if (requiredFields.length) {
-    for (const phase of phases.filter((item) => item.final)) {
-      phase.output = "json";
-      phase.expect = { type: "object", required: requiredFields };
-      phase.retry = phase.retry || { max: 1, backoffMs: 0 };
-    }
-  }
-  // Field order is a prompt-cache contract: stable context first, then the
-  // variable task, requestId and route. Identifiers that change per phase must
-  // not precede the shared context a provider prefix cache could reuse.
-  const capsule = JSON.stringify({
-    contextDigest: request.contextDigest,
-    context: request.context,
-    cwd: request.cwd,
-    policy: request.policy,
-    metadata: request.metadata,
-    task: request.task,
-    route: request.route,
-  });
-  const allowedTools = request.policy?.write
-    ? (request.policy.tools?.length ? request.policy.tools : ["read", "grep", "find", "ls", "bash", "edit", "write"])
-    : ["read", "grep", "find", "ls"];
-  for (const phase of phases) {
-    if (typeof phase.task === "string") phase.task = `${phase.task}\n\nHarnest context:\n${capsule}`;
-    if (request.route?.model) phase.model = request.route.model;
-    if (typeof request.route?.thinking === "string") phase.thinking = request.route.thinking;
-    phase.tools = allowedTools;
-  }
-  definition.phases = phases;
-  if (request.policy?.maxCostUsd != null) definition.budget = { maxUSD: request.policy.maxCostUsd };
-  const baseName = typeof workflow.name === "string" && workflow.name.trim()
-    ? workflow.name.trim()
-    : typeof definition.name === "string" && definition.name.trim()
-      ? definition.name.trim()
-      : `harnest-${request.requestId.slice(0, 12)}`;
-  const requestSlug = safeFlowFileName(request.requestId).slice(0, 32);
-  const requestHash = createHash("sha256").update(request.requestId).digest("hex").slice(0, 10);
-  const name = `${safeFlowFileName(baseName).slice(0, 80)}--${requestSlug}-${requestHash}`;
-  definition.name = name;
-  return { definition, name };
-}
-
-function taskflowArgs(request, workflow) {
-  const supplied = isObject(workflow?.args)
-    ? structuredClone(workflow.args)
-    : {};
-  return supplied;
-}
-
-function taskflowSlashArgs(request, workflow) {
-  return Object.entries(taskflowArgs(request, workflow))
-    .map(([key, value]) => `${key}=${typeof value === "string" && !/\s/.test(value) ? value : JSON.stringify(value)}`)
-    .join(" ");
-}
-
 // Field order is a prompt-cache contract: stable context first, then the
 // variable task, requestId and route. A provider prefix cache can only match
 // leading bytes, so identifiers that change per attempt must not lead.
@@ -284,7 +139,6 @@ function requestPrompt(request) {
   const envelope = {
     contextDigest: request.contextDigest,
     context: request.context,
-    workflow: request.workflow,
     policy: request.policy,
     metadata: request.metadata,
     task: request.task,
@@ -293,11 +147,11 @@ function requestPrompt(request) {
   };
   return [
     ...(request.context?.graph?.graphId && request.context?.graph?.nodeId ? [
-      "Execute this single agent-graph node directly. Harnest already owns dependency scheduling; do not invoke Taskflow or create a second workflow to perform this node.",
+      "Execute this single agent-graph node directly. Harnest already owns dependency scheduling; do not create a second workflow to perform this node.",
       "Use the attributed direct-dependency results in context.graph.upstream as data. Return this node's final answer, not another execution plan.",
     ] : [
       "Execute the assigned task directly in this session and return the final answer.",
-      "Do not invoke Taskflow or create a separate workflow for this task.",
+      "Do not create a separate workflow for this task.",
     ]),
     JSON.stringify(envelope),
   ].join("\n\n");
@@ -311,50 +165,6 @@ function killChild(child) {
   terminateProcessTree(child);
 }
 
-async function materializeFlow(request, definition, enabled) {
-  if (!enabled) return null;
-  const root = join(request.cwd, ".pi", "taskflows");
-  const filePath = join(root, `${safeFlowFileName(definition.name)}.json`);
-  const prior = await readFile(filePath).catch(() => null);
-  await mkdir(root, { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(definition, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(tempPath, filePath);
-  return async () => {
-    if (prior) {
-      const restorePath = `${filePath}.${process.pid}.${randomUUID()}.restore`;
-      await writeFile(restorePath, prior, { mode: 0o600 });
-      await rename(restorePath, filePath);
-    } else {
-      await rm(filePath, { force: true });
-      await rmdir(root).catch(() => undefined);
-      await rmdir(dirname(root)).catch(() => undefined);
-    }
-  };
-}
-
-function extractTaskflowResult(message) {
-  if (!message || typeof message !== "object") return null;
-  if (message.role !== "toolResult" && message.role !== "tool_result") return null;
-  const toolName = message.toolName ?? message.name;
-  if (toolName !== "taskflow") return null;
-  const details = isObject(message.details) ? message.details : null;
-  const state = retainedState(details?.state);
-  const finalOutput = typeof details?.finalOutput === "string" && details.finalOutput.trim()
-    ? details.finalOutput
-    : textFromMessage(message);
-  const output = retainedText(finalOutput);
-  return {
-    finalOutput: output.text,
-    outputOverflow: output.overflow,
-    hasFinalOutput: output.nonempty,
-    state,
-    workflowRunId: state?.runId ?? details?.runId ?? null,
-    isError: Boolean(message.isError),
-    details: diagnostic(details),
-  };
-}
-
 function usageFrom(state, stats) {
   if (stats && typeof stats === "object") return stats;
   if (state && typeof state === "object") {
@@ -364,7 +174,7 @@ function usageFrom(state, stats) {
 }
 
 class RpcRun {
-  constructor({ executable, args, cwd, env, spawnFn, signal, timeoutMs, onProgress, requestId, expectTaskflow, provider }) {
+  constructor({ executable, args, cwd, env, spawnFn, signal, timeoutMs, onProgress, requestId, provider }) {
     this.executable = executable;
     this.args = args;
     this.cwd = cwd;
@@ -374,7 +184,6 @@ class RpcRun {
     this.timeoutMs = timeoutMs;
     this.onProgress = onProgress;
     this.requestId = requestId;
-    this.expectTaskflow = expectTaskflow;
     this.provider = provider || null;
     this.child = null;
     this.stdoutBuffer = null;
@@ -397,7 +206,6 @@ class RpcRun {
     this.stats = null;
     this.lastAssistantText = null;
     this.assistantText = null;
-    this.taskflowResult = null;
     this.settled = false;
     this.terminalSeen = false;
     this.promptAccepted = false;
@@ -743,7 +551,7 @@ class RpcRun {
       this.send({ type: "get_session_stats", id: rpcCommandId(this.requestId, "usage") });
       if (this.settled) return;
       this.terminalFallbackTimer = setTimeout(() => {
-        if (!this.settled && (this.taskflowResult || this.lastAssistantText?.nonempty || this.assistantText?.nonempty)) {
+        if (!this.settled && (this.lastAssistantText?.nonempty || this.assistantText?.nonempty)) {
           this.finishTerminal();
         }
       }, 1_000);
@@ -785,11 +593,6 @@ class RpcRun {
 
   observeMessage(message) {
     if (this.settled) return;
-    const taskflow = extractTaskflowResult(message);
-    if (taskflow) {
-      this.taskflowResult = taskflow;
-      if (taskflow.state) this.state = { ...(this.state || {}), ...taskflow.state };
-    }
     if (message?.role === "assistant") {
       if (message.stopReason === "error" || message.errorMessage) {
         const reason = diagnostic(message.errorMessage) || "Pi model request failed";
@@ -833,39 +636,14 @@ class RpcRun {
       this.finishClose();
       return;
     }
-    const taskflow = this.taskflowResult;
-    if (this.expectTaskflow && !taskflow) {
-      this.finishReject(new PiAdapterError("Pi RPC settled without a taskflow terminal result", "downstream", {
-        terminal: true,
-        events: this.recentEvents,
-      }));
-      return;
-    }
-    if (this.expectTaskflow && taskflow?.state?.status !== "completed") {
-      this.finishReject(new PiAdapterError("Pi taskflow did not report completed state", "downstream", {
-        workflowRunId: taskflow.workflowRunId,
-        state: diagnostic(taskflow.state),
-        event: taskflow.details,
-      }));
-      return;
-    }
-    if (taskflow?.isError || (!this.expectTaskflow && taskflow?.state && taskflow.state.status !== "completed")) {
-      this.finishReject(new PiAdapterError(diagnostic(taskflow.finalOutput) || "Pi taskflow failed", "downstream", {
-        workflowRunId: taskflow.workflowRunId,
-        state: diagnostic(taskflow.state),
-        event: taskflow.details,
-      }));
-      return;
-    }
     const trailingAssistant = this.lastAssistantText?.nonempty
       ? this.lastAssistantText
       : this.assistantText?.nonempty ? this.assistantText : null;
-    const useTaskflow = (this.expectTaskflow || !trailingAssistant) && taskflow?.hasFinalOutput;
-    if (useTaskflow ? taskflow.outputOverflow : trailingAssistant?.overflow) {
+    if (trailingAssistant?.overflow) {
       this.finishReject(new PiAdapterError("Pi final output exceeds the retained protocol limit", "output-limit", { maxChars: MAX_PROTOCOL_TEXT_CHARS }));
       return;
     }
-    const finalText = useTaskflow ? taskflow.finalOutput : trailingAssistant?.text || "";
+    const finalText = trailingAssistant?.text || "";
     if (!finalText) {
       this.finishReject(new PiAdapterError("Pi RPC completed without final downstream output", "downstream", {
         terminal: true,
@@ -877,7 +655,7 @@ class RpcRun {
       finalText,
       state: this.state,
       stats: this.stats,
-      workflowRunId: taskflow?.workflowRunId ?? this.state?.workflowRunId ?? this.state?.runId ?? null,
+      workflowRunId: this.state?.workflowRunId ?? this.state?.runId ?? null,
       eventSummary: this.eventSummary,
     });
   }
@@ -931,9 +709,7 @@ export class PiAdapter {
   constructor(options = {}) {
     this.launch = harnessLaunch("pi", options.launch || options.command || options.executable || options.piExecutable);
     this.spawnFn = options.spawnFn || spawnNativeCommand;
-    this.taskflowExtensionPath = options.taskflowExtensionPath || options.extensionPath || null;
     this.env = options.env;
-    this.materializeInlineFlows = options.materializeInlineFlows !== false;
     this.activeRun = null;
   }
 
@@ -978,20 +754,16 @@ export class PiAdapter {
   }
 
   async run(request, options = {}) {
+    assertPromptOnlyWorkflow("pi", request?.workflow);
     request = validateAdapterExecution(request, "pi");
     const { sessionId, sessionAction, instructions, attachments } = request.execution;
     const fork = sessionAction === "fork";
     if (isClaudeRoute(request.route)) rejectClaudeRoute(request.route);
-    assertNoClaudeWorkflow("pi", request.workflow);
-    const workflow = request.workflow ?? null;
     const { tools: toolPolicy } = normalizePolicyControls(request.policy || {});
     const { allow, deny = [] } = toolPolicy;
     if (allow !== undefined) throw new PiAdapterError("Pi supports policy.tools.deny only for explicit tool policies", "policy");
     if (deny.some((name) => !READ_TOOLS.includes(name) && !WRITE_TOOLS.includes(name))) {
       throw new PiAdapterError("Pi policy.tools.deny accepts only exact built-in tool names", "policy");
-    }
-    if (deny.length && (workflow?.spec != null || workflow?.nodes != null)) {
-      throw new PiAdapterError("Pi cannot enforce policy.tools.deny inside Taskflow phases", "policy");
     }
     if (deny.length) {
       const help = await runProcess(this.launch.command, [...(this.launch.args || []), "--help"], {
@@ -1005,14 +777,9 @@ export class PiAdapter {
         throw new PiAdapterError("Installed Pi version cannot enforce policy.tools.deny; required CLI flags are missing", "policy");
       }
     }
-    const specInfo = taskflowDefinition(workflow, request);
-    // Explicit workflow requests need the optional Taskflow package; resolve
-    // (and fail) before materializing files or spawning a paid model run.
-    const taskflowExtensionPath = specInfo ? resolveTaskflowExtensionPath(this.taskflowExtensionPath) : null;
     const args = [
       "--mode",
       "rpc",
-      ...(specInfo ? ["--extension", taskflowExtensionPath] : []),
       ...routeArgs(request.route),
     ];
     const executable = this.launch.command;
@@ -1022,15 +789,10 @@ export class PiAdapter {
       const requested = Array.isArray(toolPolicy) && toolPolicy.length ? toolPolicy : WRITE_TOOLS;
       for (const tool of requested) tools.add(tool);
     }
-    if (specInfo) tools.add("taskflow");
     for (const name of deny) tools.delete(name);
     if (tools.size) args.push("--tools", [...tools].join(","));
     else args.push("--no-tools");
     if (deny.length) args.push("--exclude-tools", deny.join(","), "--no-extensions", "--no-mcp");
-    const slashArgs = taskflowSlashArgs(request, workflow);
-    const prompt = specInfo
-      ? `/tf:${specInfo.name}${slashArgs ? ` ${slashArgs}` : ""}`
-      : requestPrompt(request);
     const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
     if (fork || instructions !== undefined) {
       await requireExecutionFlags({ launch: this.launch, request, env, spawnFn: this.spawnFn, signal: options.signal }, [], [
@@ -1043,9 +805,6 @@ export class PiAdapter {
         type: "image", mimeType: attachmentMimeType(path), data: (await readAttachment(path)).toString("base64"),
       })))
       : [];
-    const cleanupFlow = specInfo
-      ? await materializeFlow(request, specInfo.definition, this.materializeInlineFlows)
-      : null;
     let scratch, rpc;
     try {
       if (instructions !== undefined) {
@@ -1065,9 +824,8 @@ export class PiAdapter {
         timeoutMs: request.execution?.timeoutMs || DEFAULT_TIMEOUT_MS,
         onProgress: options.onProgress,
         requestId: request.requestId,
-        expectTaskflow: Boolean(specInfo),
         provider: request.route?.provider ?? null,
-      }).setPrompt(prompt, images, fork ? sessionId : null);
+      }).setPrompt(requestPrompt(request), images, fork ? sessionId : null);
       this.activeRun = rpc;
       const value = await rpc.run();
       const state = value.state || {};
@@ -1093,7 +851,6 @@ export class PiAdapter {
     } finally {
       if (this.activeRun === rpc) this.activeRun = null;
       if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
-      await cleanupFlow?.().catch(() => undefined);
     }
   }
 }

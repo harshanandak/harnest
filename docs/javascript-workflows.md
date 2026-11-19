@@ -1,6 +1,6 @@
 # JavaScript workflows
 
-Harnest supplies its own multi-agent workflow environment across OpenCode, Pi, Claude Code, Codex, Cursor, Gemini CLI and Amp. Claude Dynamic Workflows is the reference experience; its workflow runtime is not required. JavaScript runs in an isolated QuickJS engine and owns branches, loops and parallel work. Each `agent()` call becomes a Harnest handoff with its own job and trace. Gemini and Amp remain prompt-only one-shot targets within a workflow; Amp accepts write-capable requests only. See [release limits](users/limits.md) for the current verification boundaries.
+Harnest supplies its own multi-agent workflow environment across OpenCode, Pi, Claude Code, Codex, Cursor, Amp, and registered ACP agents. Claude Dynamic Workflows is the reference experience; its workflow runtime is not required. JavaScript runs in an isolated QuickJS engine and owns branches, loops and parallel work. Each `agent()` call becomes a Harnest handoff with its own job and trace. Amp uses one-shot execution and requires approved write access. See [release limits](users/limits.md) for the current verification boundaries.
 
 ## Start and inspect
 
@@ -42,7 +42,7 @@ Examples include [file review](../examples/dynamic-review.js), [risk-based verif
 
 To run the verification loop, pass the example file's contents as `source` and supply `args`, for example `{"task":"Draft a concise release note for the supplied changes","maxRounds":3}`. The draft agent writes an answer and the verifier returns a schema-checked verdict. The next draft receives the verifier's feedback. The loop stops on a pass or at `maxRounds`, which defaults to 3 and accepts integers from 1 to 500. The workflow's `execution.maxAgents` and deadline still apply. The result includes `verified`, `rounds`, the final draft, and a message such as `not verified after 3 rounds`.
 
-`npm run smoke:dynamic:scale` measures the isolated engine with fake callbacks, including 4,096-item helpers. `npm run smoke:dynamic:runner-scale` measures 1,000 invocations through the real runner, Harnest and durable stores with fake adapters, concurrency six and a 120-second deadline. The latter records coordinator RSS, heap, handles, paged status sizes and retained disk bytes. Neither probe measures native-harness memory or subscription quota savings.
+`bun run smoke:dynamic:scale` measures the isolated engine with fake callbacks, including 4,096-item helpers. `bun run smoke:dynamic:runner-scale` measures 1,000 invocations through the real runner, Harnest and durable stores with fake adapters, concurrency six and a 120-second deadline. The latter records coordinator RSS, heap, handles, paged status sizes and retained disk bytes. Neither probe measures native-harness memory or subscription quota savings.
 
 ## Recovery and controls
 

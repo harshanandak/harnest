@@ -4,7 +4,7 @@ alwaysApply: false
 ---
 
 When the user asks to delegate a bounded task to another harness
-(OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a registered ACP agent), compare models, or fan out parallel
+(OpenCode, Pi, Cursor, Claude, Codex, Amp, or a registered ACP agent), compare models, or fan out parallel
 research lanes or dependency graphs, invoke the `handoff` skill (`/handoff`) and call the
 `harnest` MCP tools (`handoff_workflow`, `handoff_status`,
 `handoff_trace`, `handoff_result`, `handoff_compare`,

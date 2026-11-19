@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { updatePolicyJson } from "./policy-store.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const AUTO_IDS = { opencode: "auto-opencode", pi: "auto-pi", cursor: "auto-cursor", claude: "auto-claude", codex: "auto-codex", gemini: "auto-gemini", amp: "auto-amp" };
+const AUTO_IDS = { opencode: "auto-opencode", pi: "auto-pi", cursor: "auto-cursor", claude: "auto-claude", codex: "auto-codex", amp: "auto-amp" };
 
 function defaultPolicyPath() {
   return process.env.HARNEST_ROUTING_POLICY || join(homedir(), ".harnest", "routing.json");
@@ -57,7 +57,7 @@ if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
 }
 const candidates = Array.isArray(policy.candidates) ? [...policy.candidates] : [];
 const generatedTargets = new Set(["pi", "claude"]);
-for (const target of ["opencode", "cursor", "codex", "gemini"]) {
+for (const target of ["opencode", "cursor", "codex"]) {
   if (policy.models?.[target]) generatedTargets.add(target);
 }
 for (const [target, id] of Object.entries(AUTO_IDS)) {

@@ -11,6 +11,6 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (mode === "hang") return;
   if (mode === "noise") for (const value of [null, false, 42, "startup", []]) console.log(JSON.stringify(value));
-  const commands = mode === "missing" ? [] : [{ name: "tf" }];
-  console.log(JSON.stringify({ id: message.id, success: true, data: { commands } }));
+  const commands = mode === "missing" ? [] : [{ name: "review" }];
+  console.log(JSON.stringify({ id: message.id, success: mode !== "rejected", data: { commands } }));
 });

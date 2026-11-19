@@ -8,7 +8,7 @@ import test from "node:test";
 
 const exec = promisify(execFile);
 const root = join(import.meta.dirname, "..");
-const codexWorkers = ["acp_worker.toml", "amp_worker.toml", "claude_worker.toml", "cursor_worker.toml", "gemini_worker.toml", "opencode_worker.toml", "pi_worker.toml"];
+const codexWorkers = ["acp_worker.toml", "amp_worker.toml", "claude_worker.toml", "cursor_worker.toml", "opencode_worker.toml", "pi_worker.toml"];
 
 test("native Codex installer copies every supported external worker into an isolated project", { skip: process.platform !== "win32" }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "harnest-native-agents-"));
@@ -72,9 +72,9 @@ test("native Codex installers preserve customized and removed worker bytes and s
   }
 });
 
-test("doctor registers Gemini and Amp launch probes without model calls", async () => {
+test("doctor registers Amp launch probes without model calls", async () => {
   const source = await readFile(join(root, "scripts", "doctor.mjs"), "utf8");
-  for (const target of ["gemini", "amp"]) {
+  for (const target of ["amp"]) {
     assert.match(source, new RegExp(`${target}: resolveLaunch\\(\"${target}\"\\)`));
     assert.match(source, new RegExp(`${target}: await describeLaunch\\(resolved\\.${target}\\)`));
   }
@@ -91,7 +91,6 @@ test("Claude hook matchers register every optional worker bridge", async () => {
   const hooks = JSON.parse(await readFile(join(root, "hooks", "hooks.json"), "utf8"));
   for (const event of ["SubagentStart", "SubagentStop"]) {
     const matcher = hooks.hooks[event][0].matcher;
-    assert.match(matcher, /gemini-worker/);
     assert.match(matcher, /amp-worker/);
     assert.match(matcher, /acp-worker/);
   }
@@ -109,10 +108,8 @@ test("public host guidance exposes the complete generic ACP contract", async () 
   const liveTranscript = await readFile(join(root, "docs", "live-transcript.md"), "utf8");
   assert.match(liveTranscript, /Bridge workers \([^)]*acp-worker/);
 
-  for (const path of ["README.md", join("docs", "public-installation.md")]) {
-    const document = await readFile(join(root, path), "utf8");
-    assert.match(document, /Gemini, Amp, and generic ACP.*native-session.*reject session transport and live controls/);
-  }
+  const readme = await readFile(join(root, "README.md"), "utf8");
+  assert.match(readme, /Amp and generic ACP.*native-session.*reject session transport and live controls/);
 
   const architecture = await readFile(join(root, "docs", "architecture.md"), "utf8");
   assert.match(architecture, /ACP adapter.*registered ACP agent/);
@@ -121,7 +118,7 @@ test("public host guidance exposes the complete generic ACP contract", async () 
 
 test("command discovery and project guidance expose generic ACP honestly", async () => {
   const workflow = await readFile(join(root, "commands", "handoff-workflow.md"), "utf8");
-  assert.match(workflow, /target=opencode\|pi\|cursor\|claude\|codex\|gemini\|amp\|acp/);
+  assert.match(workflow, /target=opencode\|pi\|cursor\|claude\|codex\|amp\|acp/);
   assert.match(workflow, /generic ACP/i);
   assert.match(workflow, /trusted.*route\.agent/i);
   assert.match(workflow, /policy\.write=true/);
@@ -130,7 +127,7 @@ test("command discovery and project guidance expose generic ACP honestly", async
 
   for (const command of ["handoff-fleet.md", "handoff-sessions.md"]) {
     const raw = await readFile(join(root, "commands", command), "utf8");
-    assert.match(raw, /target=opencode\|pi\|cursor\|claude\|codex\|gemini\|amp\|acp/);
+    assert.match(raw, /target=opencode\|pi\|cursor\|claude\|codex\|amp\|acp/);
     assert.match(raw, /generic ACP/i);
     assert.match(raw, /resume.*execution\.sessionId/i);
     assert.match(raw, /rejects live.*control/i);

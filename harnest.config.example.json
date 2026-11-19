@@ -4,7 +4,6 @@
     "cursor": "cursor-agent",
     "claude": "claude",
     "codex": "codex",
-    "gemini": "gemini",
     "amp": "amp"
   },
   "routing": {
@@ -24,7 +23,7 @@
           "target": "claude",
           "route": { "provider": "anthropic", "model": "sonnet" },
           "scores": { "quality": 9, "speed": 6, "efficiency": 6, "reliability": 9 },
-          "capabilities": { "readOnly": true, "write": true, "taskflow": false, "liveControl": false, "maxContextTokens": 200000 },
+          "capabilities": { "readOnly": true, "write": true, "liveControl": false, "maxContextTokens": 200000 },
           "costUsd": 1.0,
           "latencyMs": 4000,
           "tags": ["deep", "review"],
@@ -35,7 +34,7 @@
           "target": "cursor",
           "route": { "provider": "cursor", "model": "composer-2.5" },
           "scores": { "quality": 6, "speed": 10, "efficiency": 9, "reliability": 8 },
-          "capabilities": { "readOnly": true, "write": true, "taskflow": false, "liveControl": false, "maxContextTokens": 128000 },
+          "capabilities": { "readOnly": true, "write": true, "liveControl": false, "maxContextTokens": 128000 },
           "costUsd": 0.2,
           "latencyMs": 1000,
           "tags": ["fast", "cheap"],
@@ -46,7 +45,7 @@
           "target": "pi",
           "route": { "provider": "your-gateway", "model": "your-fast-model" },
           "scores": { "quality": 6, "speed": 10, "efficiency": 9, "reliability": 8 },
-          "capabilities": { "readOnly": true, "write": true, "taskflow": true, "liveControl": true, "maxContextTokens": 128000 },
+          "capabilities": { "readOnly": true, "write": true, "liveControl": true, "maxContextTokens": 128000 },
           "costUsd": 0.2,
           "latencyMs": 1000,
           "tags": ["fast", "cheap"]
@@ -56,7 +55,7 @@
           "target": "opencode",
           "route": { "provider": "your-gateway", "model": "your-strong-model", "harnessVersion": "v2" },
           "scores": { "quality": 10, "speed": 5, "efficiency": 5, "reliability": 9 },
-          "capabilities": { "readOnly": true, "write": true, "taskflow": true, "liveControl": true, "maxContextTokens": 256000 },
+          "capabilities": { "readOnly": true, "write": true, "liveControl": true, "maxContextTokens": 256000 },
           "costUsd": 1.5,
           "latencyMs": 5000,
           "tags": ["deep", "review"]
@@ -82,9 +81,6 @@
           "apply": { "weights": { "quality": 3, "speed": 10 }, "prefer": { "tags": ["fast"] } }
         }
       ]
-    },
-    "project": {
-      "defaults": { "require": { "taskflow": true } }
     },
     "sessions": {
       "example-session-id": {

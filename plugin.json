@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "harnest",
   "version": "0.1.0",
-  "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Gemini CLI, Amp, and trusted registered ACP agents.",
+  "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Amp, and trusted registered ACP agents.",
   "author": {
     "name": "Harsha Nanda"
   },
@@ -15,9 +15,7 @@
     "cursor",
     "claude",
     "codex",
-    "gemini",
-    "amp",
-    "taskflow"
+    "amp"
   ],
   "skills": "./skills/",
   "extensions": {
@@ -36,7 +34,6 @@
           "Hand this workflow to the cheapest qualified harness.",
           "Run this graph in OpenCode and return its receipt.",
           "Run this graph in Pi and return its receipt.",
-          "Run this graph in Gemini and return its receipt.",
           "Run this graph in Amp and return its receipt."
         ]
       }

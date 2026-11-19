@@ -1,3 +1,4 @@
+import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 // Cursor ACP session adapter.
 //
 // The existing `cursor.mjs` adapter runs one `cursor-agent -p` process per
@@ -98,16 +99,6 @@ class AcpProtocolError extends Error {
     const status = Number(data?.status ?? data?.statusCode ?? data?.httpStatus);
     this.status = Number.isFinite(status) ? status : null;
   }
-}
-
-// Raw requests may carry policy aliases; normalizeRequest already collapses
-// them, but direct adapter callers must not be able to flip read-only to write
-// by using `allowWrites`.
-function policyWrites(policy = {}) {
-  if (typeof policy.write === "boolean") return policy.write;
-  if (typeof policy.readOnly === "boolean") return !policy.readOnly;
-  if (typeof policy.allowWrites === "boolean") return policy.allowWrites;
-  return false;
 }
 
 function adapterError(message, kind, details = {}) {
@@ -383,7 +374,6 @@ function promptEnvelope(request) {
     protocolVersion: request.protocolVersion || "1.0",
     contextDigest: request.contextDigest || digestContext(request.context),
     context: request.context ?? null,
-    flowSpec: request.workflow?.spec || null,
     cwd: request.cwd,
     policy: request.policy || { write: false, tools: [], maxCostUsd: null },
     task: request.task,
@@ -795,14 +785,6 @@ export class AcpTransport {
   }
 }
 
-function assertNoGraph(workflow) {
-  if (workflow?.spec == null && workflow?.nodes == null) return;
-  throw adapterError(
-    "cursor ACP session transport cannot execute a Taskflow graph; select pi or opencode for workflow.spec/workflow.nodes",
-    "policy",
-  );
-}
-
 function assertThinkingUnsupported(route) {
   const thinking = route?.thinking;
   if (thinking == null || (typeof thinking === "string" && !thinking.trim())) return;
@@ -862,7 +844,7 @@ class AcpSession {
     this.modes = null;
     this.currentModeId = null;
     this.model = null;
-    this.policyWrite = policyWrites(request.policy);
+    this.policyWrite = request.policy?.write === true;
     this.busy = false;
     this.activePrompt = null; // { settled, stopReason, error, resolveSettled }
     this.finalText = "";
@@ -1353,7 +1335,7 @@ export class CursorSessionAdapter {
         cwd: request.cwd,
         identity: {
           cwd: request.cwd,
-          policyWrite: policyWrites(request.policy),
+          policyWrite: request.policy?.write === true,
           provider: modelSelection(request.route || {}).provider,
           model: modelSelection(request.route || {}).model,
         },
@@ -1410,7 +1392,7 @@ export class CursorSessionAdapter {
       }
       session.applySessionSetup(setupResult);
       await session.applyModelSelection(request);
-      await session.applyModeSelection(policyWrites(request.policy));
+      await session.applyModeSelection(request.policy?.write === true);
       this.session = session;
       return session;
     } catch (error) {
@@ -1430,7 +1412,7 @@ export class CursorSessionAdapter {
     const identity = session.identity;
     const selection = modelSelection(request.route || {});
     return identity.cwd === request.cwd
-      && identity.policyWrite === policyWrites(request.policy)
+      && identity.policyWrite === (request.policy?.write === true)
       && (identity.model ?? null) === (selection.model ?? null)
       && (identity.provider ?? null) === (selection.provider ?? null);
   }
@@ -1452,7 +1434,7 @@ export class CursorSessionAdapter {
   async run(request, { signal, onProgress } = {}) {
     request = validateAdapterExecution(request, "cursor", "session");
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
-    assertNoGraph(request.workflow);
+    assertPromptOnlyWorkflow("cursor", request?.workflow);
     assertNoClaudeRoute("cursor", request.route);
     assertThinkingUnsupported(request.route);
     assertSessionPolicySupported(request.policy || {});
@@ -1470,7 +1452,7 @@ export class CursorSessionAdapter {
       session = await this.#acquireSession(request, execution.signal);
       session.adapter = this;
       session.workflowRunId = this.workflowRunId;
-      session.policyWrite = policyWrites(request.policy);
+      session.policyWrite = request.policy?.write === true;
       const response = await session.sendPrompt(request, {
         signal: execution.signal,
         timeoutMs: request.execution?.timeoutMs || DEFAULT_TIMEOUT_MS,

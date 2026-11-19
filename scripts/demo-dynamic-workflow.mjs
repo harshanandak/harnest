@@ -6,7 +6,7 @@
 // scripts/fixtures/dynamic-demo-adapter.mjs. No native harness process, no
 // network or paid model calls. Write-capable routes still use the fake adapter.
 //
-// Flow: validate -> start -> branch -> mixed seven-target parallel fan-out ->
+// Flow: validate -> start -> branch -> mixed six-target parallel fan-out ->
 // one failed agent -> pause (in-flight checkpoint drains; the next dispatch
 // parks) -> explicit stop -> fresh controller process resumes the ordered
 // prefix -> final result -> per-invocation/history drill-in -> parameterized
@@ -59,7 +59,7 @@ export function parseArgs(argv) {
 export const WORKFLOW_SOURCE = [
   'export const meta = {',
   '  name: "dynamic-demo",',
-  '  description: "Zero-paid branch, seven-target fan-out, checkpoint and replay demo",',
+  '  description: "Zero-paid branch, six-target fan-out, checkpoint and replay demo",',
   '  phases: ["plan", "fan-out", "checkpoint", "reduce"],',
   '};',
   '',
@@ -81,7 +81,6 @@ export const WORKFLOW_SOURCE = [
   '  ["work-claude", "claude"],',
   '  ["work-codex", "codex"],',
   '  ["work-cursor", "cursor"],',
-  '  ["work-gemini", "gemini"],',
   '  ["work-amp", "amp"],',
   '];',
   'const laneResults = await parallel(lanes.map(function (lane) {',
@@ -337,7 +336,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   try {
     writeFileSync(manifest.artifacts.workflow, WORKFLOW_SOURCE, "utf8");
 
-    // --- initial run: branch -> seven-target fan-out -> one failed agent ----
+    // --- initial run: branch -> six-target fan-out -> one failed agent ----
     const requestId = `demo-${Date.now().toString(36)}`;
     const spec = {
       requestId,
@@ -376,9 +375,9 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     }, 45_000);
     const beforePause = launchCounts(readLaunches(fixture));
     assert(
-      "branch and all seven targets dispatched before pause",
+      "branch and all six targets dispatched before pause",
       beforePause.plan === 1
-        && ["work-pi", "work-opencode", "work-claude", "work-codex", "work-cursor", "work-gemini", "work-amp"].every((label) => beforePause[label] === 1)
+        && ["work-pi", "work-opencode", "work-claude", "work-codex", "work-cursor", "work-amp"].every((label) => beforePause[label] === 1)
         && beforePause.checkpoint === 1,
       beforePause,
     );
@@ -470,7 +469,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     );
     assert(
       "the failed lane and the invalidated suffix re-ran after resume",
-      ["work-cursor", "work-gemini", "work-amp"].every((label) => afterResume[label] === 2)
+      ["work-cursor", "work-amp"].every((label) => afterResume[label] === 2)
         && afterResume.checkpoint === 2 && afterResume["after-pause"] === 1,
       afterResume,
     );
@@ -486,16 +485,16 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     const output = finalResult.output ?? null;
     assert("branch returned proceed", output?.branch === "proceed", output?.branch ?? null);
     assert(
-      "all seven lanes completed on resume",
-      output?.completedCount === 7 && Array.isArray(output?.failedLabels) && output.failedLabels.length === 0,
+      "all six lanes completed on resume",
+      output?.completedCount === 6 && Array.isArray(output?.failedLabels) && output.failedLabels.length === 0,
       { completedCount: output?.completedCount, failedLabels: output?.failedLabels },
     );
-    assert("parameterized items reduced after seven targets", output?.itemCount === 5 && output?.total === 35, { itemCount: output?.itemCount, total: output?.total });
+    assert("parameterized items reduced after six targets", output?.itemCount === 5 && output?.total === 30, { itemCount: output?.itemCount, total: output?.total });
     assert("checkpoint and after-pause results are present", output?.checkpoint === "checkpoint" && output?.afterPause === "after-pause", output ?? null);
 
-    const labels = ["plan", "work-pi", "work-opencode", "work-claude", "work-codex", "work-cursor", "work-gemini", "work-amp", "checkpoint", "after-pause"];
+    const labels = ["plan", "work-pi", "work-opencode", "work-claude", "work-codex", "work-cursor", "work-amp", "checkpoint", "after-pause"];
     const invocations = finalStatus.invocations ?? [];
-    assert("all ten invocations are present", invocations.length === 10 && labels.every((label) => invocations.some((call) => call.label === label)), invocations.map((call) => call.label));
+    assert("all nine invocations are present", invocations.length === labels.length && labels.every((label) => invocations.some((call) => call.label === label)), invocations.map((call) => call.label));
     assert("invocation ordinals are 0..9", invocations.every((call, index) => call.ordinal === index), invocations.map((call) => call.ordinal));
     assert("every invocation completed", invocations.every((call) => call.state === "completed"), invocations.map((call) => [call.label, call.state]));
     assert("every invocation has a job and session id", invocations.every((call) => call.jobId && call.sessionId), invocations.map((call) => [call.label, call.jobId, call.sessionId]));
@@ -506,7 +505,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       attemptsByLabel,
     );
     assert("the failed agent retried on resume", attemptsByLabel["work-cursor"] === 2, attemptsByLabel);
-    assert("later Gemini and Amp lanes replayed after the failed agent", attemptsByLabel["work-gemini"] === 2 && attemptsByLabel["work-amp"] === 2, attemptsByLabel);
+    assert("Amp lane replayed after the failed agent", attemptsByLabel["work-amp"] === 2, attemptsByLabel);
     assert(
       "the checkpoint re-ran after the failure invalidated the suffix",
       attemptsByLabel.checkpoint === 2,
@@ -575,7 +574,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     assert("saved rerun completed", savedStatus.state === "completed", savedStatus.state);
     assert(
       "saved rerun used its own parameters",
-      savedResult.output?.itemCount === 3 && savedResult.output?.total === 21 && savedResult.output?.failedLabels?.length === 0,
+      savedResult.output?.itemCount === 3 && savedResult.output?.total === 18 && savedResult.output?.failedLabels?.length === 0,
       savedResult.output ?? null,
     );
     manifest.frames.savedRerun = await captureView(
@@ -615,7 +614,6 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       "work-claude": 2,
       "work-codex": 2,
       "work-cursor": 3,
-      "work-gemini": 3,
       "work-amp": 3,
       checkpoint: 3,
       "after-pause": 2,

@@ -34,7 +34,6 @@ const snapshot = {
     pi: { unknown: "catalog not probed; profile defaults are not freshness verification" },
     codex: { unknown: "catalog not probed" },
     opencode: { unknown: "catalog not probed by this command; inspect opencode models" },
-    gemini: { unknown: "native model catalog unavailable; no aliases invented" },
     amp: { unknown: "native model catalog unavailable; --mode is not a model pin" },
   },
 };

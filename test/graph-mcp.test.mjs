@@ -20,7 +20,7 @@ async function call(client, name, args, error = false) {
 }
 
 for (const modern of [false, true]) {
-  test(`seven-harness graph resumes only failed work through MCP after restart (${modern ? "modern" : "legacy"})`, { timeout: 60000 }, async (t) => {
+  test(`six-harness graph resumes only failed work through MCP after restart (${modern ? "modern" : "legacy"})`, { timeout: 60000 }, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "harnest-graph-mcp-"));
     const phases = [];
     const measure = async (name, run) => {
@@ -33,15 +33,14 @@ for (const modern of [false, true]) {
     try {
       client = await measure("connect", () => connect(directory, modern));
       const graph = {
-        requestId: "seven-agent-dag", cwd: directory, task: "private-graph-task-must-not-be-echoed-by-status", context: { shared: "private-shared-context-marker" }, policy: { write: true },
+        requestId: "six-agent-dag", cwd: directory, task: "private-graph-task-must-not-be-echoed-by-status", context: { shared: "private-shared-context-marker" }, policy: { write: true },
         execution: { background: false, maxConcurrency: 2, timeoutMs: 10000 },
         nodes: [
           { id: "pi-plan", target: "pi", task: "plan", policy: { write: false } },
           { id: "claude-review", target: "claude", task: "review", dependsOn: ["pi-plan"], policy: { write: false } },
           { id: "codex-review", target: "codex", task: "review", dependsOn: ["pi-plan"], policy: { write: false } },
-          { id: "gemini-review", target: "gemini", task: "review", dependsOn: ["pi-plan"], policy: { write: false } },
           { id: "amp-review", target: "amp", route: { variant: "medium" }, task: "review", dependsOn: ["pi-plan"], policy: { write: true } },
-          { id: "cursor-join", target: "cursor", task: "join", dependsOn: ["claude-review", "codex-review", "gemini-review", "amp-review"], policy: { write: false } },
+          { id: "cursor-join", target: "cursor", task: "join", dependsOn: ["claude-review", "codex-review", "amp-review"], policy: { write: false } },
           { id: "opencode-final", target: "opencode", route: { provider: "fixture", model: "synthetic", harnessVersion: "v2" }, task: "final", dependsOn: ["cursor-join"], policy: { write: true } },
         ], outputs: ["opencode-final"],
       };
@@ -50,12 +49,11 @@ for (const modern of [false, true]) {
       await assert.rejects(readFile(join(directory, "launches.jsonl")), { code: "ENOENT" });
       const partial = await measure("start", () => call(client, "handoff_graph_start", { graph }));
       assert.equal(partial.state, "partial", JSON.stringify(partial));
-      assert.equal(partial.nodes.length, 7);
+      assert.equal(partial.nodes.length, graph.nodes.length);
       const firstNodes = Object.fromEntries(partial.nodes.map(node => [node.id, node]));
       assert.equal(firstNodes["pi-plan"].state, "completed");
       assert.equal(firstNodes["claude-review"].state, "failed");
       assert.equal(firstNodes["codex-review"].state, "completed");
-      assert.equal(firstNodes["gemini-review"].state, "completed");
       assert.equal(firstNodes["amp-review"].state, "completed");
       assert.equal(firstNodes["cursor-join"].state, "blocked");
       assert.equal(firstNodes["opencode-final"].state, "blocked");
@@ -68,7 +66,7 @@ for (const modern of [false, true]) {
       const repeated = await call(client, "handoff_graph_resume", { graphId: partial.graphId, commandId: "retry-review-once", nodeIds: ["claude-review"], background: false });
       assert.equal(repeated.graphId, partial.graphId);
       const status = await call(client, "handoff_graph_status", { graphId: partial.graphId });
-      assert.equal(status.nodes.length, 7);
+      assert.equal(status.nodes.length, graph.nodes.length);
       assert.doesNotMatch(JSON.stringify(status), /private-graph-task-must-not-be-echoed-by-status|private-shared-context-marker/);
       assert.equal(status.outputs, undefined, "full outputs belong to result, not routine status");
       for (const node of status.nodes) {
@@ -85,12 +83,11 @@ for (const modern of [false, true]) {
       assert.deepEqual(Object.keys(result.outputs), ["opencode-final"]);
       assert.match(JSON.stringify(result.outputs), /opencode-final DONE/);
       const launches = (await readFile(join(directory, "launches.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
-      assert.equal(launches.length, 8, "seven nodes plus one failed-node retry; no completed work repeated");
+      assert.equal(launches.length, graph.nodes.length + 1, "six nodes plus one failed-node retry; no completed work repeated");
       assert.equal(launches.filter(item => item.nodeId === "pi-plan").length, 1);
       assert.equal(launches.filter(item => item.nodeId === "codex-review").length, 1);
-      assert.equal(launches.filter(item => item.nodeId === "gemini-review").length, 1);
       assert.equal(launches.filter(item => item.nodeId === "amp-review").length, 1);
-      assert.deepEqual(launches.find(item => item.nodeId === "cursor-join").upstream, ["amp-review", "claude-review", "codex-review", "gemini-review"]);
+      assert.deepEqual(launches.find(item => item.nodeId === "cursor-join").upstream, ["amp-review", "claude-review", "codex-review"]);
       assert.deepEqual(launches.find(item => item.nodeId === "opencode-final").upstream, ["cursor-join"]);
     } catch (error) {
       t.diagnostic(JSON.stringify({ phases }));

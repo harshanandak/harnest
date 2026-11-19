@@ -55,7 +55,6 @@ function handoffEnvelope(request) {
     protocolVersion: request.protocolVersion || "1.0",
     contextDigest: request.contextDigest || digestContext(request.context),
     context: request.context ?? null,
-    flowSpec: request.workflow?.spec || null,
     cwd: request.cwd,
     policy: request.policy || { write: false, tools: [], maxCostUsd: null },
     task: request.task,

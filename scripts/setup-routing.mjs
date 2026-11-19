@@ -20,7 +20,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // support); OpenCode fourth (Go high-limit
 // catalogs, v2 control); Cursor fifth (named cheap models only).
 // Unmentioned harnesses append in this order.
-const TARGETS = ["pi", "claude", "codex", "opencode", "cursor", "gemini", "amp"];
+const TARGETS = ["pi", "claude", "codex", "opencode", "cursor", "amp"];
 const DEFAULT_SUBSCRIPTIONS = ["pi", "claude", "codex", "opencode", "cursor"];
 const TIERS = ["quick", "balanced", "deep", "review"];
 
@@ -88,7 +88,7 @@ export async function interactive(detected, { rl = createInterface({ input: stdi
         console.log("  amp [native default; configure advanced candidate routes for modes]");
         continue;
       }
-      const hint = target === "opencode" ? "provider/model" : target === "claude" ? "alias, e.g. sonnet" : target === "cursor" ? "e.g. composer-2.5, cursor-grok-4.6-high-fast (cheap)" : target === "gemini" ? "Gemini model id, or Enter for native default" : "Enter for default";
+      const hint = target === "opencode" ? "provider/model" : target === "claude" ? "alias, e.g. sonnet" : target === "cursor" ? "e.g. composer-2.5, cursor-grok-4.6-high-fast (cheap)" : "Enter for default";
       const answer = (await rl.question(`  ${target} [${hint}]: `)).trim();
       if (answer) models[target] = answer;
     }
@@ -143,7 +143,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 const options = parseArgs(process.argv.slice(2));
 if (options.help) {
   console.log([
-    "Usage: node scripts/setup-routing.mjs [--order pi,claude,codex,opencode,cursor,gemini,amp] [--tier balanced]",
+    "Usage: node scripts/setup-routing.mjs [--order pi,claude,codex,opencode,cursor,amp] [--tier balanced]",
     "  [--model target=model] [--budget 2] [--cheap-lane model-id] [--flagship-lane model-id]",
     "  [--sub target=1] [--no-rules] [--allow-training-endpoints|--no-training-endpoints] [--out path] [--yes]",
     "Writes the simple preference keys plus starter task rules; the engine expands them into full policy.",

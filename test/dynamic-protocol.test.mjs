@@ -69,7 +69,7 @@ test("policy narrowing never widens write, tools or cost", () => {
   assert.throws(() => normalizePolicy({ tools: ["read", "rm"] }, root), /widen allowed tools/);
   assert.throws(() => normalizePolicy({ maxCostUsd: 6 }, root), /increase cost ceiling/);
   assert.deepEqual(normalizePolicy({}, root), root);
-  assert.throws(() => normalizePolicy({ readOnly: true, allowWrites: true }), /contradictory write policy aliases/);
+  assert.throws(() => normalizePolicy({ write: "true" }), /policy\.write must be boolean/);
 });
 
 test("inherited explicit deny lists, plan mode and sandbox survive child overrides", () => {

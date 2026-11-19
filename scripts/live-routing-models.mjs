@@ -14,7 +14,6 @@ const cases = [
   ["cursor", { model: "gpt-6.1-sol-high" }],
   ["codex", { model: "gpt-6.2-sol", thinking: "high" }],
   ["claude", { model: "claude-sonnet-4-5" }],
-  ["gemini", { model: "gemini-3-pro" }],
   ["amp", {}],
 ];
 
@@ -45,7 +44,7 @@ export async function main() {
     const result = await previewRoutingCase({ settings, target, route });
     console.log(JSON.stringify(result));
     if (target !== "amp") {
-      const expected = target === "gemini" ? ["unavailable"] : ["current", "updated", "managed-latest"];
+      const expected = ["current", "updated", "managed-latest"];
       if (!expected.includes(result.status)) process.exitCode = 1;
     }
   }

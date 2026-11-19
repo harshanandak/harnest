@@ -76,7 +76,9 @@ test("the Pi installer is import-safe, replaces stale extension entries, and bac
       "stale registrations of this extension must be replaced, not appended",
     );
     const raw = await readFile(join(root, "scripts", "install-pi-integration.mjs"), "utf8");
-    assert.ok(raw.includes(".bak-harnest-"), "replaced extension and skill files must be backed up");
+    assert.match(raw, /import \{[^}]*\breplaceWithBackup\b[^}]*\} from "\.\/install-files\.mjs"/, "the installer must use the shared backup writer");
+    assert.ok((raw.match(/backupAndWrite\(/g) ?? []).length >= 4,
+      "replaced extension, settings and skill files must go through the backup writer");
   } finally {
     if (saved.HOME === undefined) delete process.env.HOME; else process.env.HOME = saved.HOME;
     if (saved.USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.USERPROFILE;
@@ -112,7 +114,7 @@ const extensionSource = async () => {
     .replace("__HARNEST_DYNAMIC_VIEW_URL__", new URL("../src/dynamic-view.mjs", import.meta.url).href)
     .replace("__HARNEST_LAUNCH_COMMAND_URL__", new URL("../src/launch-command.mjs", import.meta.url).href)
     .replace("__HARNEST_GRAPH_VIEW_URL__", new URL("../scripts/graph-view.mjs", import.meta.url).href)
-    .replace('"@earendil-works/pi-ai"', JSON.stringify(import.meta.resolve("@earendil-works/pi-ai")))
+    .replace('"@earendil-works/pi-ai"', JSON.stringify(new URL("./fixtures/pi-ai-string-enum.mjs", import.meta.url).href))
     .replace('"typebox"', JSON.stringify(import.meta.resolve("typebox")));
 };
 
@@ -145,7 +147,7 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"], description: "OpenCode only: v2 or omitted." });
   assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v2"] });
   const policy = request.properties.policy;
-  assert.deepEqual(Object.keys(policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
+  assert.deepEqual(Object.keys(policy.properties), ["write", "tools", "mode", "sandbox", "maxCostUsd"]);
   const [legacyTools, explicitTools] = policy.properties.tools.anyOf;
   assert.equal(legacyTools.type, "array");
   assert.deepEqual(Object.keys(explicitTools.properties), ["allow", "deny"]);
@@ -161,7 +163,7 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.deepEqual(Object.keys(node.properties.execution.properties), ["timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns"]);
   assert.equal(node.properties.execution.additionalProperties, false);
   assert.equal(node.properties.policy.additionalProperties, false);
-  const readOnlyTargets = ["pi", "cursor", "claude", "codex", "gemini"];
+  const readOnlyTargets = ["pi", "cursor", "claude", "codex"];
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.request.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.candidates.items.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_review").parameters.properties.request.properties.target.enum, readOnlyTargets);

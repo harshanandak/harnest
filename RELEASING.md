@@ -10,6 +10,6 @@
    gh release create v0.1.0 --verify-tag --title "Harnest v0.1.0" --notes-file <release-notes-file>
    ```
 
-4. Verify the GitHub Release points to the tagged commit and that a fresh checkout can install the exact tag with `bun install --frozen-lockfile`. Harnest ships through GitHub source releases. Skip npm publication.
+4. Verify the GitHub Release points to the tagged commit and that a fresh checkout can install the exact tag with `bun install --frozen-lockfile --omit optional`. Harnest ships through GitHub source releases. Skip npm publication.
 
 To roll back an installation, check out the previous release tag, run the frozen install, rerun the host installer, and restart the host.

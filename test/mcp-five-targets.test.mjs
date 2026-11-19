@@ -9,11 +9,11 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { digestContext } from "../src/protocol.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const targets = ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"];
+const targets = ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"];
 const context = { requiredResultFields: ["finalText"], requiredText: ["DONE"] };
 
 async function connect(directory, modern) {
-  const client = new Client({ name: "eight-target-regression", version: "1" }, modern ? { versionNegotiation: { mode: "auto" } } : {});
+  const client = new Client({ name: "seven-target-regression", version: "1" }, modern ? { versionNegotiation: { mode: "auto" } } : {});
   await client.connect(new StdioClientTransport({
     command: process.execPath,
     args: [join(root, "scripts", "fixtures", "mcp-five-targets.mjs"), directory], cwd: root,
@@ -28,16 +28,16 @@ async function call(client, name, args) {
 }
 
 for (const modern of [false, true]) {
-  // Runs eight fixture handoffs plus a restart roundtrip; process startup
+  // Runs seven fixture handoffs plus a restart roundtrip; process startup
   // dominates on a loaded machine (observed up to ~25s), so the budget is
   // explicit rather than tight. Assertions are unchanged.
-  test(`MCP eight-target policy, progress, receipt and restart roundtrip (${modern ? "modern" : "legacy"})`, { timeout: 90_000 }, async () => {
-    const directory = await mkdtemp(join(tmpdir(), "harnest-mcp-eight-"));
+  test(`MCP seven-target policy, progress, receipt and restart roundtrip (${modern ? "modern" : "legacy"})`, { timeout: 90_000 }, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harnest-mcp-seven-"));
     let client;
     try {
       client = await connect(directory, modern);
       const host = await call(client, "handoff_host_info", {});
-      for (const worker of ["opencode-worker", "pi-worker", "cursor-worker", "claude-worker", "codex-worker", "gemini-worker", "amp-worker", "acp-worker"]) {
+      for (const worker of ["opencode-worker", "pi-worker", "cursor-worker", "claude-worker", "codex-worker", "amp-worker", "acp-worker"]) {
         assert.match(host.launchPath.claude, new RegExp(`harnest:${worker}`), `Claude launch path must name ${worker}`);
       }
       assert.match(host.launchPath.codex, /For Codex-to-Codex, call handoff_workflow directly/);
@@ -51,7 +51,7 @@ for (const modern of [false, true]) {
         route: target === "amp"
           ? { variant: "medium" }
           : target === "acp" ? { agent: "fixture-acp" }
-          : { model: target === "gemini" ? "gemini-synthetic" : `synthetic-${target}`, ...(target === "opencode" ? { harnessVersion: "v2" } : {}) },
+          : { model: `synthetic-${target}`, ...(target === "opencode" ? { harnessVersion: "v2" } : {}) },
       } })));
       for (const [index, receipt] of receipts.entries()) {
         assert.equal(receipt.target, targets[index]);

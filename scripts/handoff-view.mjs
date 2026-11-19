@@ -3,7 +3,7 @@
  * handoff-view - live transcript for a single Harnest job.
  *
  * The companion folds every harness's deltas (claude_delta, codex_delta,
- * cursor_delta, gemini_delta, amp_delta, OpenCode/Pi progress) into the durable trace. This is the
+ * cursor_delta, amp_delta, OpenCode/Pi progress) into the durable trace. This is the
  * operator's read-only screen over that trace: one line per meaningful event,
  * `--watch` tails it until the job reaches a terminal state, and noisy
  * activity records are skipped. No writes, no dispatch.

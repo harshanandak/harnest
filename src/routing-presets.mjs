@@ -111,14 +111,13 @@ const HARNESS_LOOP = {
   // like cursor/claude but without the shim tax. Provisional until measured.
   codex: { speedMod: 1, efficiencyMod: 0 },
   // New prompt-only adapters remain neutral until measured independently.
-  gemini: { speedMod: 0, efficiencyMod: 0 },
   amp: { speedMod: 0, efficiencyMod: 0 },
   acp: { speedMod: 0, efficiencyMod: 0 },
 };
 
 // Harness topology doctrine (verified 2026-09-11): Pi is the default home
 // for anything portable — any provider model (including DeepSeek and
-// Codex-CLI-reachable work via its tools), taskflow graphs, live steering,
+// Codex-CLI-reachable work via its tools), live steering,
 // fastest effective loop. Route elsewhere only for what Pi lacks:
 //   - claude: Claude models (nothing else runs them) + budget enforcement.
 //   - opencode: OpenCode Go high-limit catalogs, v2 live control.
@@ -134,14 +133,14 @@ const AUTO_CANDIDATES = [
     id: "auto-claude",
     target: "claude",
     scores: { quality: 9, speed: 6, efficiency: 6, reliability: 9 },
-    capabilities: { readOnly: true, write: true, taskflow: false, liveControl: false, maxContextTokens: 200000 },
+    capabilities: { readOnly: true, write: true, liveControl: false, maxContextTokens: 200000 },
     tags: ["deep", "review", "flagship"],
   },
   {
     id: "auto-pi",
     target: "pi",
     scores: { quality: 7, speed: 7, efficiency: 7, reliability: 8 },
-    capabilities: { readOnly: true, write: true, taskflow: true, liveControl: true, maxContextTokens: 128000, thinking: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+    capabilities: { readOnly: true, write: true, liveControl: true, maxContextTokens: 128000, thinking: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
     tags: ["balanced"],
   },
   {
@@ -149,7 +148,7 @@ const AUTO_CANDIDATES = [
     target: "cursor",
     requiresModel: true,
     scores: { quality: 6, speed: 10, efficiency: 9, reliability: 8 },
-    capabilities: { readOnly: true, write: true, taskflow: false, liveControl: false, maxContextTokens: 128000 },
+    capabilities: { readOnly: true, write: true, liveControl: false, maxContextTokens: 128000 },
     tags: ["fast", "cheap"],
   },
   {
@@ -157,7 +156,7 @@ const AUTO_CANDIDATES = [
     target: "codex",
     requiresModel: true,
     scores: { quality: 8, speed: 7, efficiency: 7, reliability: 8 },
-    capabilities: { readOnly: true, write: true, taskflow: false, liveControl: false, maxContextTokens: 400000 },
+    capabilities: { readOnly: true, write: true, liveControl: false, maxContextTokens: 400000 },
     tags: ["balanced"],
   },
   {
@@ -165,16 +164,8 @@ const AUTO_CANDIDATES = [
     target: "opencode",
     requiresModel: true,
     scores: { quality: 9, speed: 5, efficiency: 5, reliability: 9 },
-    capabilities: { readOnly: false, write: true, taskflow: true, liveControl: true, maxContextTokens: 200000 },
+    capabilities: { readOnly: false, write: true, liveControl: true, maxContextTokens: 200000 },
     tags: ["deep", "flagship"],
-  },
-  {
-    id: "auto-gemini",
-    target: "gemini",
-    requiresModel: true,
-    scores: { quality: 7, speed: 7, efficiency: 7, reliability: 7 },
-    capabilities: { readOnly: true, write: true, taskflow: false, liveControl: false },
-    tags: [],
   },
 ];
 
@@ -220,12 +211,10 @@ function textIncludesSlash(value) {
 }
 
 function capabilitiesFor(target) {
-  if (target === "gemini") return { readOnly: true, write: true, taskflow: false, liveControl: false };
-  if (target === "amp") return { readOnly: false, write: true, taskflow: false, liveControl: false };
-  if (target === "acp") return { readOnly: false, write: true, taskflow: false, liveControl: false };
-  const base = { readOnly: true, write: true, taskflow: false, liveControl: false };
+  if (target === "amp") return { readOnly: false, write: true, liveControl: false };
+  if (target === "acp") return { readOnly: false, write: true, liveControl: false };
+  const base = { readOnly: true, write: true, liveControl: false };
   if (target === "pi") {
-    base.taskflow = true;
     base.liveControl = true;
     // Pi thinking levels are CLI-verified (pi --help); other harnesses use
     // unvalidated passthrough until their level sets are confirmed.
@@ -233,7 +222,6 @@ function capabilitiesFor(target) {
   }
   if (target === "opencode") {
     base.readOnly = false;
-    base.taskflow = true;
     base.liveControl = true;
   }
   // NOTE: no computerUse anywhere. No one-shot CLI route in this set offers

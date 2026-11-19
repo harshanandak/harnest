@@ -11,7 +11,7 @@
         { "$ref": "./handoff-request.schema.json" },
         {
           "properties": {
-            "target": { "enum": ["pi", "cursor", "claude", "codex", "gemini"] }
+            "target": { "enum": ["pi", "cursor", "claude", "codex"] }
           }
         }
       ]
@@ -26,7 +26,7 @@
         "required": ["name", "route"],
         "properties": {
           "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
-          "target": { "enum": ["pi", "cursor", "claude", "codex", "gemini"] },
+          "target": { "enum": ["pi", "cursor", "claude", "codex"] },
           "route": {
             "type": "object",
             "required": ["model"],

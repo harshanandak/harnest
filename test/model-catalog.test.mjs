@@ -590,10 +590,10 @@ test("concurrent callers coalesce; TTL expiry refetches", async () => {
   assert.deepEqual(calls.slice(2), calls.slice(0, 2));
 });
 
-test("Gemini and Amp catalogs are explicitly unavailable without probing or inventing aliases", async () => {
+test("Amp catalogs are explicitly unavailable without probing or inventing aliases", async () => {
   let probes = 0;
   const getCatalog = createModelCatalog({ probe: async () => { probes += 1; throw new Error("must not probe"); } });
-  for (const target of ["gemini", "amp"]) {
+  for (const target of ["amp"]) {
     const result = await getCatalog({ target });
     assert.equal(result.status, "unavailable");
     assert.deepEqual(result.models, []);

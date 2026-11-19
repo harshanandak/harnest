@@ -142,14 +142,10 @@ test("catalog builds honest defaults: pi+claude auto, rest need names", () => {
   assert.deepEqual(withModels.find((c) => c.id === "auto-codex").model, { intelligence: 7, taste: 7, speed: 8, costEff: 8, decisiveness: 7 });
 });
 
-test("Gemini, Amp, and ACP are excluded from built-in auto routes while explicit candidates stay honest", () => {
+test("Amp and ACP are excluded from built-in auto routes while explicit candidates stay honest", () => {
   const defaults = buildDefaultCandidates({});
-  assert.equal(defaults.some((candidate) => ["gemini", "amp", "acp"].includes(candidate.target)), false);
+  assert.equal(defaults.some((candidate) => ["amp", "acp"].includes(candidate.target)), false);
 
-  const gemini = buildDefaultCandidates({ gemini: "gemini-3-pro" }).find((candidate) => candidate.target === "gemini");
-  assert.deepEqual(gemini.route, { model: "gemini-3-pro" });
-  assert.equal(gemini.capabilities.readOnly, true);
-  assert.equal(gemini.capabilities.write, true);
 
   assert.throws(
     () => expandUserPolicy({ models: { amp: "smart" } }),
@@ -167,7 +163,7 @@ test("Gemini, Amp, and ACP are excluded from built-in auto routes while explicit
       target: "amp",
       route: { variant: "medium" },
       scores: { quality: 5, speed: 5, efficiency: 5, reliability: 5 },
-      capabilities: { readOnly: false, write: true, taskflow: false, liveControl: false },
+      capabilities: { readOnly: false, write: true, liveControl: false },
     }],
   }), { now: () => 0 });
   assert.equal(amp.explanation.selected, "manual-amp");
@@ -180,14 +176,13 @@ test("Gemini, Amp, and ACP are excluded from built-in auto routes while explicit
       target: "amp",
       route: { variant: "medium" },
       scores: { quality: 5, speed: 5, efficiency: 5, reliability: 5 },
-      capabilities: { readOnly: false, write: true, taskflow: false, liveControl: false },
+      capabilities: { readOnly: false, write: true, liveControl: false },
     }],
   }), { now: () => 0 }), /Amp cannot enforce a read-only request/);
 });
 
-test("automatic routing rejects unsupported Gemini and Amp policy without hiding a compatible lane", () => {
+test("automatic routing rejects unsupported Amp policy without hiding a compatible lane", () => {
   const candidates = [
-    { id: "gemini-high", target: "gemini", route: { model: "gemini-3-pro" }, scores: { quality: 10, speed: 10, efficiency: 10, reliability: 10 }, capabilities: { readOnly: true, write: true } },
     { id: "amp-high", target: "amp", route: { variant: "high" }, scores: { quality: 10, speed: 10, efficiency: 10, reliability: 10 }, capabilities: { readOnly: false, write: true } },
     { id: "pi-compatible", target: "pi", route: { model: "fixture" }, scores: { quality: 1, speed: 1, efficiency: 1, reliability: 1 }, capabilities: { readOnly: true, write: true } },
   ];
@@ -195,7 +190,6 @@ test("automatic routing rejects unsupported Gemini and Amp policy without hiding
   const toolsDecision = resolvePolicyRoute(toolsRequest, scopesFor(toolsRequest, { candidates }), { now: () => 0 });
   assert.equal(toolsDecision.explanation.selected, "pi-compatible");
   assert.deepEqual(toolsDecision.explanation.rejected, [
-    { id: "gemini-high", reasons: ["granular-tools"] },
     { id: "amp-high", reasons: ["read-only", "granular-tools"] },
   ]);
 
@@ -203,42 +197,8 @@ test("automatic routing rejects unsupported Gemini and Amp policy without hiding
   const budgetDecision = resolvePolicyRoute(budgetRequest, scopesFor(budgetRequest, { candidates }), { now: () => 0 });
   assert.equal(budgetDecision.explanation.selected, "pi-compatible");
   assert.deepEqual(budgetDecision.explanation.rejected, [
-    { id: "gemini-high", reasons: ["cost-budget"] },
     { id: "amp-high", reasons: ["read-only", "cost-budget"] },
   ]);
-});
-
-test("automatic routing rejects every adapter-invalid Gemini candidate route and keeps a compatible fallback", () => {
-  const invalidRoutes = [
-    [{ provider: "openai" }, "gemini-provider"],
-    [{ model: "gpt-6" }, "gemini-model"],
-    [{ agent: "reviewer" }, "gemini-route-control"],
-    [{ variant: "high" }, "gemini-route-control"],
-    [{ harnessVersion: "v2" }, "gemini-route-control"],
-  ];
-  for (const [route, reason] of invalidRoutes) {
-    const automatic = request({ metadata: { routing: { mode: "auto" } } });
-    const decision = resolvePolicyRoute(automatic, scopesFor(automatic, { candidates: [
-      { id: "gemini-invalid", target: "gemini", route, scores: { quality: 10, speed: 10, efficiency: 10, reliability: 10 }, capabilities: { readOnly: true, write: true } },
-      { id: "pi-compatible", target: "pi", route: { model: "fixture" }, scores: { quality: 1, speed: 1, efficiency: 1, reliability: 1 }, capabilities: { readOnly: true, write: true } },
-    ] }), { now: () => 0 });
-    assert.equal(decision.explanation.selected, "pi-compatible", JSON.stringify(route));
-    assert.deepEqual(decision.explanation.rejected, [{ id: "gemini-invalid", reasons: [reason] }]);
-  }
-
-  const valid = request({ metadata: { routing: { mode: "auto" } } });
-  const selected = resolvePolicyRoute(valid, scopesFor(valid, { candidates: [
-    { id: "gemini-valid", target: "gemini", route: { provider: "google", model: "gemini-3-pro" }, scores: { quality: 10, speed: 10, efficiency: 10, reliability: 10 }, capabilities: { readOnly: true, write: true } },
-    { id: "pi-compatible", target: "pi", route: { model: "fixture" }, scores: { quality: 1, speed: 1, efficiency: 1, reliability: 1 }, capabilities: { readOnly: true, write: true } },
-  ] }), { now: () => 0 });
-  assert.equal(selected.explanation.selected, "gemini-valid");
-
-  const slashAlias = request({ metadata: { routing: { mode: "auto" } } });
-  const slashAliasSelected = resolvePolicyRoute(slashAlias, scopesFor(slashAlias, { candidates: [
-    { id: "gemini-slash-alias", target: "gemini", route: { provider: "google/gemini", model: "gemini-3-pro" }, scores: { quality: 10, speed: 10, efficiency: 10, reliability: 10 }, capabilities: { readOnly: true, write: true } },
-    { id: "pi-compatible", target: "pi", route: { model: "fixture" }, scores: { quality: 1, speed: 1, efficiency: 1, reliability: 1 }, capabilities: { readOnly: true, write: true } },
-  ] }), { now: () => 0 });
-  assert.equal(slashAliasSelected.explanation.selected, "gemini-slash-alias");
 });
 
 test("explicit same-id candidates overlay generated ones", async () => {
@@ -295,7 +255,7 @@ test("setup wizard writes a valid minimal policy non-interactively", { timeout: 
   });
   void stderr;
   const written = JSON.parse(await readFile(out, "utf8"));
-  assert.deepEqual(written.harnessOrder, ["claude", "cursor", "pi", "codex", "opencode", "gemini", "amp"]);
+  assert.deepEqual(written.harnessOrder, ["claude", "cursor", "pi", "codex", "opencode", "amp"]);
   assert.equal(written.tier, "balanced");
   assert.deepEqual(written.models, { cursor: "cursor-grok-4.6-high-fast" });
   assert.deepEqual(written.subscriptions, {

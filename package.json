@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Harnest MCP coordinates durable handoffs and workflow graphs across OpenCode, Pi, Claude Code, Codex, Cursor, Gemini CLI, Amp, and registered ACP agents.",
+  "description": "Harnest MCP coordinates durable handoffs and workflow graphs across OpenCode, Pi, Claude Code, Codex, Cursor, Amp, and registered ACP agents.",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
@@ -46,11 +46,8 @@
     "quickjs-emscripten-core": "0.32.0",
     "zod": "^4.2.0"
   },
-  "optionalDependencies": {
-    "opencode-taskflow": "0.2.10",
-    "pi-taskflow": "0.2.10",
-    "taskflow-core": "0.2.10",
-    "taskflow-mcp-core": "0.2.10"
+  "devDependencies": {
+    "typebox": "1.4.7"
   },
   "repository": {
     "type": "git",

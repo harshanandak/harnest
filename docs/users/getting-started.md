@@ -5,7 +5,7 @@ Harnest MCP runs from a source checkout. Clients share one local HTTP daemon. A 
 ## Requirements
 
 - Git.
-- Bun and Node.js 22.19 or newer for the default installation with optional Taskflow packages.
+- Bun and Node.js 22 or newer.
 - An MCP client that supports Streamable HTTP or stdio.
 - At least one [supported downstream agent](supported-agents.md), installed and authenticated through its native instructions.
 
@@ -18,10 +18,8 @@ Clone the repository and install dependencies from its default branch:
 ```sh
 git clone https://github.com/harshanandak/harnest.git
 cd harnest
-bun install --frozen-lockfile
+bun install --frozen-lockfile --omit optional
 ```
-
-The default install includes the optional Taskflow packages for explicit Pi and OpenCode compatibility requests. To skip them for plain handoffs and Harnest agent graphs, use `bun install --frozen-lockfile --omit optional` with Node.js 20 or newer.
 
 ## Add the MCP server
 

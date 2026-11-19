@@ -31,7 +31,7 @@ test("installer copies every plugin import, preserves unrelated JSONC config, re
   const plugins = await readdir(new URL("../opencode-plugin/", import.meta.url));
   const expected = [
     "opencode.jsonc",
-    ...["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"].map(name => `agents/${name}-worker.md`),
+    ...["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"].map(name => `agents/${name}-worker.md`),
     "skills/handoff/SKILL.md", "skills/handoff/agents/openai.yaml",
     ...references.map(name => `skills/handoff/references/${name}`),
     ...plugins.map(name => `plugins/harnest/${name}`),
@@ -64,7 +64,7 @@ test("installer copies every plugin import, preserves unrelated JSONC config, re
   assert.doesNotMatch(dynamicPlugin, /__HARNEST_DYNAMIC_CLIENT_URL__|dynamic-tools\.mjs|dynamic-runner\.mjs/);
   assert.equal(await readFile(join(dir, "package.json"), "utf8"), '{"dependencies":{"unrelated":"1"}}');
   const second = await installIntegration(dir, { token: "fixture-token" });
-  assert.deepEqual(second, { changed: [], manifest: null, migrated: [] });
+  assert.deepEqual(second, { changed: [], manifest: null });
   const manifest = JSON.parse(await readFile(first.manifest, "utf8"));
   assert.equal(manifest.files.filter(file => file.backup).length, 2);
   await restoreIntegration(first.manifest);
@@ -148,7 +148,7 @@ test("upgrade backs up changed package assets and preserves canonical plugin opt
   assert.deepEqual(next.plugins, config.plugins);
   assert.equal(next.mcp.servers.harnest.command, undefined);
   assert.equal(next.mcp.servers.harnest.type, "remote");
-  assert.deepEqual(await installIntegration(dir, { token: "fixture-token" }), { changed: [], manifest: null, migrated: [] });
+  assert.deepEqual(await installIntegration(dir, { token: "fixture-token" }), { changed: [], manifest: null });
   await restoreIntegration(upgraded.manifest);
   assert.equal(await readFile(asset, "utf8"), "// earlier local customization\n");
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")), config);

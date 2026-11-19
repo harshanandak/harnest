@@ -56,14 +56,6 @@ test("write without approval is blocked with exit 2 and names the approval marke
   assert.match(String(result.stderr), /metadata\.harnest\.writeApproved/);
 });
 
-test("write-capable policy aliases require the same approval marker", async () => {
-  for (const policy of [{ readOnly: false }, { allowWrites: true }]) {
-    const result = await run(hookPayload({ request: writeRequest({ policy }) }));
-    assert.equal(result.code, 2, JSON.stringify(policy));
-    assert.match(String(result.stderr), /metadata\.harnest\.writeApproved/);
-  }
-});
-
 test("write with approval is allowed", async () => {
   const result = await run(
     hookPayload({ request: writeRequest({ metadata: { harnest: { writeApproved: true } } }) }),
@@ -83,8 +75,8 @@ test("tool denies and Cursor plan or sandbox leave the write approval gate intac
   }
 });
 
-test("Gemini and Amp write handoffs use the same explicit approval marker", async () => {
-  for (const target of ["gemini", "amp"]) {
+test("Amp write handoffs use the same explicit approval marker", async () => {
+  for (const target of ["amp"]) {
     const blocked = await run(hookPayload({ request: writeRequest({ target }) }));
     assert.equal(blocked.code, 2, target);
     assert.match(String(blocked.stderr), /metadata\.harnest\.writeApproved/);

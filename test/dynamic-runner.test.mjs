@@ -125,25 +125,25 @@ test("workflow rows publish the leased native session while its first turn is st
   } finally { finish(); await f.companion.close(); }
 });
 
-test("sequential plan dispatches all seven targets and preserves the status contract", { timeout: 30_000 }, async (t) => {
+test("sequential plan dispatches all six named targets and preserves the status contract", { timeout: 30_000 }, async (t) => {
   const seen = [];
   const f = await fixture(t, async (request) => {
     seen.push(request.target);
     const usage = request.target === "pi" ? { input_tokens: 10, output_tokens: 5, total_cost_usd: 0.01 } : undefined;
     return { sessionId: `s-${request.target}`, result: { finalText: `done:${request.task}` }, ...(usage ? { usage } : {}) };
   });
-  const targets = ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp"];
+  const targets = ["opencode", "pi", "cursor", "claude", "codex", "amp"];
   const plan = targets.map((target, index) => call(`PROMPT-${index}`, {
     target,
     route: target === "opencode" ? { model: "fixture/model" } : target === "amp" ? { variant: "medium" } : {},
     policy: { write: ["opencode", "amp"].includes(target) },
   }));
-  const result = await f.runner.start(f.spec(plan, { requestId: "seven", name: "seven targets", policy: { write: true }, route: {} }));
+  const result = await f.runner.start(f.spec(plan, { requestId: "six", name: "six targets", policy: { write: true }, route: {} }));
   assert.equal(result.state, "completed", JSON.stringify({ error: result.error, invocations: result.invocations }));
-  assert.equal(result.name, "seven targets");
+  assert.equal(result.name, "six targets");
   assert.equal(result.attempt, 1);
   assert.deepEqual(result.output.results.map((value) => value.finalText), targets.map((target, index) => `done:PROMPT-${index}`));
-  assert.equal(result.invocations.length, 7);
+  assert.equal(result.invocations.length, targets.length);
   assert.ok(result.invocations.every((invocation) => invocation.state === "completed"));
   assert.deepEqual(Object.keys(result).sort(), ["argsDigest", "attempt", "completedAt", "controls", "createdAt", "error", "invocations", "invocationsTotal", "name", "output", "phases", "phasesOmitted", "phasesTotal", "progress", "requestId", "revision", "runId", "scriptDigest", "startedAt", "state", "updatedAt", "usageTotals"].sort());
   const status = await f.runner.status({ runId: result.runId });

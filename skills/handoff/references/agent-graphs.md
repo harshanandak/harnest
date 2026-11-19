@@ -1,6 +1,6 @@
 # Mixed-harness agent graphs
 
-Use `handoff_graph_*` when tasks depend on other agents' results. Use `handoff_compare` for independent opinions on the same task and `handoff_workflow` for a single handoff, or a Pi/OpenCode compatibility workflow when an explicit FlowSpec is supplied and the optional Taskflow packages are installed.
+Use `handoff_graph_*` when tasks depend on other agents' results. Use `handoff_compare` for independent opinions on the same task and `handoff_workflow` for a single handoff.
 
 ## Build and run
 

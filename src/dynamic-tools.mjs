@@ -12,7 +12,7 @@ const revision = z.string().regex(/^[a-f0-9]{64}$/);
 const saved = { name, cwd: z.string().min(1).optional(), scope: z.enum(["project", "user"]).optional() };
 export const dynamicInputSchema = z.object({
   requestId: id, name: z.string().max(200).optional(), source, args: z.json().optional(),
-  cwd: z.string().min(1), target: z.enum(["auto", "pi", "opencode", "claude", "codex", "cursor", "gemini", "amp", "acp"]).optional(),
+  cwd: z.string().min(1), target: z.enum(["auto", "pi", "opencode", "claude", "codex", "cursor", "amp", "acp"]).optional(),
   route: object.optional(), policy: object.optional(), context: object.optional(), metadata: object.optional(),
   execution: z.object({
     background: z.boolean().optional(), timeoutMs: z.number().int().min(1).max(86400000).optional(),

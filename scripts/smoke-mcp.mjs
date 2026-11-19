@@ -37,7 +37,7 @@ try {
   assert.equal(Boolean(info.isError), false);
   const host = JSON.parse(info.content[0].text);
   assert.equal(host.runtime.sourceStatus, "current");
-  assert.deepEqual(host.runtime.targets, ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]);
+  assert.deepEqual(host.runtime.targets, ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]);
   assert.equal(host.runtime.routingPolicyVersion, 2);
   const dynamicValidation = await client.callTool({ name: "handoff_dynamic_validate", arguments: { workflow: {
     requestId: "smoke-dynamic-validation", cwd: root, source: "return args.value + 1;", args: { value: 41 }, policy: { write: false },

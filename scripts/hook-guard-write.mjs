@@ -20,7 +20,7 @@ try {
   const request = toolInput.graph ?? toolInput.request ?? toolInput;
   if (!request || typeof request !== "object") process.exit(0);
   const policy = request.policy;
-  const writeCapable = policy?.write === true || policy?.readOnly === false || policy?.allowWrites === true;
+  const writeCapable = policy?.write === true;
   if (!writeCapable) process.exit(0);
   if (request.metadata?.harnest?.writeApproved === true) process.exit(0);
   process.stderr.write(

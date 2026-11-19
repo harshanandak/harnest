@@ -14,20 +14,11 @@
   "properties": {
     "protocolVersion": { "const": "1.0" },
     "requestId": { "type": "string", "minLength": 1 },
-    "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+    "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"] },
     "task": { "type": "string", "minLength": 1 },
     "cwd": { "type": "string", "minLength": 1 },
     "context": {},
     "contextDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "workflow": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "engine": { "const": "taskflow" },
-        "name": { "type": "string" },
-        "spec": {}
-      }
-    },
     "route": {
       "type": "object",
       "additionalProperties": false,
@@ -57,7 +48,7 @@
         "background": { "type": "boolean" },
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
         "sessionId": { "type": "string" },
-        "addDirs": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 1024 }, "description": "Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval." },
+        "addDirs": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 1024 }, "description": "Existing absolute directories for Claude, Codex, Cursor,. Codex requires write policy. External write roots require confirmed write approval." },
         "attachments": {
           "type": "array",
           "maxItems": 4,
@@ -83,8 +74,6 @@
       "additionalProperties": false,
       "properties": {
         "write": { "type": "boolean", "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true." },
-        "readOnly": { "type": "boolean", "description": "Legacy alias for !write; must not contradict write or allowWrites" },
-        "allowWrites": { "type": "boolean", "description": "Legacy alias for write; must not contradict write or readOnly" },
         "tools": {
           "oneOf": [
             { "type": "array", "items": { "type": "string", "minLength": 1 } },
@@ -124,7 +113,7 @@
             "harnessOrder": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "fallbacks": { "type": "boolean" },
             "contextTokens": { "type": "number", "minimum": 0 },
-            "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"] },
+            "target": { "enum": ["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"] },
             "weights": { "type": "object" },
             "route": { "type": "object" },
             "require": { "type": "object" },

@@ -18,7 +18,7 @@ const stats = { tokens: { total: 17 }, cost: 0.01 };
 function request(target, overrides = {}) {
   return {
     requestId: `stream-${target}`, target, cwd: process.cwd(), task: "Return the final result.",
-    context: target === "opencode" ? { graph: { graphId: "fixture" } } : {}, contextDigest: "a".repeat(64), workflow: null,
+    context: target === "opencode" ? { graph: { graphId: "fixture" } } : {}, contextDigest: "a".repeat(64),
     route: { provider: "openai", model: "test-model" },
     execution: { timeoutMs: 10_000, sessionId: target === "opencode" ? null : "resumed-session" },
     policy: { write: target === "opencode", tools: [] }, ...overrides,
@@ -207,76 +207,29 @@ for (const [code, errorMessage, kind] of [[0, null, null], [0, "Authentication r
   });
 }
 
-for (const taskflow of [false, true]) {
-  test(`Pi real RPC child preserves early Taskflow identity and ${taskflow ? "saved-flow" : "post-steer"} final output through a large stream`, { timeout: 20_000 }, async () => {
-    const script = String.raw`
-      if (process.argv.includes("--version")) { console.log("opencode v2.2.1"); process.exit(0); }
-      const { once } = require('node:events');
-      const { createInterface } = require('node:readline');
-      async function emit(value) { if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain'); }
-      createInterface({input:process.stdin}).on('line', async (line) => {
-        const command=JSON.parse(line);
-        if (command.type==='prompt') {
-          await emit({type:'response',id:command.id,command:command.type,success:true});
-          await emit({type:'message_end',message:{role:'toolResult',toolName:'taskflow',details:{finalOutput:'SAVED',state:{status:'completed',runId:'early-flow',totalUsage:{totalTokens:17}}}}});
-          for(let i=0;i<1800;i++) await emit({type:'diagnostic',payload:'x'.repeat(1024)});
-          await emit({type:'message_end',message:{role:'assistant',content:'STEERED'}});
-          await emit({type:'agent_settled'});
-        } else await emit({type:'response',id:command.id,command:command.type,success:true,
-          data:command.type==='get_state'?${JSON.stringify(state)}:command.type==='get_last_assistant_text'?{text:'STEERED'}:${JSON.stringify(stats)}});
-      });
-    `;
-    const adapter = new PiAdapter({ materializeInlineFlows: false, taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", launch: { command: process.execPath, args: ["-e", script, "--"] } });
-    const output = await adapter.run(request("pi", taskflow ? {
-      workflow: { spec: { name: "retained-flow", phases: [{ id: "final", task: "Return result", final: true }] } },
-    } : {}));
-    assert.equal(output.result.finalText, taskflow ? "SAVED" : "STEERED");
-    assert.equal(output.sessionId, state.sessionId);
-    assert.equal(output.workflowRunId, "early-flow");
-    assert.deepEqual(output.usage, stats);
-    assert.equal(output.result.eventSummary.count, 1808);
-  });
-}
-
-for (const taskflow of [false, true]) {
-  test(`Pi bounds ${taskflow ? "unrelated assistant" : "stale shorthand Taskflow"} text without rejecting the required final output`, async () => {
-    const adapter = new PiAdapter({ command: "fake-pi", materializeInlineFlows: false, taskflowExtensionPath: "C:\\pinned\\pi-taskflow\\dist\\index.js", spawnFn: () => new ScriptChild("pi", (child) => {
-      child.emitJson({ type: "message_end", message: { role: "toolResult", toolName: "taskflow", details: {
-        finalOutput: taskflow ? "SAVED" : "x".repeat(1024 * 1024 + 1),
-        state: { status: "completed", runId: "bounded-flow" },
-      } } });
-      assistant(child, "pi", taskflow ? "x".repeat(1024 * 1024 + 1) : "STEERED");
-    }) });
-    const output = await adapter.run(request("pi", taskflow ? { workflow: {
-      spec: { name: "required-flow", phases: [{ id: "final", task: "Return result", final: true }] },
-    } } : {}));
-    assert.equal(output.result.finalText, taskflow ? "SAVED" : "STEERED");
-    assert.equal(output.workflowRunId, "bounded-flow");
-  });
-}
-
-test("Pi rejects an oversized required Taskflow result despite a short assistant answer", async () => {
-  const adapter = new PiAdapter({ command: "fake-pi", materializeInlineFlows: false, spawnFn: () => new ScriptChild("pi", (child) => {
-    child.emitJson({ type: "message_end", message: { role: "toolResult", toolName: "taskflow", details: {
-      finalOutput: "x".repeat(1024 * 1024 + 1), state: { status: "completed", runId: "large-flow" },
-    } } });
-    assistant(child, "pi", "short answer");
-  }) });
-  await assert.rejects(adapter.run(request("pi", { workflow: {
-    spec: { name: "required-flow", phases: [{ id: "final", task: "Return result", final: true }] },
-  } })), (error) => error.details.kind === "output-limit");
-});
-
-test("OpenCode preserves a phase's output-limit through the Taskflow handler", async (t) => {
-  const cwd = await mkdtemp(join(tmpdir(), "opencode-phase-limit-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
-  const adapter = fakeAdapter("opencode", (child) => {
-    child.emitJson({ type: "error", error: { message: "Authentication required", status: 401 } });
-    child.stdout.emit("data", Buffer.alloc(2 * 1024 * 1024 + 1, "x"));
-  });
-  await assert.rejects(adapter.run(request("opencode", { cwd, workflow: {
-    spec: { name: "large-phase", phases: [{ id: "final", type: "agent", task: "Return result", final: true }] },
-  } })), (error) => error.details.kind === "output-limit");
+test("Pi preserves native session identity and final text through a large RPC stream", { timeout: 20_000 }, async () => {
+  const script = String.raw`
+    if (process.argv.includes("--version")) { console.log("opencode v2.2.1"); process.exit(0); }
+    const { once } = require('node:events');
+    const { createInterface } = require('node:readline');
+    async function emit(value) { if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain'); }
+    createInterface({input:process.stdin}).on('line', async (line) => {
+      const command=JSON.parse(line);
+      if (command.type==='prompt') {
+        await emit({type:'response',id:command.id,command:command.type,success:true});
+        for(let i=0;i<1800;i++) await emit({type:'diagnostic',payload:'x'.repeat(1024)});
+        await emit({type:'message_end',message:{role:'assistant',content:'STEERED'}});
+        await emit({type:'agent_settled'});
+      } else await emit({type:'response',id:command.id,command:command.type,success:true,
+        data:command.type==='get_state'?${JSON.stringify(state)}:command.type==='get_last_assistant_text'?{text:'STEERED'}:${JSON.stringify(stats)}});
+    });
+  `;
+  const adapter = new PiAdapter({ launch: { command: process.execPath, args: ["-e", script, "--"] } });
+  const output = await adapter.run(request("pi"));
+  assert.equal(output.result.finalText, "STEERED");
+  assert.equal(output.sessionId, state.sessionId);
+  assert.deepEqual(output.usage, stats);
+  assert.equal(output.result.eventSummary.count, 1807);
 });
 
 test("Pi retains only the stderr byte tail and reports its end after large diagnostics", async () => {

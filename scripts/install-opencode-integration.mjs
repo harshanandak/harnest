@@ -16,11 +16,6 @@ export function openCodeConfigDir(env = process.env) {
   return join(env.XDG_CONFIG_HOME || join(env.USERPROFILE || env.HOME, ".config"), "opencode");
 }
 
-export function isLegacyOpenCodePlugin(entry) {
-  const name = Array.isArray(entry) ? entry[0] : entry?.package ?? entry;
-  return typeof name === "string" && /(?:^|[\\/])agent-companion(?:\.(?:m?js|ts)|@[^\\/]+)?[\\/]?$/.test(name);
-}
-
 // Tokenize strings before stripping JSONC comments/trailing commas so URLs and
 // escaped quotes inside user settings remain intact. JSON.parse validates syntax.
 export function parseConfig(raw) {
@@ -102,7 +97,7 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   if (config.mcp !== undefined && !object(config.mcp)) throw new Error("mcp must be an object");
   config.mcp ??= {};
   if (config.mcp.servers !== undefined && !object(config.mcp.servers)) throw new Error("mcp.servers must be an object");
-  if (Object.hasOwn(config, "plugin") || Object.hasOwn(config.mcp, "harnest") || Object.hasOwn(config.mcp, "agent-companion")
+  if (Object.hasOwn(config, "plugin") || Object.hasOwn(config.mcp, "harnest")
     || Object.entries(config.mcp).some(([key, entry]) =>
     key !== "servers" && object(entry) && ["type", "enabled", "command", "url"].some((field) => Object.hasOwn(entry, field)))) {
     migrateConfig();
@@ -114,26 +109,10 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   const plugins = config.plugins ?? [];
   if (plugins.some(Array.isArray)) migrateConfig();
 
-  const migrated = [];
-  const previous = Object.hasOwn(servers, "harnest") ? servers.harnest
-    : Object.hasOwn(servers, "agent-companion") ? servers["agent-companion"] : {};
+  const previous = Object.hasOwn(servers, "harnest") ? servers.harnest : {};
   if (!object(previous)) throw new Error("The Harnest MCP entry must be an object");
-  if (Object.hasOwn(servers, "agent-companion")) {
-    if (Object.hasOwn(servers, "harnest")) throw new Error("Consolidate the harnest and agent-companion MCP entries before installing");
-    migrated.push("mcp.servers.agent-companion");
-    delete servers["agent-companion"];
-  }
   const entry = "./plugins/harnest";
-  const activePlugin = plugins.some((value) => (value?.package ?? value) === entry);
-  const legacyPlugins = plugins.filter(isLegacyOpenCodePlugin);
-  if (legacyPlugins.length > 1 || (legacyPlugins.length && activePlugin)) {
-    throw new Error("Consolidate the harnest and agent-companion plugin registrations before installing");
-  }
-  const [legacyPlugin] = legacyPlugins;
-  if (legacyPlugin) migrated.push("agent-companion plugin registration");
-  config.plugins = legacyPlugin
-    ? plugins.map((value) => value === legacyPlugin ? (object(value) ? { ...value, package: entry } : entry) : value)
-    : activePlugin ? plugins : [...plugins, entry];
+  config.plugins = plugins.some((value) => (value?.package ?? value) === entry) ? plugins : [...plugins, entry];
 
   await prepareDaemon?.();
   token ??= await readDaemonToken();
@@ -159,7 +138,7 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
     if (source === "opencode-plugin/dynamic-ui.mjs") bytes = Buffer.from(bytes.toString("utf8").replace("__HARNEST_DYNAMIC_CLIENT_URL__", pathToFileURL(join(root, "src", "daemon-client.mjs")).href));
     candidates.push({ path: join(configDir, relative), bytes });
   };
-  for (const name of ["opencode-worker.md", "pi-worker.md", "cursor-worker.md", "claude-worker.md", "codex-worker.md", "gemini-worker.md", "amp-worker.md", "acp-worker.md"]) {
+  for (const name of ["opencode-worker.md", "pi-worker.md", "cursor-worker.md", "claude-worker.md", "codex-worker.md", "amp-worker.md", "acp-worker.md"]) {
     await add(`opencode-agents/${name}`, `agents/${name}`);
   }
   const addTree = async (source, relative) => {
@@ -184,7 +163,7 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   }
   await assertConfigUnchanged();
   if (unchanged) await replaceWithBackup(configPath, original, original, { sensitive: true });
-  if (!changes.length) return { changed: [], manifest: null, migrated };
+  if (!changes.length) return { changed: [], manifest: null };
   const backupDir = join(configDir, ".harnest-backups", backupStamp());
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
   const manifest = { version: 1, files: [] };
@@ -208,7 +187,7 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   } catch (error) {
     throw new Error(`Installation interrupted; reverse path: node scripts/install-opencode-integration.mjs --restore "${manifestPath}"`, { cause: error });
   }
-  return { changed: changes.map(file => file.path), manifest: manifestPath, migrated };
+  return { changed: changes.map(file => file.path), manifest: manifestPath };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

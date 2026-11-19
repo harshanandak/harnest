@@ -1,3 +1,4 @@
+import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 import { validateAdapterExecution } from "../execution-controls.mjs";
 import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
@@ -164,10 +165,6 @@ function isPolicySupported(policy = {}) {
   return { supported: true };
 }
 
-function assertSessionWorkflow(workflow) {
-  if (workflow?.spec == null && workflow?.nodes == null) return;
-  throw adapterError("Claude session mode cannot execute a Taskflow graph; select pi or opencode for workflow.spec/workflow.nodes", "policy");
-}
 
 // Field order mirrors the one-shot Claude adapter: stable context first, the
 // variable task and identifiers last, so a provider prefix cache can match.
@@ -176,7 +173,6 @@ function handoffEnvelope(request) {
     protocolVersion: request.protocolVersion || "1.0",
     contextDigest: request.contextDigest || digestContext(request.context),
     context: request.context ?? null,
-    flowSpec: request.workflow?.spec || null,
     cwd: request.cwd,
     policy: request.policy || { write: false, tools: [], maxCostUsd: null },
     task: request.task,
@@ -1454,7 +1450,7 @@ export class ClaudeSessionAdapter {
   async run(request, { signal, onProgress } = {}) {
     request = validateAdapterExecution(request, "claude", "session");
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
-    assertSessionWorkflow(request?.workflow);
+    assertPromptOnlyWorkflow("claude", request?.workflow);
     const controlError = routeControlError("claude", request.route, "session");
     if (controlError) throw adapterError(controlError, "policy");
     const policyCheck = isPolicySupported(request.policy || {});

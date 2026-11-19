@@ -18,8 +18,6 @@ export function assertGraphLeaf(request) {
   const { target, route, policy } = request;
   assertAdapterRoute(target, route);
   assertAdapterPolicy(target, policy, request.execution);
-  // Graph nodes are prompt-only. Pi's Taskflow budget is not enforced on this
-  // path, and OpenCode has no prompt-only budget enforcement either.
   if (target !== "claude" && policy.maxCostUsd != null) throw graphError("policy", `${target} does not enforce maxCostUsd for prompt-only graph nodes`);
   if (target === "opencode" && !route.model) throw graphError("validation", "OpenCode graph node requires explicit route.model");
   if (target !== "acp" && route.model && !/^[a-zA-Z0-9._/[\]=,+-]+$/.test(route.model)) throw graphError("validation", `invalid ${target} route.model`);
@@ -43,11 +41,9 @@ function text(value, label) {
 
 function policy(input = {}, parent) {
   only(input, POLICY_FIELDS, "policy");
-  const aliases = [input.write, input.readOnly === undefined ? undefined : !input.readOnly, input.allowWrites].filter((v) => v !== undefined);
-  for (const key of ["write", "readOnly", "allowWrites"]) if (input[key] !== undefined && typeof input[key] !== "boolean") throw graphError("validation", `policy.${key} must be boolean`);
-  if (aliases.some((v) => v !== aliases[0])) throw graphError("policy", "contradictory write policy aliases");
+  if (input.write !== undefined && typeof input.write !== "boolean") throw graphError("validation", "policy.write must be boolean");
   const result = {
-    write: aliases[0] ?? parent?.write ?? false,
+    write: input.write ?? parent?.write ?? false,
     ...inheritPolicyControls(input, parent, (message) => graphError("policy", message)),
     maxCostUsd: input.maxCostUsd ?? parent?.maxCostUsd ?? null,
   };
@@ -111,7 +107,7 @@ export async function normalizeGraph(input) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) || ["__proto__", "constructor", "prototype"].includes(id)) throw graphError("validation", `invalid node id: ${id}`);
     if (ids.has(id)) throw graphError("validation", `duplicate node id: ${id}`);
     ids.add(id);
-    if (!NODE_TARGETS.has(node.target)) throw graphError("validation", `node ${id} requires an explicit target (opencode, pi, cursor, claude, codex, gemini, amp, acp, or auto)`);
+    if (!NODE_TARGETS.has(node.target)) throw graphError("validation", `node ${id} requires an explicit target (opencode, pi, cursor, claude, codex, amp, acp, or auto)`);
     const dependsOn = node.dependsOn ?? [];
     if (!Array.isArray(dependsOn) || dependsOn.some((v) => typeof v !== "string") || new Set(dependsOn).size !== dependsOn.length) throw graphError("validation", `invalid dependencies: ${id}`);
     if (dependsOn.length > 256) throw graphError("validation", `node ${id} has more than 256 dependencies`);

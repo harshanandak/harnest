@@ -21,45 +21,29 @@ export function bridgeEntry() {
   };
 }
 
-const codexServerTable = /^[ \t]*\[\s*(?:mcp_servers|"mcp_servers"|'mcp_servers')\s*\.\s*["']?(harnest|agent-companion)["']?\s*(?:\.\s*(.+?))?\s*\][ \t]*(?:#.*)?$/;
-const codexOldPluginTable = /^\[\s*(?:plugins\s*\.\s*["']agent-companion(?:@[^"']+)?["']|marketplaces\s*\.\s*["']?agent-companion(?:-local)?["']?)\s*(?:\.|\])/;
+const codexServerTable = /^[ \t]*\[\s*(?:mcp_servers|"mcp_servers"|'mcp_servers')\s*\.\s*["']?harnest["']?\s*(?:\.\s*(.+?))?\s*\][ \t]*(?:#.*)?$/;
 
 // Replace just the Harnest transport table(s), keeping all other Codex configuration verbatim.
-export function codexConfig(previous, entry, migrated = []) {
+export function codexConfig(previous, entry) {
   const tables = (previous ?? "").split(/(?=^\s*\[{1,2}[^\r\n\]]+\]{1,2}\s*(?:#.*)?$)/m);
   const unmanaged = [];
   const keptSettings = [];
-  const serverHeaders = tables.map((section) => codexServerTable.exec(section.trimStart().split(/\r?\n/, 1)[0]));
-  const hasCurrent = serverHeaders.some((header) => header?.[1] === "harnest");
   const transportKey = /^(?:command|args|env|env_vars|cwd|url|http_headers|env_http_headers|bearer_token_env_var|auth)\s*=/;
-  for (const [index, section] of tables.entries()) {
-    const name = section.trimStart().split(/\r?\n/, 1)[0];
-    const header = serverHeaders[index];
-    if (codexOldPluginTable.test(name)) {
-      migrated.push(name.startsWith("[plugins") ? "agent-companion plugin" : "agent-companion marketplace");
-    } else if (/^\[\s*(?:plugins|marketplaces)\s*\]/.test(name)) {
-      unmanaged.push(section.replace(/^[ \t]*["']?agent-companion(?:-local|@[^"'\r\n]+)?["']?[ \t]*=.*(?:\r?\n|$)/gm, () => {
-        migrated.push(name.includes("marketplaces") ? "agent-companion marketplace" : "agent-companion plugin");
-        return "";
-      }));
-    } else if (!header) {
+  for (const section of tables) {
+    const header = codexServerTable.exec(section.trimStart().split(/\r?\n/, 1)[0]);
+    if (!header) {
       unmanaged.push(section);
-    } else {
-      if (header[1] === "agent-companion") {
-        if (!migrated.includes("mcp_servers.agent-companion")) migrated.push("mcp_servers.agent-companion");
-        if (hasCurrent) continue;
-      }
-      if (header[2]) {
-        if (!["env", "http_headers", "env_http_headers"].includes(header[2].replaceAll(/["']/g, ""))) {
-          unmanaged.push(header[1] === "agent-companion" ? section.replace(name, name.replace("agent-companion", "harnest")) : section);
-        }
-        continue;
-      }
-      let removing = false;
-      for (const line of section.trimStart().split(/\r?\n/).slice(1)) {
-        if (/^[\w-]+\s*=/.test(line.trim())) removing = transportKey.test(line.trim());
-        if (!removing && line.trim()) keptSettings.push(line);
-      }
+      continue;
+    }
+    const nested = header[1];
+    if (nested) {
+      if (!["env", "http_headers", "env_http_headers"].includes(nested.replaceAll(/["']/g, ""))) unmanaged.push(section);
+      continue;
+    }
+    let removing = false;
+    for (const line of section.trimStart().split(/\r?\n/).slice(1)) {
+      if (/^[\w-]+\s*=/.test(line.trim())) removing = transportKey.test(line.trim());
+      if (!removing && line.trim()) keptSettings.push(line);
     }
   }
   const remainder = unmanaged.join("").trimEnd();
@@ -81,9 +65,8 @@ export async function installHostConfig(host, { home = homedir(), codexHome = pr
   if (host !== "codex") throw new Error("Expected codex or cursor");
   const path = join(codexHome, "config.toml");
   const previous = await readExisting(path);
-  const migrated = [];
-  const backup = await replaceWithBackup(path, codexConfig(previous, entry, migrated), previous, { sensitive: true });
-  return { path, backup, migrated };
+  const backup = await replaceWithBackup(path, codexConfig(previous, entry), previous, { sensitive: true });
+  return { path, backup };
 }
 
 const jsonOptions = (format) => ({ disallowComments: format === "json", allowTrailingComma: format === "jsonc" });
@@ -119,17 +102,15 @@ function removeServerProperty(text, map, property) {
   ]);
 }
 
-export async function readJsonServers(path, key, format = "json") {
+export async function readJsonServer(path, key, format = "json") {
   const raw = await readExisting(path);
-  if (raw === null) return {};
+  if (raw === null) return undefined;
   const root = parseHostJson(raw.replace(/^\uFEFF/, ""), path, format);
   const servers = propertyValue(root, key, path);
-  if (!servers || servers.type === "null") return {};
+  if (!servers || servers.type === "null") return undefined;
   if (servers.type !== "object") throw new Error(`Invalid MCP configuration: ${path}`);
-  return Object.fromEntries(["harnest", "agent-companion"].flatMap((name) => {
-    const node = propertyValue(servers, name, path);
-    return node ? [[name, getNodeValue(node)]] : [];
-  }));
+  const node = propertyValue(servers, "harnest", path);
+  return node && getNodeValue(node);
 }
 
 export async function installJsonServer(path, key, entry, { existingOnly = false, format = "json" } = {}) {
@@ -140,11 +121,9 @@ export async function installJsonServer(path, key, entry, { existingOnly = false
   const servers = propertyValue(root, key, path);
   if (servers && !["object", "null"].includes(servers.type)) throw new Error(`Invalid MCP configuration: ${path}`);
   const map = servers?.type === "object" ? servers : undefined;
-  const legacy = propertyValue(map, "agent-companion", path);
   const current = propertyValue(map, "harnest", path);
-  if (existingOnly && !legacy && !current) return null;
+  if (existingOnly && !current) return null;
 
-  if (legacy) text = removeServerProperty(text, map, legacy.parent);
   const options = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: text.includes("\r\n") ? "\r\n" : "\n" } };
   const edit = (location, value) => { text = applyEdits(text, modify(text, location, value, options)); };
   if (!map) edit([key], { harnest: entry });
@@ -153,8 +132,7 @@ export async function installJsonServer(path, key, entry, { existingOnly = false
   }
   parseHostJson(text, path, format);
   const backup = await replaceWithBackup(path, bom + text, previous, { sensitive: true });
-  const migrated = legacy ? [`${key}.agent-companion`] : [];
-  const result = { path, backup, migrated };
+  const result = { path, backup };
   if (previous === null) result.created = true;
   return result;
 }

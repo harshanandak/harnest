@@ -333,7 +333,7 @@ export function createRouteResolver(options = {}) {
     const resolved = await resolveOnce(input);
     assertAdapterRoute(resolved.target, resolved.route);
     if (resolved.target === "opencode") {
-      assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution, resolved.workflow);
+      assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution);
       // require.liveControl stays a hard gate after a local resolver override.
       if (resolved.metadata?.harnest?.routingDecision?.requireLiveControl === true
         && openCodeUsesSharedService(resolved, options.openCodeServerUrl)) {

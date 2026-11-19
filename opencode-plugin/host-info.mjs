@@ -25,11 +25,6 @@ const WORKERS = [
     notes: "One-shot exec with JSONL events in trace. Read-only maps to --sandbox read-only; write uses workspace-write (never danger-full-access). Resume via execution.sessionId; no live message/reroute.",
   },
   {
-    agent: "gemini-worker",
-    target: "gemini",
-    notes: "Prompt-only attached one-shot requiring Gemini CLI v0.62.0. Temporary settings/admin policy preserves native auth; any OS system-policy TOML rejects before inference. Read-only uses a fixed safe read-tool allowlist without shell/write; write adds verified coding tools including run_shell_command for build/test, write_file, and replace. Unknown tools, plan exit, MCP, extensions, and hooks stay denied. This is not a filesystem sandbox. Resume via execution.sessionId; session transport and live controls are unsupported.",
-  },
-  {
     agent: "amp-worker",
     target: "amp",
     notes: "Prompt-only attached one-shot, write-only with explicit approval. Requires empty tools and null maxCostUsd. Supports native Linux/macOS or the entire MCP server running inside WSL; native Windows rejects before inference. Generated settings are risk reduction, not containment. Resume via execution.sessionId; session transport and live controls are unsupported.",
@@ -77,14 +72,14 @@ export function hostInfoSnapshot(env = process.env) {
     launchPath: {
       direct: "Call harnest_handoff_workflow directly as an MCP tool when child visibility is not needed.",
       nativeChild:
-        "Call the subagent tool with the matching worker agent ID (opencode-worker, pi-worker, cursor-worker, claude-worker, codex-worker, gemini-worker, amp-worker, acp-worker) so the handoff runs in a visible OpenCode child session; the worker pages status/trace and returns the durable receipt.",
+        "Call the subagent tool with the matching worker agent ID (opencode-worker, pi-worker, cursor-worker, claude-worker, codex-worker, amp-worker, acp-worker) so the handoff runs in a visible OpenCode child session; the worker pages status/trace and returns the durable receipt.",
     },
     workers: WORKERS,
     graphWorkflows: "Harnest coordinates mixed-harness DAGs. Validate/start with handoff_graph_*, inspect node child job IDs, and selectively resume unsuccessful steps. Native panels are host-dependent; graph status is the portable view.",
     dynamicWorkflows: "Harnest owns JavaScript orchestration across all supported harnesses. Use handoff_dynamic_* for scripts, saved versions, history and durable controls. Recovery reuses an ordered prefix. Claude's workflow runtime is not required.",
     writeApproval: {
       marker: "metadata.harnest.writeApproved=true",
-      appliesTo: "write-capable handoff_workflow and handoff_graph_start calls on guarded hosts, including policy.write=true, policy.readOnly=false, and policy.allowWrites=true",
+      appliesTo: "write-capable handoff_workflow and handoff_graph_start calls on guarded hosts with policy.write=true",
       scope: "The lead confirms the intended write scope before setting the marker; there is no separate writeScope protocol field.",
     },
     nestedHandoffs: "A nested handoff remains subject to the child host's approval and sandbox restrictions and cannot widen them.",
@@ -98,7 +93,6 @@ export function hostInfoSnapshot(env = process.env) {
       cursor: "oneshot rejects live controls; session uses ACP cancel/model negotiation and rejects mid-turn messages",
       claude: "oneshot rejects live controls; session uses SDK streaming guidance with consumption evidence and acknowledged setModel",
       codex: "oneshot rejects live controls; session uses app-server turn/steer and owned queued follow-ups",
-      gemini: "prompt-only oneshot rejects live controls and execution.transport=session; follow-ups resume by native session identity",
       amp: "attached oneshot rejects live controls and execution.transport=session; follow-ups resume by native thread identity",
       acp: "attached oneshot rejects live controls and execution.transport=session; follow-ups resume or load the negotiated native session identity",
     },

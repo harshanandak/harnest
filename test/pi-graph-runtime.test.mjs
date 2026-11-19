@@ -23,6 +23,7 @@ test("Pi executes the installed graph tools with real schemas, persistence and s
       } }),
     }),
   });
+  try {
   const shim = moduleUrl(`
     import { createDaemonClient as create } from ${JSON.stringify(new URL("../src/daemon-client.mjs", import.meta.url).href)};
     export const createDaemonClient = () => create({ port: ${daemon.port}, directory: ${JSON.stringify(daemonDirectory)} });
@@ -33,9 +34,8 @@ test("Pi executes the installed graph tools with real schemas, persistence and s
     .replace('"__HARNEST_DAEMON_SETTINGS_URL__"', JSON.stringify(new URL("../src/daemon-settings.mjs", import.meta.url).href))
     .replace('"__HARNEST_DYNAMIC_VIEW_URL__"', JSON.stringify(new URL("../src/dynamic-view.mjs", import.meta.url).href))
     .replace('"__HARNEST_LAUNCH_COMMAND_URL__"', JSON.stringify(new URL("../src/launch-command.mjs", import.meta.url).href))
-    .replace('"@earendil-works/pi-ai"', JSON.stringify(import.meta.resolve("@earendil-works/pi-ai")))
+    .replace('"@earendil-works/pi-ai"', JSON.stringify(new URL("./fixtures/pi-ai-string-enum.mjs", import.meta.url).href))
     .replace('"typebox"', JSON.stringify(import.meta.resolve("typebox")));
-  try {
     const tools = new Map(), entries = [];
     const { default: extension } = await import(moduleUrl(source));
     extension({ registerTool: tool => tools.set(tool.name, tool), registerCommand() {}, on() {}, appendEntry: (type, data) => entries.push({ type, data }) });

@@ -95,7 +95,6 @@ export async function detectAllowance(run = defaultRun, { codexQuotaProbe = prob
     claude: { signal: "none", note: "claude doctor reports install health only; no auth/quota signal" },
     opencode: { signal: "none", note: "no clean read-only auth probe; manual stays" },
     pi: { providers: piProviders },
-    gemini: { signal: "none", note: "no verified read-only auth/quota probe; unknown" },
     amp: { signal: "none", note: "no verified read-only auth/quota probe; unknown" },
   };
 }
@@ -170,7 +169,7 @@ if (isMain) {
     `  cursor: auth=${detection.cursor.auth} (${detection.cursor.signal})`,
     `  pi: ready=[${readyProviders.join(", ") || "none"}] down=[${downProviders.join(", ") || "none"}]`,
     `  pi headroom=${headroom === null ? "no signal" : headroom}`,
-    "  cursor/pi/claude/generic-opencode/gemini/amp quota: unknown — manual stays",
+    "  cursor/pi/claude/generic-opencode/amp quota: unknown — manual stays",
   ].join("\n"));
   for (const suggestion of subsidySuggestions(detection, policy)) {
     console.log(`  suggest ${suggestion}`);
