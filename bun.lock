@@ -19,6 +19,7 @@
       "optionalDependencies": {
         "opencode-taskflow": "0.2.10",
         "pi-taskflow": "0.2.10",
+        "taskflow-core": "0.2.10",
         "taskflow-mcp-core": "0.2.10",
       },
     },

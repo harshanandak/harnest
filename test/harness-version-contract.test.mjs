@@ -34,6 +34,7 @@ test("published handoff schema enumerates only V2", async () => {
 test("stored OpenCode V1 routes are ineligible for new work while historical receipts remain readable", async () => {
   const request = normalizeRequest({
     requestId: "historical-opencode", target: "opencode", task: "Inspect", cwd: process.cwd(),
+    policy: { write: true },
   });
   const oldRoute = { model: "openai/fixture", harnessVersion: "v1" };
   const resolve = createRouteResolver({
@@ -69,9 +70,9 @@ test("OpenCode single, graph, and dynamic leaves reject unenforceable tools befo
   }] }), /OpenCode V1 is unsupported/);
 });
 
-test("MCP comparison and review schemas reject Amp and ACP while preserving all six read-only targets", () => {
+test("MCP comparison and review schemas expose only the five read-only targets", () => {
   const server = createServer({ detachBackground: false });
-  const targets = ["opencode", "pi", "cursor", "claude", "codex", "gemini"];
+  const targets = ["pi", "cursor", "claude", "codex", "gemini"];
   const inputFor = (collection, target) => ({
     request: { requestId: `readonly-${target}`, target, task: "inspect", cwd: process.cwd() },
     [collection]: [
@@ -82,6 +83,7 @@ test("MCP comparison and review schemas reject Amp and ACP while preserving all 
   for (const [toolName, collection] of [["handoff_compare", "candidates"], ["handoff_review", "reviewers"]]) {
     const schema = server._registeredTools[toolName].inputSchema;
     for (const target of targets) assert.equal(schema.safeParse(inputFor(collection, target)).success, true, `${toolName}:${target}`);
+    assert.equal(schema.safeParse(inputFor(collection, "opencode")).success, false, `${toolName}:OpenCode must fail at the MCP boundary`);
     assert.equal(schema.safeParse(inputFor(collection, "amp")).success, false, `${toolName}:Amp must fail at the MCP boundary`);
     assert.equal(schema.safeParse(inputFor(collection, "acp")).success, false, `${toolName}:ACP must fail at the MCP boundary`);
   }

@@ -77,7 +77,7 @@ export function hostInfoSnapshot(env = process.env) {
     launchPath: {
       direct: "Call harnest_handoff_workflow directly as an MCP tool when child visibility is not needed.",
       nativeChild:
-        "Launch the task tool with the matching worker subagent (opencode-worker, pi-worker, cursor-worker, claude-worker, codex-worker, gemini-worker, amp-worker, acp-worker) so the handoff runs in a visible OpenCode child session; the worker pages status/trace and returns the durable receipt.",
+        "Call the subagent tool with the matching worker agent ID (opencode-worker, pi-worker, cursor-worker, claude-worker, codex-worker, gemini-worker, amp-worker, acp-worker) so the handoff runs in a visible OpenCode child session; the worker pages status/trace and returns the durable receipt.",
     },
     workers: WORKERS,
     graphWorkflows: "Harnest coordinates mixed-harness DAGs. Validate/start with handoff_graph_*, inspect node child job IDs, and selectively resume unsuccessful steps. Native panels are host-dependent; graph status is the portable view.",

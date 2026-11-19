@@ -158,6 +158,7 @@ test("catalog rejects a V1 route and never requests metadata from a V1 binary", 
   assert.equal((await catalog({ target: "opencode", route: { harnessVersion: "v1" } })).reason, "opencode:v2-required");
   assert.deepEqual(calls, []);
   assert.equal((await catalog({ target: "opencode" })).reason, "opencode:v2-required");
+  assert.equal((await catalog({ target: "opencode" })).reason, "opencode:v2-required");
   assert.deepEqual(calls.map((args) => args.at(-1)), ["--version"]);
   assert.equal((await catalog({ target: "dsh" })).reason, "catalog:unsupported-target");
 });
@@ -565,20 +566,28 @@ test("claude returns managed aliases with no probe", async () => {
 });
 
 test("concurrent callers coalesce; TTL expiry refetches", async () => {
-  let count = 0;
-  const probe = async () => {
-    count++;
+  const calls = [];
+  const probe = async ({ args }) => {
+    calls.push(args.at(-1));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    return { status: 0, stdout: JSON.stringify({ data: [] }), stderr: "" };
+    return { status: 0, stdout: args.at(-1) === "--version" ? "2.2.1" : JSON.stringify(OPENCODE_API), stderr: "" };
   };
   let timestamp = 1_000_000;
-  const getCatalog = createModelCatalog({ probe, now: () => timestamp, env: { HARNEST_OPENCODE_V2: "oc-fake" } });
+  const getCatalog = createModelCatalog({ probe, now: () => timestamp, ttlMs: 1000, env: { HARNEST_OPENCODE_V2: "oc-fake" } });
   const [first, second] = await Promise.all([getCatalog({ target: "opencode" }), getCatalog({ target: "opencode" })]);
-  assert.equal(count, 1);
+  assert.equal(first.status, "available");
+  assert.ok(first.models.some((model) => model.id === "gpt-5.6-sol"));
+  assert.equal(calls.length, 2);
   assert.equal(second, first);
-  timestamp += 3_600_001;
-  await getCatalog({ target: "opencode" });
-  assert.equal(count, 2);
+  timestamp += 999;
+  assert.equal(await getCatalog({ target: "opencode" }), first);
+  assert.equal(calls.length, 2);
+  timestamp += 2;
+  const refreshed = await getCatalog({ target: "opencode" });
+  assert.equal(refreshed.status, "available");
+  assert.deepEqual(refreshed.models, first.models);
+  assert.notEqual(refreshed.at, first.at);
+  assert.deepEqual(calls.slice(2), calls.slice(0, 2));
 });
 
 test("Gemini and Amp catalogs are explicitly unavailable without probing or inventing aliases", async () => {

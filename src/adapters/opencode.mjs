@@ -23,7 +23,7 @@ import { requireExecutionFlags } from "./execution-help.mjs";
 import { compactText, structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
 import { OpenCodeControl } from "./opencode-control.mjs";
-import { assertAdapterPolicy, assertAdapterRoute, assertNoClaudeWorkflow } from "../model-policy.mjs";
+import { assertAdapterPolicy, assertAdapterRoute, assertNoClaudeWorkflow, openCodeUsesSharedService } from "../model-policy.mjs";
 
 const MAX_PROTOCOL_TEXT_CHARS = 1024 * 1024;
 const MAX_FINAL_TEXT_CHARS = 64_000;
@@ -426,16 +426,56 @@ function executionSignal(parentSignal, timeoutMs) {
   };
 }
 
+function taskflowPolicyError(message) {
+  return adapterError(message, "policy", { field: "workflow.spec" });
+}
+
+function prepareTaskflow(cwd, spec, { isShorthand, desugar, discoverAgents, readSubagentSettings }) {
+  const flow = isShorthand(spec) ? desugar(spec) : spec;
+  const { modelRoles, taskflow } = readSubagentSettings();
+  const { agents } = discoverAgents(cwd, flow.agentScope ?? "both", modelRoles, taskflow);
+  const fallback = agents[0];
+  const selected = new Set();
+  let usesFallback = false;
+  const visit = (phases) => {
+    if (!Array.isArray(phases)) return;
+    for (const phase of phases) {
+      if (!phase || typeof phase !== "object") continue;
+      if (!["flow", "expand", "approval", "script"].includes(phase.type)) {
+        const names = Array.isArray(phase.branches) ? phase.branches.map((branch) => branch?.agent ?? phase.agent) : [phase.agent];
+        if (phase.type === "tournament") names.push(phase.judgeAgent ?? phase.agent);
+        if (phase.score?.judge) names.push(phase.score.judge.agent ?? phase.agent);
+        for (const name of names) {
+          if (typeof name === "string" && name) selected.add(agents.find((agent) => agent.name === name) ?? fallback);
+          else usesFallback = true;
+        }
+      }
+      visit(Array.isArray(phase.def) ? phase.def : phase.def?.phases);
+    }
+  };
+  visit(flow.phases);
+  // An implicit bundled agent is a Taskflow default. Use the native OpenCode
+  // agent for that case, including its own system prompt and permissions.
+  const nativeDefault = usesFallback && fallback?.source === "built-in" && !selected.has(fallback) ? fallback.name : null;
+  if ([...selected, ...(usesFallback ? [fallback] : [])].some((agent) => agent?.tools?.length && agent.name !== nativeDefault)) {
+    throw taskflowPolicyError("OpenCode V2 does not enforce Taskflow agent tool lists");
+  }
+  return { flow, agents: new Map(agents.map((agent) => [agent.name, agent])), nativeDefault };
+}
+
 export class OpenCodeAdapter {
   constructor(options = {}) {
     this.options = options;
     const injected = options.launch || options.command || options.executable || options.bin;
-    this.launch = harnessLaunch("opencode", options.launchV2 || options.commandV2 || injected);
-    this.spawnFn = options.spawnFn;
     this.env = options.env || {};
+    this.launch = harnessLaunch("opencode", options.launchV2 || options.commandV2 || injected, {
+      env: options.env ? mergeProcessEnv(this.env) : process.env,
+    });
+    this.spawnFn = options.spawnFn;
     this.fetchFn = options.fetchFn;
     this.controlRuntime = null;
     this.controlStart = null;
+    this.running = false;
     // Memoized only after a successful dynamic import: a load failure must not
     // wedge the adapter if the optional package is installed later.
     this.taskflowCore = null;
@@ -445,7 +485,8 @@ export class OpenCodeAdapter {
     if (this.taskflowCore) return this.taskflowCore;
     let cause;
     try {
-      const loaded = await import("taskflow-mcp-core/server");
+      const [server, core] = await Promise.all([import("taskflow-mcp-core/server"), import("taskflow-core")]);
+      const loaded = { makeToolHandlers: server.makeToolHandlers, core };
       this.taskflowCore = loaded;
       return loaded;
     } catch (error) {
@@ -505,7 +546,8 @@ export class OpenCodeAdapter {
     // Explicit workflow.spec needs the optional core. Load it before the
     // execution signal and control server so a missing dependency cannot start
     // a server (or a timeout) it must then unwind; plain runs never load it.
-    const taskflowCore = flowSpec !== null ? await this.#loadTaskflowCore() : null;
+    if (this.running) throw adapterError("OpenCode adapter already owns an active request", "busy");
+    this.running = true;
     const execution = executionSignal(signal, request.execution?.timeoutMs);
     const state = {
       sessionId: fork ? null : sessionId || null,
@@ -515,12 +557,11 @@ export class OpenCodeAdapter {
       eventTypes: new Set(),
       lastFailure: null,
     };
-    const graphNode = Boolean(request.context?.graph?.graphId);
     // Graph nodes attach to the OpenCode background service by default, so each
     // node is a native session the operator can open in the sidebar. A private
     // control server is opt-in via route.serverUrl; host-attached nodes have no
     // live control surface because the graph scheduler owns them.
-    const hostAttached = graphNode && !(this.options.serverUrl || request.route?.serverUrl);
+    const hostAttached = openCodeUsesSharedService(request, this.options.serverUrl);
     const controlRuntime = !hostAttached ? new OpenCodeControl({
       spawnFn: this.spawnFn,
       fetchFn: this.fetchFn,
@@ -534,6 +575,8 @@ export class OpenCodeAdapter {
     this.controlRuntime = controlRuntime;
     let scratch;
     try {
+      const taskflow = flowSpec !== null ? await this.#loadTaskflowCore() : null;
+      const preparedFlow = taskflow && prepareTaskflow(request.cwd, flowSpec, taskflow.core);
       const launch = this.launch;
       const env = mergeProcessEnv(this.env);
       if (!this.spawnFn) {
@@ -554,8 +597,8 @@ export class OpenCodeAdapter {
         serverUrl: this.options.serverUrl || request.route?.serverUrl,
       });
       if (this.controlStart) await this.controlStart;
-      if (flowSpec !== null) {
-        return await this.#runWorkflow(request, flowSpec, execution, state, onProgress, taskflowCore);
+      if (taskflow) {
+        return await this.#runWorkflow(request, flowSpec, execution, state, onProgress, taskflow.makeToolHandlers, preparedFlow);
       }
       request = validateAdapterExecution(request, "opencode");
       if (attachments?.length) {
@@ -576,6 +619,7 @@ export class OpenCodeAdapter {
       this.controlStart = null;
       this.hostAttached = null;
       execution.dispose();
+      this.running = false;
       if (scratch) await rm(scratch, { recursive: true, force: true });
     }
   }
@@ -722,11 +766,8 @@ export class OpenCodeAdapter {
     };
   }
 
-  async #runWorkflow(request, flowSpec, execution, state, onProgress, taskflowCore) {
-    // The optional core is loaded (and load failures classified) in run()
-    // before any control server or phase process exists.
-    const { makeToolHandlers } = taskflowCore;
-    const phaseState = { firstSession: true };
+  async #runWorkflow(request, flowSpec, execution, state, onProgress, makeToolHandlers, { flow, agents: preparedAgents, nativeDefault }) {
+    let resumeSessionId = request.execution?.sessionId;
     // Each phase envelope carries the shared context exactly once. Folding the
     // rendered root prompt into `task` while also supplying `context` in the
     // same envelope shipped two full copies to every phase process.
@@ -734,24 +775,28 @@ export class OpenCodeAdapter {
     const runner = {
       usageAccounting: "available",
       runTask: async (defaultCwd, agents, agentName, task, opts, globalThinking) => {
-        const agent = agents.find((candidate) => candidate.name === agentName) || {};
+        const effective = agents.find((candidate) => candidate.name === agentName);
+        const implicit = agentName === nativeDefault && effective?.source === "built-in";
+        const agent = implicit ? {} : preparedAgents.get(agentName) ?? {};
         const phaseTask = `${rootTask}\n\nPhase task:\n${task}`;
         const phaseRequest = {
           ...request,
           cwd: opts?.cwd ?? defaultCwd ?? request.cwd,
         };
         try {
-          if (opts?.tools?.length || agent.tools?.length) {
-            throw adapterError("OpenCode V2 does not enforce Taskflow phase or agent tool lists", "policy");
+          if (opts?.tools !== undefined || (!implicit && effective?.tools?.length)) {
+            throw taskflowPolicyError("OpenCode V2 does not enforce Taskflow phase or agent tool lists");
           }
-          const result = await this.#spawn(phaseRequest, promptFor(phaseRequest, flowSpec, phaseTask, agent.systemPrompt || ""), execution, state, onProgress, {
+          const sessionId = resumeSessionId;
+          resumeSessionId = null;
+          const phaseSignal = opts?.signal ? AbortSignal.any([execution.signal, opts.signal]) : execution.signal;
+          const result = await this.#spawn(phaseRequest, promptFor(phaseRequest, flowSpec, phaseTask, agent.systemPrompt || ""), { ...execution, signal: phaseSignal }, state, onProgress, {
             model: request.route?.model || opts?.model || agent.model,
             agent: request.route?.agent,
             variant: request.route?.variant,
             thinking: request.route?.thinking || opts?.thinking || agent.thinking || globalThinking,
-            sessionId: phaseState.firstSession ? request.execution?.sessionId : null,
+            sessionId,
           });
-          phaseState.firstSession = false;
           return {
             agent: agentName,
             task,
@@ -781,7 +826,7 @@ export class OpenCodeAdapter {
       },
     };
     const handlers = makeToolHandlers(request.cwd, runner, { host: "opencode" });
-    const response = await handlers.taskflow_run({ define: flowSpec }, { signal: execution.signal });
+    const response = await handlers.taskflow_run({ define: flow }, { signal: execution.signal });
     const raw = taskflowText(response);
     if (response?.isError) {
       if (state.lastFailure) throw state.lastFailure;

@@ -90,6 +90,30 @@ test("invalid config aborts before installing assets", async t => {
   assert.deepEqual(await readdir(dir), ["opencode.json"]);
 });
 
+test("daemon preparation cannot make the installer overwrite a stale config snapshot", async (t) => {
+  const original = '{"model":"original/model"}';
+  const edited = '{"model":"operator/model"}';
+  for (const [name, before, after] of [
+    ["edit", { "opencode.json": original }, { "opencode.json": edited }],
+    ["remove", { "opencode.json": original }, {}],
+    ["create", {}, { "opencode.json": edited }],
+    ["select JSONC", {}, { "opencode.jsonc": edited }],
+    ["switch file", { "opencode.json": original }, { "opencode.jsonc": edited }],
+    ["add competing file", { "opencode.json": original }, { "opencode.json": original, "opencode.jsonc": edited }],
+  ]) {
+    await t.test(name, async (t) => {
+      const dir = await fixture(t);
+      for (const [file, bytes] of Object.entries(before)) await writeFile(join(dir, file), bytes);
+      await assert.rejects(installIntegration(dir, { token: "fixture-token", async prepareDaemon() {
+        for (const file of Object.keys(before)) if (!(file in after)) await rm(join(dir, file));
+        for (const [file, bytes] of Object.entries(after)) await writeFile(join(dir, file), bytes);
+      } }), /configuration changed during daemon preparation/);
+      assert.deepEqual((await readdir(dir)).sort(), Object.keys(after).sort());
+      for (const [file, bytes] of Object.entries(after)) assert.equal(await readFile(join(dir, file), "utf8"), bytes);
+    });
+  }
+});
+
 test("installer rejects legacy and mixed layouts before daemon preparation or file changes", async t => {
   const dir = await fixture(t);
   const path = join(dir, "opencode.json");

@@ -63,6 +63,29 @@ test("OpenCode V2 resolves the native binary behind the renamed opencode command
   }
 });
 
+test("OpenCode discovery uses the supplied PATH and Windows shim environment", async (t) => {
+  const host = await mkdtemp(join(tmpdir(), "harnest-opencode-host-path-"));
+  const supplied = await mkdtemp(join(tmpdir(), "harnest-opencode-supplied-path-"));
+  for (const directory of [host, supplied]) t.after(() => rm(directory, { recursive: true, force: true }));
+  const windows = process.platform === "win32";
+  const name = windows ? "opencode2.exe" : "opencode2";
+  for (const directory of [host, supplied]) await writeFile(join(directory, name), "fixture", { mode: 0o755 });
+  await withEnv("PATH", host, () => withEnv("HARNEST_OPENCODE_V2", undefined, async () => {
+    assert.equal(harnessLaunch("opencode", undefined, { config: {} }).command, join(host, name));
+    const env = windows ? { Path: supplied, PATHEXT: ".EXE", SystemRoot: "C:\\fixture-windows" } : { PATH: supplied };
+    assert.equal(harnessLaunch("opencode", undefined, { config: {}, env }).command, join(supplied, name));
+    if (windows) {
+      await rm(join(supplied, name));
+      const shim = join(supplied, "opencode2.ps1");
+      await writeFile(shim, "# fixture shim");
+      assert.deepEqual(harnessLaunch("opencode", undefined, { config: {}, env }), {
+        command: "C:\\fixture-windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        args: ["-NoProfile", "-File", shim],
+      });
+    }
+  }));
+});
+
 test("a stale executable pin falls back to detection and fails only when nothing resolves", { skip: process.platform !== "win32" }, async (t) => {
   const bin = await mkdtemp(join(tmpdir(), "harnest-stale-pin-"));
   t.after(() => rm(bin, { recursive: true, force: true }));

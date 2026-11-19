@@ -194,23 +194,33 @@ export class OpenCodeControl {
   }
 
   async #send(command, sessionId) {
-    if (!this.client?.session) throw new OpenCodeControlError("OpenCode V2 client is not ready", "not-ready");
+    const session = this.client?.session;
+    if (!session) throw new OpenCodeControlError("OpenCode V2 client is not ready", "not-ready");
     let model = null;
     if (command.kind === "reroute") {
       model = modelParts(command.route);
       if (!model.provider || !model.model) throw new OpenCodeControlError("V2 reroute requires provider and model", "invalid-control");
-      await this.client.session.switchModel({
+      await session.switchModel({
         sessionID: sessionId,
         model: { providerID: model.provider, id: model.model, ...(model.variant ? { variant: model.variant } : {}) },
       });
     }
     if (command.message) {
-      await this.client.session.prompt({
-        sessionID: sessionId,
-        id: `msg_${randomUUID().replaceAll("-", "")}`,
-        text: command.message,
-        delivery: command.delivery === "follow_up" ? "queue" : "steer",
-      });
+      try {
+        await session.prompt({
+          sessionID: sessionId,
+          id: `msg_${randomUUID().replaceAll("-", "")}`,
+          text: command.message,
+          delivery: command.delivery === "follow_up" ? "queue" : "steer",
+        });
+      } catch {
+        throw new OpenCodeControlError(model
+          ? "OpenCode switched the model and did not confirm prompt delivery"
+          : "OpenCode did not confirm prompt delivery", "control", {
+          uncertain: true,
+          ...(model ? { modelSwitchApplied: true, model } : {}),
+        });
+      }
     }
     return {
       commandId: command.commandId,

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createAdapter } from "./adapters/index.mjs";
 import { createRouteResolver } from "./routing.mjs";
 import { createModelCatalog } from "./model-catalog.mjs";
-import { assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
+import { assertAdapterPolicy, assertAdapterRoute, openCodeUsesSharedService } from "./model-policy.mjs";
 import { JobStore } from "./job-store.mjs";
 import { EXECUTION_CONTROLS } from "./execution-controls.mjs";
 import {
@@ -213,17 +213,7 @@ function requestIdentity(value) {
 }
 
 function comparisonRouteIdentity(request) {
-  const route = { ...request.route };
-  if (request.target === "opencode" && typeof route.model === "string") {
-    if (route.provider && route.model.startsWith(`${route.provider}/`)) {
-      route.model = route.model.slice(route.provider.length + 1);
-    } else if (!route.provider && route.model.includes("/")) {
-      const separator = route.model.indexOf("/");
-      route.provider = route.model.slice(0, separator);
-      route.model = route.model.slice(separator + 1);
-    }
-  }
-  return stableJson({ target: request.target, route });
+  return stableJson({ target: request.target, route: request.route });
 }
 
 function normalizeControl(input, kind) {
@@ -329,6 +319,9 @@ export function steerFor(receipt, ownership) {
     return { mode: "pending", hint: "cancellation requested; poll handoff_status for owner acknowledgement before resuming" };
   }
   const openCode = receipt.target === "opencode" && receipt.route?.harnessVersion !== "v1";
+  if (openCode && receipt.capabilities?.liveControl === false) {
+    return { mode: "graph", hint: "use the graph tools to inspect, cancel or resume shared-service nodes" };
+  }
   if (ownership && !ownership.local && (interactive || receipt.target === "pi" || openCode)) {
     return {
       mode: "owner-required",
@@ -381,7 +374,9 @@ export class Companion {
     this.modelCatalog = options.routing?.modelCatalog ?? (options.adapterFactory
       ? async () => ({ status: "unavailable", models: [], reason: "custom adapter has no model catalog" })
       : createModelCatalog({ config: options.routing?.config, env: options.routing?.env }));
-    this.routeResolver = options.routeResolver || createRouteResolver({ ...options.routing, modelCatalog: this.modelCatalog });
+    this.routeResolver = options.routeResolver || createRouteResolver({
+      ...options.routing, modelCatalog: this.modelCatalog, openCodeServerUrl: this.adapterOptions.opencode?.serverUrl,
+    });
     this.running = new Map();
     this.sessionPool = new SessionAdapterPool({ ...options.sessionPool, lockDir: join(this.store.root, "native-sessions") });
     this.ownerId = options.ownerId || randomUUID();
@@ -418,6 +413,9 @@ export class Companion {
     if (!cwd?.isDirectory()) throw Object.assign(new TypeError(`cwd is not a directory: ${request.cwd}`), { details: { kind: "validation", hint: "cwd must be an existing absolute directory" } });
 
     const receipt = createReceipt(request);
+    if (request.target === "opencode") {
+      receipt.capabilities = { liveControl: !openCodeUsesSharedService(request, this.adapterOptions.opencode?.serverUrl) };
+    }
     if (options.resumeOf) {
       // Resume lineage: the new job starts a fresh execution identity but
       // carries the parent's immutable attempt ledger and running totals so
@@ -673,6 +671,7 @@ export class Companion {
       });
       const resolved = await this.routeResolver(requested);
       if (resolved.policy.write) throw Object.assign(new TypeError(`candidate ${candidate.name} resolved to a write-capable request`), { details: { kind: "policy" } });
+      if (resolved.target === "opencode") assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution, resolved.workflow);
       return { candidate, request: resolved };
     }));
     const routeOwners = new Map();
@@ -765,6 +764,7 @@ export class Companion {
       });
       const resolved = await this.routeResolver(requested);
       if (resolved.policy.write) throw Object.assign(new TypeError(`reviewer ${reviewer.name} resolved to a write-capable request`), { details: { kind: "policy" } });
+      if (resolved.target === "opencode") assertAdapterPolicy(resolved.target, resolved.policy, resolved.execution, resolved.workflow);
       return { reviewer, request: resolved };
     }));
     const routeOwners = new Map();
@@ -1700,6 +1700,10 @@ export class Companion {
         if (record.state === "uncertain") record.effect = "delivery_unconfirmed";
       } catch (error) {
         record.state = error?.details?.uncertain ? "uncertain" : "rejected";
+        if (record.state === "uncertain") record.effect = "delivery_unconfirmed";
+        if (command.kind === "reroute" && error?.details?.modelSwitchApplied === true) {
+          record.acknowledgement = { modelSwitchApplied: true, promptAcknowledged: false };
+        }
         record.error = safeError(error);
       }
       record.updatedAt = new Date().toISOString();

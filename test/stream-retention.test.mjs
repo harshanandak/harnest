@@ -21,7 +21,7 @@ function request(target, overrides = {}) {
     context: target === "opencode" ? { graph: { graphId: "fixture" } } : {}, contextDigest: "a".repeat(64), workflow: null,
     route: { provider: "openai", model: "test-model" },
     execution: { timeoutMs: 10_000, sessionId: target === "opencode" ? null : "resumed-session" },
-    policy: { write: false, tools: [] }, ...overrides,
+    policy: { write: target === "opencode", tools: [] }, ...overrides,
   };
 }
 
@@ -328,7 +328,7 @@ async function memoryProbe(urls, selectedTarget) {
       assert.ok(growth.heap < 16 * 1024 * 1024, `${target} retained ${growth.heap} heap bytes`);
       assert.ok(growth.buffers < 8 * 1024 * 1024, `${target} retained ${growth.buffers} buffer bytes`);
       if (target === "opencode") {
-        emit({ type: "result", result: "DONE" });
+        emit({ type: "text", sessionID: "memory-session", part: { type: "text", text: "DONE" } });
         child.emit("close", 0, null);
       } else {
         emit({ type: "message_end", message: { role: "assistant", content: "DONE" } });
@@ -343,15 +343,24 @@ async function memoryProbe(urls, selectedTarget) {
           : command.type === "get_last_assistant_text" ? { text: "DONE" } : { tokens: { total: 17 } } });
       return true;
     } };
-    const adapter = new Adapter({ command: `fake-${target}`, spawnFn: () => {
-      if (target === "opencode") queueMicrotask(flood);
+    const adapter = new Adapter({ command: `fake-${target}`, spawnFn: (_command, args) => {
+      if (target === "opencode") {
+        assert.equal(args[0], "run");
+        assert.ok(!args.includes("--server"));
+        queueMicrotask(flood);
+      }
       return child;
     } });
-    const output = await adapter.run({ requestId: "memory", target, cwd: process.cwd(), task: "Return result", context: {},
-      policy: { write: false }, route: { model: "openai/test" }, execution: { timeoutMs: 20_000 } }, {
+    const output = await adapter.run({ requestId: "memory", target, cwd: process.cwd(), task: "Return result",
+      context: target === "opencode" ? { graph: { graphId: "memory" } } : {},
+      policy: { write: target === "opencode" }, route: { model: "openai/test" }, execution: { timeoutMs: 20_000 } }, {
       onProgress() { count++; },
     });
     assert.equal(output.result.finalText, "DONE");
+    if (target === "opencode") {
+      assert.equal(output.sessionId, "memory-session");
+      assert.equal(count, 2049);
+    }
     assert.equal(output.result.eventSummary.count, count);
     results.push({ target, count, ...growth });
   }

@@ -165,7 +165,7 @@ const AUTO_CANDIDATES = [
     target: "opencode",
     requiresModel: true,
     scores: { quality: 9, speed: 5, efficiency: 5, reliability: 9 },
-    capabilities: { readOnly: true, write: true, taskflow: true, liveControl: true, maxContextTokens: 200000 },
+    capabilities: { readOnly: false, write: true, taskflow: true, liveControl: true, maxContextTokens: 200000 },
     tags: ["deep", "flagship"],
   },
   {
@@ -232,6 +232,7 @@ function capabilitiesFor(target) {
     base.thinking = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
   }
   if (target === "opencode") {
+    base.readOnly = false;
     base.taskflow = true;
     base.liveControl = true;
   }

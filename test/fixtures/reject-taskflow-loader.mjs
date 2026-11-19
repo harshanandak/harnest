@@ -1,5 +1,5 @@
 export function resolve(specifier, context, nextResolve) {
-  if (specifier === "taskflow-mcp-core/server" || specifier === "pi-taskflow") {
+  if (["taskflow-mcp-core/server", "taskflow-core", "pi-taskflow"].includes(specifier)) {
     if (process.env.REJECT_TASKFLOW_MODE === "eval") {
       throw new Error("Taskflow runtime exploded during evaluation");
     }

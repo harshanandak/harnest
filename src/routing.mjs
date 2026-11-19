@@ -258,7 +258,7 @@ export function createRouteResolver(options = {}) {
     const scopes = policyScopes(routing, request, userPolicy);
     let routed = request;
     if (scopes.length) {
-      const decision = resolvePolicyRoute(request, scopes, { now: options.now?.() ?? Date.now() });
+      const decision = resolvePolicyRoute(request, scopes, { now: options.now?.() ?? Date.now(), openCodeServerUrl: options.openCodeServerUrl });
       routed = normalizeRequest(attachRoutingDecision({
         ...request,
         target: decision.target,

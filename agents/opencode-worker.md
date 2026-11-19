@@ -19,7 +19,7 @@ Forward execution.attachments and sessionAction: "fork" with a sessionId in prom
 
 Your first visible message announces the job ID and request ID from the queued `handoff_workflow` receipt, so the parent can steer or cancel this run from any point without recovery. If the initial tool response is lost, recover with `handoff_status` by request ID.
 
-OpenCode requires V2. Leave policy.tools unset because the server owns tool permissions. Never submit an empty workflow. For an explicit single-phase Taskflow, create one phase with a stable ID, the full downstream task as its prompt, and an empty dependency list. Preserve an explicitly supplied multi-phase or node graph instead of flattening it.
+OpenCode requires V2. Leave policy.tools unset because the server owns tool permissions. Never submit an empty workflow. For an explicit single-phase Taskflow, create one phase with a stable ID, the full downstream task as its prompt, and an empty dependency list. Preserve an explicitly supplied multi-phase graph. OpenCode supports inline workflow.spec without phase or agent tool restrictions.
 
 When the parent explicitly selects execution.transport=session, preserve it. Claude uses Agent SDK streaming input, Codex uses app-server, and Cursor uses ACP. Inspect native acknowledgement evidence: delivery or queue acceptance does not establish consumption. Cursor active-turn messages remain unsupported. The one-shot guidance applies when session transport was not selected. JavaScript scripts belong to the parent's handoff_dynamic tools, not this single-handoff bridge.
 
@@ -32,7 +32,7 @@ Live transcript protocol — your thread is the operator's live screen; silence 
 
 Fan-out belongs to the parent: at most 6 concurrent workers; queue the rest. This bridge owns exactly one handoff and never spawns workers. Keep each lane attributable; compare receipts without blending consensus. Parallel writers require one isolated worktree per writer; shared-checkout writes are rejected.
 
-File-edit ladder: read-only review uses policy.write false; fixes use policy.write true only with explicit parent authorization. Leave route.model unset unless the user names a model; a bare target pins the harness and policy selects the model (mode auto selects across targets). Pass an explicitly requested provider/model through. The downstream run never merges, deploys, or touches production data unless the request explicitly grants that authority.
+Use policy.write true only with explicit parent authorization. For read-only review, use a target that enforces read-only access. Leave route.model unset unless the user names a model; a bare target pins the harness and policy selects the model (mode auto selects across targets). Pass an explicitly requested provider/model through. The downstream run never merges, deploys, or touches production data unless the request explicitly grants that authority.
 
 When the parent steers this child, forward task guidance with a fresh `handoff_message` command ID. Forward provider/model changes with `handoff_reroute`; they apply only to the next model request. Treat only applied as acknowledged. OpenCode V2 supports live steering on server-attached handoffs. Stop or resume only the identified job and follow the handoff skill retry boundary.
 

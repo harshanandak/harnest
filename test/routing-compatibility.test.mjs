@@ -9,7 +9,7 @@ import { createRouteResolver } from "../src/routing.mjs";
 import { preflight } from "../src/preflight.mjs";
 
 const request = (target, extra = {}) => ({ requestId: "compatibility", target, task: "review", cwd: process.cwd(), ...extra });
-const lane = (id, target, route, quality) => ({ id, target, route, scores: { quality } });
+const lane = (id, target, route, quality) => ({ id, target, route, scores: { quality }, capabilities: { write: true } });
 const options = (candidates = [], extra = {}) => ({
   config: { routing: { global: { candidates }, ...extra } }, env: {}, userPolicy: {},
 });
@@ -19,7 +19,7 @@ test("auto selection rejects highest-score Claude routes for every non-Claude ta
     for (const route of [{ model: "claude-opus-5-thinking-high" }, { model: "gateway/sonnet" }, { provider: "anthropic", model: "private" }]) {
       const resolved = await createRouteResolver(options([
         lane("incompatible", target, route, 10), lane("compatible", target, { model: "works" }, 1),
-      ]))(request(target));
+      ]))(request(target, { policy: { write: target === "opencode" } }));
       assert.equal(resolved.route.model, "works");
       const decision = resolved.metadata.harnest.routingDecision;
       assert.deepEqual(decision.rankedRoutes.map((entry) => entry.id), ["compatible"]);

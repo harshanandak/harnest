@@ -28,13 +28,14 @@ const adapterFactory = target => ({ async run(request, { onProgress }) {
 const companion = new Companion({ stateDir: join(directory, "jobs"), routeResolver: async request => request, adapterFactory });
 let runner = new GraphRunner({ companion });
 const spec = {
-  requestId: "demo-five-agent-graph", cwd: workspace, task: "Model-free five-agent graph demo", policy: { write: false },
+  requestId: "demo-five-agent-graph", cwd: workspace, task: "Model-free five-agent graph demo", policy: { write: true },
+  metadata: { harnest: { writeApproved: true } },
   execution: { background: false, maxConcurrency: 2, timeoutMs: 30000 },
   nodes: [
-    { id: "plan", target: "claude", task: "plan" },
-    { id: "cheap-check", target: "cursor", task: "check", dependsOn: ["plan"] },
-    { id: "deep-review", target: "codex", task: "review", dependsOn: ["plan"] },
-    { id: "combine", target: "pi", task: "combine", dependsOn: ["cheap-check", "deep-review"] },
+    { id: "plan", target: "claude", task: "plan", policy: { write: false } },
+    { id: "cheap-check", target: "cursor", task: "check", dependsOn: ["plan"], policy: { write: false } },
+    { id: "deep-review", target: "codex", task: "review", dependsOn: ["plan"], policy: { write: false } },
+    { id: "combine", target: "pi", task: "combine", dependsOn: ["cheap-check", "deep-review"], policy: { write: false } },
     { id: "final", target: "opencode", task: "final", route: { provider: "fixture", model: "fake", harnessVersion: "v2" }, dependsOn: ["combine"] },
   ], outputs: ["final"],
 };

@@ -361,7 +361,7 @@ minContextTokens }` rejects anything that cannot satisfy the run.
 There is deliberately **no automatic failover to the next candidate** after launch for write-capable runs:
 a retry could duplicate side effects. The exception is read-only transport/timeout/task failure, which retries once on the next viable ranked route (`receipt.routingFallbacks` records the switch; opt out with `metadata.routing.fallbacks: false`). To compare or hedge, fan out with
 `handoff_compare` (2-16 read-only lanes, one receipt per lane) or retry explicitly
-after reviewing the trace. Read-only compare and review accept the six targets with native read-only support; Amp is excluded because its downstream adapter requires writes. Retrying a compare after partial failure needs a new base `requestId` — lane IDs are deterministic (`<base>:<lane>`), so the same key returns the existing lane receipts instead of rerunning. See `routing.md` deliberate limits.
+after reviewing the trace. Read-only compare and review accept Pi, Cursor, Claude, Codex, and Gemini. Retrying a compare after partial failure needs a new base `requestId` — lane IDs are deterministic (`<base>:<lane>`), so the same key returns the existing lane receipts instead of rerunning. See `routing.md` deliberate limits.
 
 Generic ACP is excluded from read-only compare and review for the same reason: its downstream contract requires explicit write approval.
 

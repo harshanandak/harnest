@@ -70,7 +70,7 @@ test("unsuccessful receipts preserve observed identity and the latest cumulative
           await new Promise(() => {});
         } }),
       });
-      const queued = await companion.start({ requestId: `observed-${mode}`, target: "opencode", task: "synthetic evidence", cwd: root, execution: { background: true, timeoutMs: mode === "timeout" ? 500 : 10000 } });
+      const queued = await companion.start({ requestId: `observed-${mode}`, target: "opencode", task: "synthetic evidence", cwd: root, policy: { write: true }, execution: { background: true, timeoutMs: mode === "timeout" ? 500 : 10000 } });
       await until(async () => progressWritten, Boolean);
       if (mode === "cancel") await companion.cancel(queued.jobId);
       if (mode === "recovery") await companion.store.transition(queued.jobId, (job) => {

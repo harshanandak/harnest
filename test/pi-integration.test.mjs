@@ -161,7 +161,7 @@ test("Pi publishes strict route, execution, and policy contracts for single and 
   assert.deepEqual(Object.keys(node.properties.execution.properties), ["timeoutMs", "sessionId", "addDirs", "attachments", "instructions", "sessionAction", "maxTurns"]);
   assert.equal(node.properties.execution.additionalProperties, false);
   assert.equal(node.properties.policy.additionalProperties, false);
-  const readOnlyTargets = ["opencode", "pi", "cursor", "claude", "codex", "gemini"];
+  const readOnlyTargets = ["pi", "cursor", "claude", "codex", "gemini"];
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.request.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_compare").parameters.properties.candidates.items.properties.target.enum, readOnlyTargets);
   assert.deepEqual(tools.get("handoff_review").parameters.properties.request.properties.target.enum, readOnlyTargets);

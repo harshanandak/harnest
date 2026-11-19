@@ -21,7 +21,7 @@ Blank cells indicate unsupported controls. The [MCP usage guide](mcp-usage.md#na
 
 | Target value | Agent | Supported shape | Main boundary |
 |---|---|---|---|
-| `opencode` | OpenCode V2 | Prompt handoffs, optional Taskflow, and server-attached live controls | The OpenCode server owns native tool permissions. Taskflow needs its optional dependencies. |
+| `opencode` | OpenCode V2 | Prompt handoffs, optional Taskflow, and server-attached live controls | Requires approved write-capable work. The OpenCode server owns native tool permissions. Taskflow needs its optional dependencies. |
 | `pi` | Pi | Read or approved write prompt handoffs; optional Taskflow; attached live controls | Pi keeps native authentication. Its bounded status and trace are the portable operator view. |
 | `cursor` | Cursor | Read or approved write handoffs, one-shot resume, and optional session transport | Cursor UI subagents do not automatically inherit UI MCP servers. |
 | `claude` | Claude Code | Read or approved write handoffs, one-shot resume, and optional session transport | One-shot supports named agents and fast mode when the native CLI confirms it. Live message and reroute require session transport. |
@@ -38,7 +38,7 @@ DeepSeek is a model choice through Pi or OpenCode, not a separate downstream tar
 | Claude Code print | `policy.tools.allow` accepts `Read`, `Glob`, and `Grep`. Harnest restricts the available tools with `--tools` and uses `--allowedTools` for the selected read tools. `policy.tools.deny` passes exact native tool names to `--disallowedTools`. Print resumes and forks receive the same flags. Claude session transport rejects tool lists. |
 | Gemini CLI v0.62.0 | `policy.tools.allow` and `policy.tools.deny` narrow the native admin policy. Read tools are `glob`, `grep_search`, `list_directory`, `read_file`, `read_many_files`, `get_internal_docs`, `google_web_search`, and `web_fetch`. Approved write policy also permits `write_file`, `replace`, and `run_shell_command`. |
 | Pi | `policy.tools.deny` removes names from `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. Pi must expose `--exclude-tools`, `--no-tools`, `--no-extensions`, and `--no-mcp`. Filtered runs disable extensions and MCP and reject Taskflow. Resume and fork launches apply the same tool selection. |
-| OpenCode V2 | The server owns native tool permissions. Harnest rejects nonempty tool lists, explicit allow lists, and nonempty Taskflow phase tool lists before launch. |
+| OpenCode V2 | The server owns native tool permissions. Harnest rejects read-only requests, nonempty tool lists, explicit allow lists, and Taskflow phase or agent tool restrictions before launch. |
 | Cursor print | `policy.mode: "plan"` uses `--mode plan`. `policy.sandbox: true` uses `--sandbox enabled` for shell commands. Both omit `--force`. Cursor rejects granular tools, sandbox disablement, and these controls on ACP session transport. |
 | Codex, Amp, registered ACP | Granular tool policy is unsupported. |
 

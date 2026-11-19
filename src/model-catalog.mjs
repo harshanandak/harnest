@@ -623,6 +623,7 @@ export function createModelCatalog({
         const raw = error instanceof Error && typeof error.message === "string" ? error.message : "";
         const suffix = raw.startsWith(`${target}:`) ? raw.slice(target.length + 1) : "";
         const known = new Set(["timeout", "output-limit", "spawn-failed", "closed-early", "rpc-error", "stdin-error", "protocol-overflow", "empty-catalog", "unsupported-provider", "rpc-failed"]);
+        if (target === "opencode") known.add("v2-required");
         const reason = known.has(suffix) || /^exit-(?:null|-?\d+)$/.test(suffix) ? raw : code(target, "probe-failed");
         rememberFailure(key, reason, now());
         const previous = cache.get(key);

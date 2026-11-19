@@ -14,6 +14,7 @@ function request(overrides = {}) {
     task: "implement the bounded change",
     cwd: process.cwd(),
     route: { provider: "explicit", model: "chosen" },
+    policy: { write: true },
     ...overrides,
   });
 }
@@ -174,6 +175,24 @@ test("an explicit route pins by default and request mode auto opts into policy s
   assert.equal(automatic.route.model, "strong-model");
 });
 
+test("live control routing excludes shared-service graph nodes but accepts managed and attached OpenCode", () => {
+  const scopes = [{ name: "global", policy: {
+    candidates: CANDIDATES, defaults: { require: { liveControl: true }, weights: { quality: 10 } },
+  } }];
+  const context = { graph: { graphId: "fixture" } };
+  const automatic = { route: {}, metadata: { routing: { mode: "auto" } } };
+  const shared = resolvePolicyRoute(request({ ...automatic, context }), scopes);
+  assert.equal(shared.target, "pi");
+  assert.ok(shared.explanation.rejected.find(({ id }) => id === "strong").reasons.includes("live-control"));
+  assert.equal(resolvePolicyRoute(request(automatic), scopes).target, "opencode");
+  assert.throws(() => resolvePolicyRoute(request({ context }), scopes), /Shared-service OpenCode graph nodes/);
+  assert.equal(resolvePolicyRoute(request({
+    context, route: { model: "fixture/model", serverUrl: "http://127.0.0.1:43991" },
+  }), scopes).target, "opencode");
+  assert.equal(resolvePolicyRoute(request({ ...automatic, context }), scopes,
+    { openCodeServerUrl: "http://127.0.0.1:43991" }).target, "opencode");
+});
+
 test("prompt rules, capability filters, budgets, deadlines, and health circuits are explainable", () => {
   const routed = resolvePolicyRoute(request({
     task: "security review with live steering",
@@ -267,6 +286,7 @@ test("latest selection retains version avoid-lists and cannot bypass a bounded b
 
 test("candidate overlays preserve omitted availability cost latency and priority", () => {
   const routed = resolvePolicyRoute(request({
+    target: "pi",
     route: {},
     policy: { write: false, maxCostUsd: 1 },
     execution: { timeoutMs: 1_000 },

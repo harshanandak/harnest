@@ -176,6 +176,7 @@ test("an unconfirmed OpenCode zero accumulator stays null and never becomes repo
   const receipt = await companion.start({
     requestId: "usage-unconfirmed",
     target: "opencode",
+    policy: { write: true },
     task: "t",
     cwd: process.cwd(),
     route: { provider: "x", model: "y" },
@@ -199,6 +200,7 @@ test("an all-null terminal summary is canonical null, not confirmed usage", asyn
   const receipt = await companion.start({
     requestId: "usage-null-summary",
     target: "opencode",
+    policy: { write: true },
     task: "t",
     cwd: process.cwd(),
     route: { provider: "x", model: "y" },
@@ -229,6 +231,7 @@ test("explicit zeros and mixed reported keys are kept exactly as reported", asyn
   const receipt = await companion.start({
     requestId: "usage-mixed",
     target: "opencode",
+    policy: { write: true },
     task: "t",
     cwd: process.cwd(),
     route: { provider: "x", model: "y" },

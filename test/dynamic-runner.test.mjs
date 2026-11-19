@@ -136,7 +136,7 @@ test("sequential plan dispatches all seven targets and preserves the status cont
   const plan = targets.map((target, index) => call(`PROMPT-${index}`, {
     target,
     route: target === "opencode" ? { model: "fixture/model" } : target === "amp" ? { variant: "medium" } : {},
-    policy: { write: target === "amp" },
+    policy: { write: ["opencode", "amp"].includes(target) },
   }));
   const result = await f.runner.start(f.spec(plan, { requestId: "seven", name: "seven targets", policy: { write: true }, route: {} }));
   assert.equal(result.state, "completed", JSON.stringify({ error: result.error, invocations: result.invocations }));

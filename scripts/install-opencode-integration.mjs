@@ -1,5 +1,4 @@
 import { mkdir, readFile, readdir, writeFile, unlink, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
@@ -81,9 +80,21 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   configDir = resolve(configDir);
   const json = join(configDir, "opencode.json");
   const jsonc = join(configDir, "opencode.jsonc");
-  if (existsSync(json) && existsSync(jsonc)) throw new Error("Both opencode.json and opencode.jsonc exist; consolidate them before installing");
-  const configPath = existsSync(jsonc) ? jsonc : json;
-  const original = await current(configPath);
+  const configPaths = [json, jsonc];
+  const originalFiles = await Promise.all(configPaths.map(current));
+  if (originalFiles.every((bytes) => bytes !== null)) throw new Error("Both opencode.json and opencode.jsonc exist; consolidate them before installing");
+  const selected = originalFiles[1] === null ? 0 : 1;
+  const configPath = configPaths[selected];
+  const original = originalFiles[selected];
+  const assertConfigUnchanged = async () => {
+    const files = await Promise.all(configPaths.map(current));
+    if (files.some((bytes, index) => {
+      const originalBytes = originalFiles[index];
+      return bytes === null || originalBytes === null ? bytes !== originalBytes : !bytes.equals(originalBytes);
+    })) {
+      throw new Error("OpenCode configuration changed during daemon preparation or installation. Retry with the current config.");
+    }
+  };
   const config = original ? parseConfig(original.toString("utf8")) : { $schema: "https://opencode.ai/config.json" };
   const migrateConfig = () => {
     throw new Error("Migrate the OpenCode configuration to V2 before installing Harnest. Use plugins and mcp.servers (https://opencode.ai/docs/migrate-v1/).");
@@ -167,10 +178,11 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   candidates.push({ path: configPath, bytes: unchanged ? original : Buffer.from(JSON.stringify(config, null, 2) + "\n") });
   const changes = [];
   for (const file of candidates) {
-    const before = await current(file.path);
+    const before = file.path === configPath ? original : await current(file.path);
     if (before?.equals(file.bytes)) continue;
     changes.push({ ...file, before });
   }
+  await assertConfigUnchanged();
   if (unchanged) await replaceWithBackup(configPath, original, original, { sensitive: true });
   if (!changes.length) return { changed: [], manifest: null, migrated };
   const backupDir = join(configDir, ".harnest-backups", backupStamp());
@@ -185,6 +197,7 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", { flag: "wx" });
   try {
     for (const file of changes) {
+      if (file.path === configPath) await assertConfigUnchanged();
       const now = await current(file.path);
       if ((now === null ? null : digest(now)) !== (file.before === null ? null : digest(file.before))) throw new Error(`File changed during install: ${file.path}`);
       await mkdir(dirname(file.path), { recursive: true });

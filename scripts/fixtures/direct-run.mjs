@@ -47,6 +47,7 @@ const request = (target, overrides = {}) => normalizeRequest({
   task: "Do the task natively.",
   cwd: process.cwd(),
   route: target === "opencode" ? { model: "fixture/model" } : {},
+  policy: { write: target === "opencode" },
   ...overrides,
 });
 

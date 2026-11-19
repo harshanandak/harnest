@@ -12,7 +12,7 @@ const state = { sessionId: "lifecycle-session", model: { provider: "openai", id:
 
 function request(target, timeoutMs = 5000) {
   return { target, requestId: "lifecycle", cwd: process.cwd(), task: "Return DONE", context: target === "opencode" ? { graph: { graphId: "fixture" } } : {},
-    route: { provider: "openai", model: "test" }, policy: { write: false }, execution: { timeoutMs } };
+    route: { provider: "openai", model: "test" }, policy: { write: target === "opencode" }, execution: { timeoutMs } };
 }
 
 function deferred() {

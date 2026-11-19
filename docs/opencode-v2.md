@@ -31,7 +31,7 @@ Harnest uses V2 when `route.harnessVersion` is omitted or is `v2`. Explicit V1 r
 
 Install the V2 CLI package `@opencode/cli`. To pin its executable, set `HARNEST_OPENCODE_V2` or `executables.opencode2` in `harnest.config.local.json`. Harnest checks the CLI major version before starting an OpenCode server or requesting model metadata.
 
-Prompt handoffs can pass attachments and continue or fork a session when the installed CLI advertises the relevant run flags. Ordinary handoffs use a managed server or attach to `route.serverUrl`. Graph nodes without a server URL use the shared service to retain native session visibility. OpenCode applies the server's own tool permissions, including for read-only requests.
+Prompt handoffs can pass attachments and continue or fork a session when the installed CLI advertises the relevant run flags. Ordinary handoffs use a managed server or attach to `route.serverUrl`. Graph nodes without a server URL use the shared service to retain native session visibility. OpenCode applies the server's own tool permissions. Harnest requires explicit write authorization and rejects read-only requests before startup. Unrestricted inline Taskflow phases use the native agent by default. Explicit phase tool lists, restricted named agents, and nested definitions that cannot be checked before launch are rejected.
 
 ## Verification
 

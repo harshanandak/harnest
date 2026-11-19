@@ -1,4 +1,4 @@
-import { adapterPolicyRejectionReasons, adapterRouteRejectionReasons, assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
+import { adapterPolicyRejectionReasons, adapterRouteRejectionReasons, assertAdapterPolicy, assertAdapterRoute, openCodeUsesSharedService } from "./model-policy.mjs";
 import { hasNativeRouteControls, normalizeRoute } from "./protocol.mjs";
 
 const AXES = ["quality", "speed", "efficiency", "reliability"];
@@ -428,7 +428,7 @@ function explicitMatches(requestRoute, candidate) {
   return entries.length > 0 && entries.every(([key, value]) => candidate.route[key] === value);
 }
 
-function rejectionReasons(candidate, request, directive, contextTokens, now) {
+function rejectionReasons(candidate, request, directive, contextTokens, now, openCodeServerUrl) {
   const reasons = [
     ...adapterRouteRejectionReasons(candidate.target, candidate.route),
     ...adapterPolicyRejectionReasons(candidate.target, request.policy, request.execution, request.workflow),
@@ -444,9 +444,10 @@ function rejectionReasons(candidate, request, directive, contextTokens, now) {
   if (health.status === "open" && number(health.retryAfter, Infinity) > now) reasons.push("circuit-open");
   if (directive.target && candidate.target !== directive.target) reasons.push("target");
   if (request.policy.write && capabilities.write !== true) reasons.push("write");
-  if (!request.policy.write && capabilities.readOnly === false) reasons.push("read-only");
+  if (!request.policy.write && capabilities.readOnly === false && !reasons.includes("read-only")) reasons.push("read-only");
   if (request.workflow && capabilities.taskflow === false) reasons.push("taskflow");
-  if (directive.require.liveControl === true && capabilities.liveControl !== true) reasons.push("live-control");
+  if (directive.require.liveControl === true && (capabilities.liveControl !== true
+    || (candidate.target === "opencode" && openCodeUsesSharedService({ ...request, route: candidate.route }, openCodeServerUrl)))) reasons.push("live-control");
   if (directive.require.computerUse === true && capabilities.computerUse !== true) reasons.push("computer-use");
   // Thinking gate: a named effort level the candidate does not declare is a
   // hard reject — the wrong reasoning depth ruins the run regardless of
@@ -650,22 +651,31 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
       ? { versionUpgradeRestricted: true } : {}),
   };
   const pinTarget = hasExplicitRoute(request) ? request.target : (preferredTarget || request.target);
+  const assertLiveControl = (target, route) => {
+    if (target === "opencode" && directive.require.liveControl === true
+      && openCodeUsesSharedService({ ...request, route }, options.openCodeServerUrl)) {
+      throw Object.assign(new Error("Shared-service OpenCode graph nodes cannot provide live control"), { details: { kind: "policy" } });
+    }
+  };
   if (hasNativeRouteControls(request.target, request.route) && request.target !== "auto") {
     const route = withThinking(mergeObject(directive.route, request.route), request.target);
     assertAdapterRoute(request.target, route);
     assertAdapterPolicy(request.target, request.policy, request.execution, request.workflow);
+    assertLiveControl(request.target, route);
     return { target: request.target, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (mode === "pin" || (hasExplicitRoute(request) && mode !== "auto" && mode !== "prefer")) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
     assertAdapterPolicy(pinTarget, request.policy, request.execution, request.workflow);
+    assertLiveControl(pinTarget, route);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (hasExplicitRoute(request) && request.metadata?.routing?.mode == null) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
     assertAdapterPolicy(pinTarget, request.policy, request.execution, request.workflow);
+    assertLiveControl(pinTarget, route);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
 
@@ -686,7 +696,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
         ...(request.route?.thinking != null ? { thinking: request.route.thinking } : {}),
       }, rawCandidate.target, rawCandidate.capabilities),
     };
-    const reasons = rejectionReasons(candidate, effective, selectionDirective, contextTokens, options.now ?? Date.now());
+    const reasons = rejectionReasons(candidate, effective, selectionDirective, contextTokens, options.now ?? Date.now(), options.openCodeServerUrl);
     if (reasons.length) {
       rejected.push({ id: candidate.id, reasons });
       continue;
@@ -706,6 +716,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
     }, fallbackTarget);
     assertAdapterRoute(fallbackTarget, route);
     assertAdapterPolicy(fallbackTarget, request.policy, request.execution, request.workflow);
+    assertLiveControl(fallbackTarget, route);
     const incompatible = rejected.filter((entry) => !entry.reasons.includes("target")
       && entry.reasons.some((reason) => [
         "claude-model", "thinking-control", "gemini-provider", "gemini-model", "gemini-route-control",

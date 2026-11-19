@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { preflight } from "../src/preflight.mjs";
 
-const request = (target) => ({ requestId: `preflight-${target}`, target, task: "synthetic routing check", cwd: process.cwd(), context: { requiredResultFields: ["finalText"] }, policy: { write: target === "amp" } });
+const request = (target) => ({ requestId: `preflight-${target}`, target, task: "synthetic routing check", cwd: process.cwd(), context: { requiredResultFields: ["finalText"] }, policy: { write: ["opencode", "amp"].includes(target) } });
 const routing = { config: { routing: {} }, env: {}, userPolicy: {
   harnessOrder: ["pi", "claude", "codex", "opencode", "cursor"],
   tier: "balanced", allowTrainingEndpoints: false,

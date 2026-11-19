@@ -100,7 +100,7 @@ function request(overrides = {}) {
     cwd: process.cwd(),
     context: { source: "deterministic-test", count: 2 },
     route: { provider: "openai", model: "gpt-test", agent: "reviewer", variant: "high" },
-    policy: { write: false },
+    policy: { write: true },
     ...overrides,
   });
 }
@@ -328,10 +328,14 @@ test("OpenCode keeps unreported cache counters null and explicit zeros as zero",
 
 test("passes write policy and launch prefixes without weakening the command contract", async () => {
   const calls = [];
+  const config = {
+    providers: { test: { package: "@opencode/ai/providers/openai-compatible" } },
+    permissions: [{ action: "shell", resource: "*", effect: "deny" }],
+  };
   const adapter = new OpenCodeAdapter({
     ...managedOptions(),
     launch: { command: "fake-opencode", args: ["--shim"] },
-    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { test: { name: "test" } } }) },
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
     spawnFn(command, args, options) {
       calls.push({ command, args, options });
       return new FakeChild(streamLines("write-session", "wrote result"));
@@ -339,12 +343,90 @@ test("passes write policy and launch prefixes without weakening the command cont
   });
   const output = await adapter.run(request({ policy: { write: true }, route: { model: "openai/gpt-test" } }));
   assert.equal(calls[0].command, "fake-opencode");
-  assert.equal(calls[0].args[0], "--shim");
-  assert.ok(!calls[0].args.includes("--auto"));
-  const enforcedConfig = JSON.parse(calls[0].options.env.OPENCODE_CONFIG_CONTENT);
-  assert.equal(enforcedConfig.provider.test.name, "test");
-  assert.equal(enforcedConfig.permission.bash, undefined);
+  assert.deepEqual(calls[0].args, ["--shim", "run", calls[0].args[2], "--format", "json", "--server", SERVER_URL, "--model", "openai/gpt-test"]);
+  assert.equal(calls[0].options.shell, false);
+  assert.match(calls[0].args[2], /"write":true/);
+  assert.deepEqual(JSON.parse(calls[0].options.env.OPENCODE_CONFIG_CONTENT), config);
   assert.equal(output.result.finalText, "wrote result");
+});
+
+test("OpenCode rejects read-only before probing either a local or attached server", async () => {
+  for (const serverUrl of [undefined, SERVER_URL]) {
+    const adapter = new OpenCodeAdapter({
+      command: "fake-opencode", serverUrl,
+      spawnFn() { assert.fail("read-only request reached the CLI"); },
+      fetchFn() { assert.fail("read-only request reached the server"); },
+    });
+    for (const overrides of [
+      { policy: undefined },
+      { policy: { write: false }, context: { graph: { graphId: "fixture" } } },
+      { policy: { write: false }, execution: { sessionId: "previous" } },
+      { policy: { write: false }, execution: { sessionId: "previous", sessionAction: "fork" } },
+      { policy: { write: false }, workflow: { spec: { task: "Review." } } },
+    ]) {
+      await assert.rejects(adapter.run(request(overrides)),
+        (error) => error.details?.kind === "policy" && error.details.field === "policy.write");
+    }
+  }
+});
+
+test("OpenCode Taskflow rejects a selected agent with tool restrictions before server startup", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-agent-policy-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const agents = join(cwd, ".pi", "agents");
+  await mkdir(agents, { recursive: true });
+  await writeFile(join(agents, "read-auditor.md"), "---\nname: read-auditor\ndescription: Read-only audit\ntools: read\n---\nReview the files.\n");
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn() { assert.fail("restricted flow reached the CLI"); },
+    fetchFn() { assert.fail("restricted flow reached the server"); },
+  });
+  await assert.rejects(adapter.run(request({ cwd, workflow: { spec: {
+    agentScope: "project",
+    name: "restricted-agent",
+    phases: [
+      { id: "first", task: "Perform a task." },
+      { id: "final", agent: "read-auditor", task: "Review the result.", final: true },
+    ],
+  } } })), /does not enforce Taskflow agent tool lists/);
+});
+
+test("OpenCode rejects dynamic nested Taskflow restrictions before launching the plan phase", async () => {
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn() { assert.fail("uninspectable flow reached the CLI"); },
+    fetchFn() { assert.fail("uninspectable flow reached the server"); },
+  });
+  const workflow = { spec: { name: "dynamic-child", phases: [
+    { id: "plan", task: "Write a FlowSpec.", output: "json" },
+    { id: "child", type: "flow", def: "{steps.plan.json}", dependsOn: ["plan"], final: true },
+  ] } };
+  await assert.rejects(adapter.run(request({ workflow })),
+    (error) => error.details?.kind === "policy" && /nested tool policy before launch.*child/.test(error.message));
+  workflow.spec.phases[1].def = [{ id: "restricted", task: "Review.", tools: ["read"] }];
+  await assert.rejects(adapter.run(request({ workflow })),
+    (error) => error.details?.kind === "policy" && /does not enforce Taskflow phase tool lists/.test(error.message));
+});
+
+test("OpenCode runs an unrestricted nested FlowSpec through V2", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-nested-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    ...managedOptions(), command: "fake-opencode",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild(streamLines("nested-session", "nested output"));
+    },
+  });
+  const output = await adapter.run(request({ cwd, workflow: { spec: {
+    name: "static-child",
+    phases: [{ id: "child", type: "flow", def: [{ id: "inner", task: "Return nested canary.", final: true }], final: true }],
+  } } }));
+  assert.equal(output.result.finalText, "nested output");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0][1], /Return nested canary/);
+  assert.ok(calls[0].includes("--server"));
 });
 
 test("OpenCode rejects workflow.nodes before launch instead of silently running it as a prompt", async () => {
@@ -613,6 +695,29 @@ test("V2 reroute switches model and can omit a message", async () => {
   assert.equal(ack.model.model, "deepseek-v4-flash");
   assert.deepEqual(calls, [["switchModel", { sessionID: "v2-reroute-session", model: { providerID: "deepseek", id: "deepseek-v4-flash" } }]]);
   await run;
+});
+
+test("OpenCode reports lost prompt acknowledgements and preserves an applied model switch", async () => {
+  const calls = [];
+  const control = new OpenCodeControl({ fetchFn: healthyFetch, clientFactory: () => ({ session: {
+    async switchModel(input) { calls.push(["switch", input]); },
+    async prompt(input) { calls.push(["prompt", input]); throw new Error("connection closed before acknowledgement"); },
+  } }) });
+  await control.start({ serverUrl: SERVER_URL });
+  control.setSessionId("ack-session");
+  await assert.rejects(control.control({ kind: "message", message: "first" }), (error) => {
+    assert.equal(error.details.uncertain, true);
+    assert.equal(error.details.modelSwitchApplied, undefined);
+    return true;
+  });
+  await assert.rejects(control.control({ kind: "reroute", route: { provider: "fixture", model: "new-model" }, message: "second" }), (error) => {
+    assert.equal(error.details.uncertain, true);
+    assert.equal(error.details.modelSwitchApplied, true);
+    assert.deepEqual(error.details.model, { provider: "fixture", model: "new-model", variant: undefined });
+    return true;
+  });
+  assert.deepEqual(calls.map(([kind]) => kind), ["prompt", "switch", "prompt"]);
+  assert.ok(calls.every(([, input]) => input.sessionID === "ack-session"));
 });
 
 test("default V2 handoff starts and cleans up a private server", async () => {

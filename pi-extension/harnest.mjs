@@ -32,7 +32,7 @@ const callDaemon = async (name, args, key) => {
   catch (error) { readiness = null; throw error; }
 };
 
-const READ_ONLY_TARGETS = ["opencode", "pi", "cursor", "claude", "codex", "gemini"];
+const READ_ONLY_TARGETS = ["pi", "cursor", "claude", "codex", "gemini"];
 
 // Bounded local truncation (no new runtime imports): tool outputs must stay
 // small; the full trace always remains pageable via handoff_trace.
@@ -268,7 +268,7 @@ const RequestSchema = Type.Object({
 
 const ReadOnlyRequestSchema = Type.Object({
   ...RequestSchema.properties,
-  target: StringEnum(READ_ONLY_TARGETS, { description: "Read-only-capable downstream harness; Amp and generic ACP are write-only." }),
+  target: StringEnum(READ_ONLY_TARGETS, { description: "Read-only-capable downstream harness." }),
 }, { additionalProperties: false, description: "Read-only comparison or review request." });
 
 const ReferenceSchema = Type.Object({

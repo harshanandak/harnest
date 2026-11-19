@@ -42,7 +42,7 @@ for (const modern of [false, true]) {
           { id: "gemini-review", target: "gemini", task: "review", dependsOn: ["pi-plan"], policy: { write: false } },
           { id: "amp-review", target: "amp", route: { variant: "medium" }, task: "review", dependsOn: ["pi-plan"], policy: { write: true } },
           { id: "cursor-join", target: "cursor", task: "join", dependsOn: ["claude-review", "codex-review", "gemini-review", "amp-review"], policy: { write: false } },
-          { id: "opencode-final", target: "opencode", route: { provider: "fixture", model: "synthetic", harnessVersion: "v2" }, task: "final", dependsOn: ["cursor-join"], policy: { write: false } },
+          { id: "opencode-final", target: "opencode", route: { provider: "fixture", model: "synthetic", harnessVersion: "v2" }, task: "final", dependsOn: ["cursor-join"], policy: { write: true } },
         ], outputs: ["opencode-final"],
       };
       const validated = await measure("validate", () => call(client, "handoff_graph_validate", { graph }));

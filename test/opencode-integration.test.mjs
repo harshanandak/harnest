@@ -20,6 +20,7 @@ test("host info snapshot describes the OpenCode launch path and control semantic
     ["opencode-worker", "pi-worker", "cursor-worker", "claude-worker", "codex-worker", "gemini-worker", "amp-worker", "acp-worker"],
   );
   assert.match(info.launchPath.nativeChild, /acp-worker/);
+  assert.match(info.launchPath.nativeChild, /subagent tool.*agent ID/);
   const acp = info.workers.find((worker) => worker.target === "acp");
   assert.equal(acp?.agent, "acp-worker");
   assert.match(acp?.notes ?? "", /route\.agent/);
@@ -49,9 +50,11 @@ test("every OpenCode worker agent is a restricted subagent with a launch descrip
     assert.match(raw, /^---\n[\s\S]+^---/m, `${name} must carry frontmatter`);
     assert.match(raw, /^mode: subagent$/m, `${name} must be a subagent`);
     assert.match(raw, /^description: /m, `${name} must describe when to use it`);
-    for (const action of ["shell", "edit", "subagent"]) {
-      assert.ok(raw.includes(`  - action: ${action}\n    resource: "*"\n    effect: deny`), `${name} must deny ${action}`);
-    }
+    const [, header] = /^---\n([\s\S]*?)\n---\n/.exec(raw);
+    const [, permissions] = /^permissions: (\[[\s\S]*?^ *\])/m.exec(header);
+    assert.deepEqual(JSON.parse(permissions),
+      ["read", "edit", "glob", "grep", "shell", "webfetch", "websearch", "subagent", "skill"]
+        .map((action) => ({ action, resource: "*", effect: "deny" })), `${name} permission rules`);
     assert.match(raw, /harnest_handoff_workflow/, `${name} must name the MCP tool with its prefix`);
   }
 });

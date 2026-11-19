@@ -10,7 +10,7 @@ import { normalizeRequest, TARGETS } from "../src/protocol.mjs";
 import { runtimeInfo } from "../src/runtime-info.mjs";
 
 const targets = ["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"];
-const readOnlyTargets = targets.filter((target) => !["amp", "acp"].includes(target));
+const readOnlyTargets = targets.filter((target) => !["opencode", "amp", "acp"].includes(target));
 
 test("Gemini, Amp, and ACP are admitted across canonical runtime and static schema surfaces", async () => {
   assert.deepEqual([...TARGETS], targets);
@@ -58,6 +58,7 @@ test("Gemini, Amp, and ACP are admitted across canonical runtime and static sche
     ],
   });
   for (const target of readOnlyTargets) assert.equal(validateComparison(comparison(target)), true, target);
+  assert.equal(validateComparison(comparison("opencode")), false, "static comparison must reject OpenCode before dispatch");
   assert.equal(validateComparison(comparison("amp")), false, "static comparison must reject read-only Amp before dispatch");
   assert.equal(validateComparison(comparison("acp")), false, "static comparison must reject write-only ACP before dispatch");
 });
