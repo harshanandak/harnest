@@ -254,8 +254,9 @@ capped at 3 rounds, one fallback-free run each.
 ## Choosing models
 
 Tell your lead agent which model to use. The lead puts that model in
-`route.model`, passes any effort you name in `route.thinking`, and sets
-`metadata.routing.modelVersion` to `pin` to keep the exact version.
+`route.model` and passes any effort you name in `route.thinking`. For an exact model ID, it
+also sets `metadata.routing.modelVersion` to `pin` to keep that version.
+Aliases such as `sonnet` stay unpinned, because pin mode rejects them.
 
 You can also [set routing preferences once](#set-up-from-the-terminal). If
 you leave the model out of your prompt, the lead uses your saved preferences.

@@ -16,7 +16,7 @@ Hand off when the work is **big, independent, or long**: huge research (multi-so
 
 Do NOT hand off when the hop costs more than the work: quick questions, single file reads, small edits, anything needing this session's accumulated context or repo state, taste-critical work with no review loop across the hop, multi-turn debugging (every turn re-states context). Your session cache is the most valuable context you have — keep context-dependent work in-session, native subagent at most.
 
-Use the model the user names in `route.model` and any effort they name in `route.thinking`. Set `metadata.routing.modelVersion` to `pin` to keep the requested model version. If the user leaves the model out of the prompt, use their saved routing preferences. If neither supplies a model, omit `route.model` so the downstream CLI can use its configured default.
+Use the model the user names in `route.model` and any effort they name in `route.thinking`. If the user names an exact model ID, set `metadata.routing.modelVersion` to `pin` to keep that version. Leave native aliases such as `sonnet` or `opus` unpinned, because pin mode rejects aliases. If the user leaves the model out of the prompt, use their saved routing preferences. If neither supplies a model, omit `route.model` so the downstream CLI can use its configured default.
 
 Use `handoff_workflow` for one downstream workflow. Pi never runs Claude models (rejected as policy) — Claude models run only via `target: "claude"` (Claude Code CLI). Use `handoff_compare` when the user requests multi-model testing, independent opinions, or parallel research on the same question. Call `handoff_host_info` first when unsure which launch path the current host expects.
 
