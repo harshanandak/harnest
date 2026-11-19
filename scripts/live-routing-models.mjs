@@ -19,7 +19,7 @@ const cases = [
 ];
 
 export async function previewRoutingCase({ settings, target, route, cwd = process.cwd() }) {
-  const request = { target, task: "Preview version selection only", cwd, route, policy: { write: target === "amp" } };
+  const request = { target, task: "Preview version selection only", cwd, route, policy: { write: target === "amp" || target === "opencode" } };
   const latest = await settings.preview({ request });
   if (target === "amp") {
     assert.deepEqual(latest.route, route);
