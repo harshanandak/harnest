@@ -28,7 +28,7 @@ function canonicalPath(path, field, directory) {
   }
   let resolved, info;
   try {
-    resolved = realpathSync(path);
+    resolved = realpathSync.native(path);
     info = statSync(resolved);
   } catch {
     throw executionError(field, `requires an existing ${directory ? "directory" : "file"}`);
