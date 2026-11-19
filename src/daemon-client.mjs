@@ -7,9 +7,11 @@ import { DAEMON_PORT, VERSION, clientPort, daemonAddress, daemonProof, readDaemo
 import { withoutHarnestToken } from "./daemon-env.mjs";
 
 const STARTUP_MS = 8000;
-const loopback = new Agent({ keepAlive: true });
-
-function exchange(url, { headers, method, body, signal, agent = loopback } = {}) {
+// Control-plane probes (proof, health, stop, port release) open a fresh
+// connection each time. Reusing a kept-alive socket can keep reaching a
+// stopping daemon after its listener closes, so an upgrade never sees the
+// port released and spends its whole startup budget waiting (#26).
+function exchange(url, { headers, method, body, signal, agent = false } = {}) {
   return new Promise((resolve, reject) => {
     const req = request(url, { method, signal, agent }, async (res) => {
       try {

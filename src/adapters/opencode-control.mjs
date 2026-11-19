@@ -157,12 +157,16 @@ export class OpenCodeControl {
           stderr: this.serverStderr || null,
         });
       }
-      try {
-        const response = await this.fetchFn(joinUrl(this.serverUrl, "/api/health"), { method: "GET", headers: this.authHeaders(), signal });
-        if (responseOk(response)) return response;
-        lastError = new Error(`health returned HTTP ${responseStatus(response) ?? "unknown"}`);
-      } catch (error) {
-        lastError = error;
+      // OpenCode V2 serves health at /global/health (2.2.1 returns 404 for an
+      // authenticated /api/health). Keep /api/health as a fallback.
+      for (const path of ["/global/health", "/api/health"]) {
+        try {
+          const response = await this.fetchFn(joinUrl(this.serverUrl, path), { method: "GET", headers: this.authHeaders(), signal });
+          if (responseOk(response)) return response;
+          lastError = new Error(`${path} returned HTTP ${responseStatus(response) ?? "unknown"}`);
+        } catch (error) {
+          lastError = error;
+        }
       }
       await sleep(this.pollMs);
     }

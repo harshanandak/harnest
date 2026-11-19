@@ -149,10 +149,10 @@ test("OpenCode forwards a fork and both file input types through native argv", a
 });
 
 const SERVER_URL = "http://127.0.0.1:43991";
+// Matches a real OpenCode 2.2.1 server: health lives at /global/health and an
+// authenticated /api/health returns 404.
 function healthyFetch(url) {
-  if (String(url).endsWith("/global/health") || String(url).endsWith("/api/health")) {
-    return Promise.resolve({ ok: true, status: 200 });
-  }
+  if (String(url).endsWith("/global/health")) return Promise.resolve({ ok: true, status: 200 });
   return Promise.resolve({ ok: false, status: 404 });
 }
 
@@ -795,6 +795,17 @@ test("default V2 handoff starts and cleans up a private server", async () => {
   assert.equal(calls[1][calls[1].indexOf("--server") + 1], "http://127.0.0.1:43992");
   assert.equal(output.route.harnessVersion, "v2");
   assert.equal(serverChild.killed, true);
+});
+
+test("attached server readiness uses /global/health, where OpenCode V2 serves health", async () => {
+  const probed = [];
+  const control = new OpenCodeControl({
+    fetchFn(url) { probed.push(new URL(url).pathname); return healthyFetch(url); },
+    clientFactory: () => ({ session: {} }),
+  });
+  await control.start({ serverUrl: SERVER_URL });
+  assert.deepEqual(probed, ["/global/health"]);
+  await control.stop();
 });
 
 test("control rejects cleanly before the managed server is ready", async () => {

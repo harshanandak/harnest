@@ -53,7 +53,7 @@ test("lazy OpenCode forwards progress, live controls and abort to the same adapt
     command: "synthetic",
     serverUrl: "http://127.0.0.1:43991",
     async fetchFn(url) {
-      assert.equal(new URL(url).pathname, "/api/health");
+      assert.equal(new URL(url).pathname, "/global/health");
       return { ok: true, status: 200 };
     },
     clientFactory: () => ({ session: { async prompt(input) { prompts.push(input); } } }),
