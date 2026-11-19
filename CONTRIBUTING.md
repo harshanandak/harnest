@@ -27,10 +27,10 @@ bun install --frozen-lockfile --omit optional
 ```sh
 bun run check            # syntax check and the Node test suite
 bun run smoke:mcp        # MCP server smoke test
-bun run validate:plugin  # plugin manifest validator (needs Python)
+bun run validate:plugin  # plugin manifest validator (needs Python with PyYAML: pip install PyYAML)
 ```
 
-GitHub CI runs these on Linux, Windows, and macOS for every pull request, and it is the gate for merging.
+GitHub CI runs these on Linux and Windows for every pull request, and on macOS too for every push to `main`. CI is the gate for merging.
 
 - Tests use fake harness processes. Live tests that call real CLIs or models (`smoke:live-control`, `scripts/live-*.mjs`) are opt-in and never run in CI.
 - Fix the cause of a failing test. Do not lengthen timeouts, add retries, or skip tests to make CI pass.

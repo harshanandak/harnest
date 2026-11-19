@@ -6,7 +6,7 @@ The documentation is plain Markdown with headings, lists, and tables, and it ren
 
 Known limits:
 
-- The optional terminal viewers (`scripts/graph-view.mjs` and similar) print padded text columns, which can be harder to follow with a screen reader. The same data is available as structured JSON through the `handoff_status` and `handoff_trace` tools.
+- The optional terminal viewers (`scripts/graph-view.mjs` and similar) print padded text columns, which can be harder to follow with a screen reader. The same data is available as structured JSON through the MCP tools: `handoff_status` and `handoff_trace` for a single handoff, and `handoff_graph_status` and `handoff_graph_result` for a graph.
 - Each downstream agent (Claude Code, Codex, OpenCode, and others) has its own interface and accessibility support. Harnest cannot change those.
 
 If something in Harnest or its docs gets in your way, [open an issue](https://github.com/harshanandak/harnest/issues/new/choose) and describe the barrier and the tools you use. Accessibility reports get the same priority as bugs.
