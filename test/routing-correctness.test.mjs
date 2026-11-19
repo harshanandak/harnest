@@ -42,7 +42,8 @@ test("a trusted hook cannot move live-control work onto a shared-service OpenCod
   const dir = await fixture(t);
   const hook = join(dir, "hook.mjs");
   await writeFile(hook, 'export default () => ({target:"opencode",route:{model:"fixture/model"}})');
-  const graphRequest = () => ({ ...request(), context: { graph: { graphId: "fixture" } }, metadata: { routing: { mode: "auto" } } });
+  // OpenCode V2 cannot enforce read-only runs, so the work must be write-enabled.
+  const graphRequest = () => ({ ...request(), policy: { write: true }, context: { graph: { graphId: "fixture" } }, metadata: { routing: { mode: "auto" } } });
   const userPolicy = { require: { liveControl: true } };
   const shared = createRouteResolver({ config: {}, env: {}, resolverModule: hook, userPolicy });
   await assert.rejects(shared(graphRequest()), /Shared-service OpenCode graph nodes/);
