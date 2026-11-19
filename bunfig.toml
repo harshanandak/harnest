@@ -1,5 +1,6 @@
 [install]
 # Refuse package versions published less than 7 days ago (604800 seconds).
 # Most hijacked npm releases are found and removed within days, so this keeps
-# them out of new installs and dependency updates.
+# them out when bun resolves a new version (bun add, bun update, lockfile changes).
+# Versions already pinned in bun.lock still install with --frozen-lockfile.
 minimumReleaseAge = 604800

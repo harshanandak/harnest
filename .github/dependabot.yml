@@ -8,9 +8,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Actions has no per-semver cooldown, so every Actions update waits 30 days.
     cooldown:
-      default-days: 7
-      semver-major-days: 30
+      default-days: 30
     groups:
       actions:
         patterns: ["*"]
