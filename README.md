@@ -63,6 +63,26 @@ bun run doctor --host codex
 > [!TIP]
 > Run `bun run setup --help` to see every host name. Setup also installs the shared daemon and a login item so it starts with your machine. Pass `--no-autostart` to skip that.
 
+### Or let your agent set it up
+
+Paste this prompt into the coding agent you want to use as the lead. It installs the pinned release, connects that agent, and leaves logins and secrets to you.
+
+```text
+Install and set up Harnest (https://github.com/harshanandak/harnest) on this machine so you can hand off work to other coding agents.
+
+1. Check that git, bun, and Node.js 22 or newer are installed. If any is missing, stop and tell me what to install.
+2. Ask me where to keep the checkout. It must stay in place, because host configs point at it. Suggest ~/harnest.
+3. Clone and install the release:
+   git clone --branch v0.1.0 https://github.com/harshanandak/harnest.git <directory>
+   cd <directory>
+   bun install --frozen-lockfile --omit optional
+4. Run `bun run setup --help` and find the host name that matches you. Setup also installs a background daemon that starts at login. Ask me before running it, and add --no-autostart if I say no. Then run `bun run setup <host>`.
+5. Run `bun run doctor --host <host>`. Fix what you can and report anything still failing.
+6. Check which downstream agent CLIs from the README's "Supported clients and downstream agents" table are on PATH. Do not install them or log in to them. Tell me which ones I still need to install or log in to.
+
+Rules: never read, print, or ask me for API keys, tokens, or other secrets. Do not change configuration beyond what setup writes. When you finish, tell me to restart you and check that the handoff_workflow, handoff_status, handoff_trace, and handoff_result tools are listed, then point me to the README's "Your first handoff" section.
+```
+
 ### Pick your lead agent
 
 <details>
