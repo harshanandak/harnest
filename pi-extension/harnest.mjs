@@ -200,12 +200,17 @@ async function openViewerTerminal(commandLine, cwd) {
 
 const HandoffRouteSchema = Type.Object({
   provider: Type.Optional(Type.String({ minLength: 1 })),
-  model: Type.Optional(Type.String({ minLength: 1 })),
-  agent: Type.Optional(Type.String({ minLength: 1 })),
-  variant: Type.Optional(Type.String({ minLength: 1 })),
+  model: Type.Optional(Type.String({ minLength: 1, description: "For ACP, an advertised session model ID." })),
+  agent: Type.Optional(Type.String({ minLength: 1, description: "Claude named agent, OpenCode agent, or trusted ACP registration ID." })),
+  variant: Type.Optional(Type.String({ minLength: 1, description: "For ACP, an advertised session mode ID." })),
   thinking: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Boolean()])),
   harnessVersion: Type.Optional(StringEnum(["v1", "v2"], { description: "OpenCode only: v1 or v2." })),
   serverUrl: Type.Optional(Type.String({ minLength: 1, description: "OpenCode private server URL." })),
+  serviceTier: Type.Optional(StringEnum(["default", "fast", "priority", "flex"], { description: "Native one-shot tier. Claude accepts only fast." })),
+  profile: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$", description: "Codex one-shot native config profile name." })),
+  options: Type.Optional(Type.Record(Type.String({ pattern: "^(?!(?:__proto__|prototype|constructor)$)(?=[\\s\\S]{1,128}$)[\\s\\S]*\\S" }),
+    Type.Union([Type.String({ maxLength: 256 }), Type.Boolean()]),
+    { maxProperties: 16, additionalProperties: false, description: "ACP session option IDs mapped to advertised values." })),
 }, { additionalProperties: false, description: "Explicit route; omit for policy selection via metadata.routing mode auto." });
 
 const HandoffPolicySchema = Type.Object({
@@ -296,6 +301,11 @@ const RouteSchema = Type.Object({
   thinking: Type.Optional(Type.Union([Type.String(), Type.Boolean()])),
   harnessVersion: Type.Optional(StringEnum(["v1", "v2"])),
   serverUrl: Type.Optional(Type.String()),
+}, { additionalProperties: false });
+
+const NamedHandoffRouteSchema = Type.Object({
+  ...HandoffRouteSchema.properties,
+  model: Type.String({ minLength: 1 }),
 }, { additionalProperties: false });
 
 // The skill says "default to background execution"; nudge it at the boundary
@@ -740,7 +750,7 @@ export default function harnestExtension(pi) {
     name: "handoff_workflow",
     label: "Hand off workflow",
     description:
-      "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Generic ACP is opt-in through route.agent, write-only, and rejects model/provider pins, granular tools, cost budgets, persistent session transport, and live controls. Use execution.background=true for durable status/result retrieval. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
+      "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Codex one-shot accepts route.profile and route.serviceTier. Claude one-shot accepts route.agent and route.serviceTier fast. Generic ACP is write-only and accepts advertised model, variant, and options controls after route.agent selects a trusted registration. ACP rejects provider pins, granular tools, cost budgets, persistent session transport, and live controls. Use execution.background=true for durable status/result retrieval. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
     promptSnippet: "Delegate a whole workflow to a downstream harness via handoff_workflow",
     promptGuidelines: [
       "Use handoff_workflow with execution.background=true when the task runs longer than one turn; then poll handoff_status and handoff_trace, and finish with handoff_result.",
@@ -794,7 +804,7 @@ export default function harnestExtension(pi) {
       candidates: Type.Array(Type.Object({
         name: Type.String(),
         target: Type.Optional(StringEnum(READ_ONLY_TARGETS)),
-        route: RouteSchema,
+        route: NamedHandoffRouteSchema,
       }), { minItems: 2, maxItems: 16 }),
     }),
     async execute(_id, params, signal) {
@@ -965,7 +975,7 @@ export default function harnestExtension(pi) {
       reviewers: Type.Array(Type.Object({
         name: Type.String(),
         target: Type.Optional(StringEnum(READ_ONLY_TARGETS)),
-        route: RouteSchema,
+        route: NamedHandoffRouteSchema,
       }), { minItems: 2, maxItems: 8 }),
       rubric: Type.Optional(Type.Array(Type.Union([Type.String(), Type.Object({
         factor: Type.String(),

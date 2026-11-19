@@ -100,6 +100,53 @@ test("createAdapter supports claude target", () => {
   assert.ok(adapter instanceof ClaudeAdapter);
 });
 
+test("Claude sends the named agent and noninteractive fast-mode settings as native argv", async () => {
+  const calls = [];
+  const adapter = new ClaudeAdapter({
+    command: "fake-claude",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: args[0] === "--version"
+        ? "2.1.322 (Claude Code)\n"
+        : streamJsonResult("ok", "fast-session", { fast_mode_state: "on" }) });
+    },
+  });
+  const route = { agent: "review-plugin:reviewer", serviceTier: "fast" };
+  const output = await adapter.run(request({ route }));
+  assert.deepEqual(calls, [
+    ["--version"],
+    ["-p", calls[1][1], "--output-format", "stream-json", "--verbose", "--permission-prompts",
+      "none", "--permission-mode", "plan", "--agent", "review-plugin:reviewer", "--settings", '{"fastMode":true}'],
+  ]);
+  assert.equal(output.route.agent, route.agent);
+  assert.equal(output.route.serviceTier, route.serviceTier);
+});
+
+test("Claude rejects older fast-mode CLIs, native fallback, and missing named agents", async () => {
+  const cases = [
+    [{ serviceTier: "fast" }, "2.1.204 (Claude Code)\n", {}, /route\.serviceTier requires Claude Code 2\.1\.219/],
+    [{ serviceTier: "fast" }, "2.1.322 (Claude Code)\n", {}, /did not confirm route\.serviceTier/],
+    [{ serviceTier: "fast" }, "2.1.322 (Claude Code)\n", { fast_mode_state: "cooldown" }, /did not confirm route\.serviceTier/],
+    [{ agent: "missing" }, null, {}, /could not resolve route\.agent/],
+  ];
+  for (const [route, version, extra, expected] of cases) {
+    const calls = [];
+    const adapter = new ClaudeAdapter({
+      command: "fake-claude",
+      spawnFn(_command, args) {
+        calls.push(args);
+        if (args[0] === "--version") return new FakeChild({ stdout: version });
+        return new FakeChild({
+          stdout: streamJsonResult("standard answer", "fallback-session", extra),
+          stderr: route.agent ? 'Warning: agent "missing" no longer exists' : "",
+        });
+      },
+    });
+    await assert.rejects(adapter.run(request({ route })), expected);
+    if (version?.startsWith("2.1.204")) assert.deepEqual(calls, [["--version"]]);
+  }
+});
+
 test("Claude adapter maps route.thinking to --effort and drops levels Claude lacks", async () => {
   const calls = [];
   const adapter = new ClaudeAdapter({

@@ -14,6 +14,7 @@ import { resolve as resolvePath } from "node:path";
 
 import { harnessLaunch } from "../config.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
+import { routeControlError } from "../protocol.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
 import { digestContext } from "../protocol.mjs";
 import {
@@ -1559,6 +1560,8 @@ export class CodexSessionAdapter {
     }
     assertPromptOnlyWorkflow("codex", request.workflow);
     assertNoClaudeRoute("codex", request.route);
+    const controlError = routeControlError("codex", request.route, "session");
+    if (controlError) throw sessionError(controlError, "policy");
     const support = isPolicySupported(request.policy || {});
     if (!support.supported) {
       throw sessionError(`Codex policy not supported: ${support.reason} — ${CODEX_SESSION_SUPPORTED_POLICY_HELP}`, "policy", { reason: support.reason });

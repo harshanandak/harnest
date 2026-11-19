@@ -35,7 +35,10 @@
               "model": { "type": "string", "minLength": 1 },
               "variant": { "type": "string" },
               "thinking": { "type": ["string", "boolean"] },
-              "harnessVersion": { "type": "string" }
+              "harnessVersion": { "type": "string" },
+              "agent": { "type": "string", "minLength": 1 },
+              "serviceTier": { "enum": ["default", "fast", "priority", "flex"] },
+              "profile": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" }
             }
           }
         }

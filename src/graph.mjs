@@ -128,7 +128,7 @@ export class GraphRunner {
       // node with an empty route is fully policy-selected; once the caller
       // supplies a field it is protected the same way.
       for (const [key, value] of Object.entries(node.request.route)) {
-        if (resolved.route[key] !== value) throw graphError("routing", `resolved node ${node.id} changed an explicit route.${key}`);
+        if (stableJson(resolved.route[key]) !== stableJson(value)) throw graphError("routing", `resolved node ${node.id} changed an explicit route.${key}`);
       }
       if (automatic && resolved.target === "acp" && !resolved.route.agent) throw graphError("routing", `automatic node ${node.id} has no usable agent route`);
       if (automatic && !["acp", "amp"].includes(resolved.target) && !resolved.route.model) throw graphError("routing", `automatic node ${node.id} has no usable model route`);

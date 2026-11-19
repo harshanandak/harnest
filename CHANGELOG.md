@@ -14,6 +14,11 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 - [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. Each preset has CI fixture coverage only, with no live CLI testing.
 - `bun run setup remove <host>` for the nine automatic ACP presets, Gemini CLI, Amp, and Cursor. It backs up the user config and removes only the Harnest MCP entry. Fresh setup prints this reverse path.
 - Per-phase agent counts, reported token totals, and elapsed time for JavaScript workflows, plus a runnable bounded verification-loop example.
+- Native service tier selection for Codex one-shot handoffs and fast mode for Claude one-shot handoffs.
+- Model selection for registered ACP agents that advertise model choices.
+- Session mode and validated config option selection for registered ACP agents.
+- Native Codex config profile selection for one-shot handoffs.
+- Named Claude Code agents for one-shot handoffs.
 
 ### Changed
 

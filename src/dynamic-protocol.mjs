@@ -6,11 +6,12 @@
 // forwards host objects, credentials or module paths into a script.
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { digestContext, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, SESSION_TARGETS, stableJson, TARGETS } from "./protocol.mjs";
+import { digestContext, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRoute, SESSION_TARGETS, stableJson, TARGETS } from "./protocol.mjs";
 import { assertGraphLeaf, bytes, compactError, cwdOverlaps, mergeData } from "./graph-protocol.mjs";
 import { addUsageToTotals, emptyUsageTotals } from "./usage.mjs";
 
 export { bytes, compactError, cwdOverlaps, mergeData };
+export { normalizeRoute };
 
 export const RUN_ACTIVE = new Set(["queued", "running", "pausing", "paused", "waiting", "stopping"]);
 export const RUN_TERMINAL = new Set(["completed", "failed", "cancelled", "partial"]);
@@ -34,7 +35,6 @@ export const DEFAULT_PHASE_LIMIT = 20;
 export const MAX_PHASE_LIMIT = 100;
 export const MAX_SCHEMA_BYTES = 100_000;
 
-const ROUTE_FIELDS = new Set(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
 const AGENT_TARGETS = new Set([...TARGETS, "auto"]);
 const POLICY_KEYS = ["write", "readOnly", "allowWrites", "tools", "maxCostUsd"];
 const EXECUTION_KEYS = ["background", "timeoutMs", "maxConcurrency", "maxAgents", "prefixStaggerMs", "transport", "providerWait"];
@@ -69,19 +69,6 @@ function text(value, label, max = null) {
   const trimmed = value.trim();
   if (max !== null && trimmed.length > max) throw dynamicError("validation", `${label} must be at most ${max} characters`);
   return trimmed;
-}
-
-export function normalizeRoute(input = {}, label = "route") {
-  only(input, [...ROUTE_FIELDS], label);
-  for (const [key, value] of Object.entries(input)) {
-    if (key === "thinking") {
-      if (typeof value === "boolean") continue;
-      if (typeof value === "string" && value.trim()) continue;
-      throw dynamicError("validation", `invalid ${label}.thinking`);
-    }
-    if (typeof value !== "string" || !value.trim()) throw dynamicError("validation", `invalid ${label}.${key}`);
-  }
-  return { ...input };
 }
 
 export function normalizePolicy(input = {}, parent) {

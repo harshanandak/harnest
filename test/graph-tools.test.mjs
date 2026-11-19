@@ -17,7 +17,7 @@ test("published graph schema matches MCP input and accepts task-aware automatic 
   const schema = z.toJSONSchema(graphInputSchema);
   assert.deepEqual(Object.keys(schema.properties.policy.properties), ["write", "readOnly", "allowWrites", "tools", "maxCostUsd"]);
   assert.equal(schema.properties.policy.additionalProperties, false);
-  assert.deepEqual(Object.keys(schema.properties.nodes.items.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
+  assert.deepEqual(Object.keys(schema.properties.nodes.items.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
   assert.equal(schema.properties.nodes.items.properties.route.additionalProperties, false);
   assert.deepEqual(schema.properties.nodes.items.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"] });
   assert.equal(graphInputSchema.safeParse({ ...graph, nodes: [{ ...graph.nodes[0], route: { harnessVersion: "v3" } }] }).success, false);

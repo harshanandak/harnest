@@ -138,15 +138,18 @@
               },
               "model": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "For ACP, use a model ID advertised by the native session."
               },
               "agent": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Claude named agent, OpenCode agent, or trusted ACP registration ID."
               },
               "variant": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "For ACP, use a mode ID advertised by the native session."
               },
               "thinking": {
                 "anyOf": [
@@ -169,6 +172,49 @@
               "serverUrl": {
                 "type": "string",
                 "minLength": 1
+              },
+              "serviceTier": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "fast",
+                  "priority",
+                  "flex"
+                ],
+                "description": "One-shot only. Claude supports fast."
+              },
+              "profile": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
+                "description": "Codex one-shot native config profile name."
+              },
+              "options": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "\\S",
+                  "not": {
+                    "enum": [
+                      "__proto__",
+                      "prototype",
+                      "constructor"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 256
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "description": "ACP session option IDs mapped to advertised values.",
+                "maxProperties": 16
               }
             },
             "additionalProperties": false

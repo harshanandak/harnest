@@ -138,7 +138,7 @@ test("Pi publishes strict route and policy contracts for single and graph handof
   const { pi, tools } = stubPi();
   extension(pi);
   const request = tools.get("handoff_workflow").parameters.properties.request;
-  assert.deepEqual(Object.keys(request.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
+  assert.deepEqual(Object.keys(request.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
   assert.equal(request.properties.route.additionalProperties, false);
   assert.deepEqual(request.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"], description: "OpenCode only: v1 or v2." });
   assert.deepEqual(tools.get("handoff_reroute").parameters.properties.route.properties.harnessVersion, { type: "string", enum: ["v1", "v2"] });

@@ -5,6 +5,7 @@ import { GeminiAdapter } from "./gemini.mjs";
 import { AmpAdapter } from "./amp.mjs";
 import { PiAdapter } from "./pi.mjs";
 import { ACPAdapter } from "./acp.mjs";
+import { routeControlError } from "../protocol.mjs";
 
 class LazyOpenCodeAdapter {
   constructor(options) {
@@ -71,6 +72,8 @@ export class LazySessionAdapter {
 }
 
 export function createAdapter(target, options = {}, request = null) {
+  const controlError = routeControlError(target, request?.route, request?.execution?.transport);
+  if (controlError) throw Object.assign(new TypeError(controlError), { details: { kind: "policy" } });
   if (request?.execution?.transport === "session") {
     if (!SESSION_ADAPTERS[target]) {
       throw Object.assign(new TypeError("session transport is supported only for claude, codex, or cursor"), {

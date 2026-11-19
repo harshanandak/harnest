@@ -9,8 +9,8 @@ The lead client is the application connected to Harnest through MCP. The downstr
 | `opencode` | OpenCode | Read or approved write prompt handoffs; optional Taskflow; attached live controls | Taskflow needs the optional dependencies. OpenCode V2 is required for current live steer and reroute behavior. |
 | `pi` | Pi | Read or approved write prompt handoffs; optional Taskflow; attached live controls | Pi keeps native authentication. Its bounded status and trace are the portable operator view. |
 | `cursor` | Cursor | Read or approved write handoffs, one-shot resume, and optional session transport | Cursor UI subagents do not automatically inherit UI MCP servers. |
-| `claude` | Claude Code | Read or approved write handoffs, one-shot resume, and optional session transport | One-shot live message and reroute are unsupported; use the acknowledged session transport when those controls are needed. |
-| `codex` | Codex | Read-only sandbox or approved workspace-write handoffs, one-shot resume, and optional session transport | Write mode uses `workspace-write`; Harnest does not select `danger-full-access`. |
+| `claude` | Claude Code | Read or approved write handoffs, one-shot resume, and optional session transport | One-shot supports named agents and fast mode when the native CLI confirms it. Live message and reroute require session transport. |
+| `codex` | Codex | Read-only sandbox or approved workspace-write handoffs, one-shot resume, and optional session transport | One-shot supports native config profiles and service tiers on CLI 0.170.0 or later. Write mode uses `workspace-write`. |
 | `gemini` | Gemini CLI | Prompt-only read or approved write handoffs with native-session follow-up | This target requires Gemini CLI v0.62.0. Inherited include directories mean its read policy is not a filesystem sandbox. Session transport and live controls are unsupported. |
 | `amp` | Amp | Approved write-only prompt handoffs with native-session follow-up | Downstream execution needs native Linux/macOS or the entire Harnest MCP server inside WSL. Native Windows downstream launch rejects before inference. Read-only, session transport, and live controls are unsupported. |
 
@@ -48,6 +48,8 @@ DeepSeek is a model choice through Pi or OpenCode, not a separate downstream tar
 ## Generic ACP agents
 
 The separate `acp` target calls a machine-local ACP executable that the operator has installed, authenticated, inspected, and explicitly trusted. A request must select the registration through `route.agent` and must be write-capable with explicit approval.
+
+ACP model, mode, and config choices vary by agent. Use the IDs and values the native session advertises in `route.model`, `route.variant`, and `route.options`. See the [MCP route controls](mcp-usage.md#native-route-controls) for field limits and CLI version requirements.
 
 `trusted: true` consents to that executable loading its native configuration. It does not create a read-only boundary or sandbox, and it does not establish that native hooks, plugins, or MCP servers are inert. Unsupported route controls, policy controls, negotiated capabilities, and callbacks fail explicitly.
 
