@@ -1,0 +1,5 @@
+[install]
+# Refuse package versions published less than 7 days ago (604800 seconds).
+# Most hijacked npm releases are found and removed within days, so this keeps
+# them out of new installs and dependency updates.
+minimumReleaseAge = 604800
