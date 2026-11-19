@@ -32,16 +32,16 @@ DeepSeek is a model choice through Pi or OpenCode, not a separate downstream tar
 | Devin CLI | ACP preset (`devin`) | No |
 | GitHub Copilot CLI | ACP preset (`github-copilot-cli`) | No |
 | Goose | ACP preset (`goose`) | No |
-| Aider | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/49) | No |
+| Aider | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/6) | No |
 | Qwen Code | ACP preset (`qwen-code`) | No |
 | Kiro CLI | ACP preset (`kiro`) | No |
 | Cline CLI | ACP preset (`cline`) | No |
-| Roo Code | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/46) | No |
+| Roo Code | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/3) | No |
 | Kilo Code | ACP preset (`kilo`) | No |
 | Augment Auggie | ACP preset (`auggie`) | No |
 | Factory Droid | ACP preset (`factory-droid`) | No |
-| Crush | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/47) | No |
-| Warp Agent CLI | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/48) | No |
+| Crush | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/4) | No |
+| Warp Agent CLI | Not yet supported: needs a [native adapter](https://github.com/harshanandak/harnest/issues/5) | No |
 | Kimi CLI | ACP preset (`kimi`) | No |
 | Mistral Vibe | ACP preset (`mistral-vibe`) | No |
 

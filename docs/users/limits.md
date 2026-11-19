@@ -1,6 +1,6 @@
 # Release limits
 
-Harnest `v0.1.0` is distributed as a tagged source checkout from the private `harshanandak/harnest` GitHub repository.
+Harnest `v0.1.0` is distributed as a tagged source checkout from the public `harshanandak/harnest` GitHub repository.
 
 ## Distribution and verification
 
@@ -14,6 +14,7 @@ Harnest `v0.1.0` is distributed as a tagged source checkout from the private `ha
 - Generic ACP is a separate, opt-in, write-only route. `route.agent` must select an explicitly trusted local registration. Trust permits native configuration imports; it is not a read-only guarantee or sandbox.
 - Devin is supported as an MCP lead client and may be registered through generic ACP. Authenticated native Devin execution, safe isolated startup, and read-only execution remain unverified.
 - Amp downstream work is write-only and requires explicit approval. It supports native Linux/macOS or the entire Harnest MCP server running inside WSL. Native Windows downstream launch is unsupported.
+- Native Windows Codex setup can overflow its payload and block read-only shell execution. This is an upstream Codex limitation.
 - Gemini downstream work requires Gemini CLI v0.62.0. Its temporary policy narrows tools, but inherited include directories mean the working directory is not a filesystem sandbox boundary.
 - Live message, reroute, cancellation, and session resume capabilities vary by target and transport. Unsupported controls reject instead of silently changing execution mode.
 

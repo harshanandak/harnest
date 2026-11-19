@@ -1,6 +1,6 @@
 {
   "name": "harnest",
-  "version": "0.1.0+claude.20261118113830",
+  "version": "0.1.0+claude.20261118190922",
   "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Gemini CLI, Amp, and trusted registered ACP agents.",
   "author": {
     "name": "Harsha Nanda"
