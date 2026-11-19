@@ -75,14 +75,18 @@ test("OpenCode discovery uses the supplied PATH and Windows shim environment", a
     await withEnv("PATHEXT", extension || undefined, () => {
       assert.equal(harnessLaunch("opencode", undefined, { config: {} }).command, join(host, name));
     });
-    const env = windows ? { Path: supplied, PATHEXT: extension, SystemRoot: "C:\\fixture-windows" } : { PATH: supplied };
+    const env = windows ? { Path: supplied, PATHEXT: extension, SystemRoot: join(supplied, "fixture-windows") } : { PATH: supplied };
     assert.equal(harnessLaunch("opencode", undefined, { config: {}, env }).command, join(supplied, name));
     if (windows) {
       await rm(join(supplied, name));
       const shim = join(supplied, "opencode2.ps1");
       await writeFile(shim, "# fixture shim");
+      const powerShellDirectory = join(env.SystemRoot, "System32", "WindowsPowerShell", "v1.0");
+      const powerShell = join(powerShellDirectory, "powershell.exe");
+      await mkdir(powerShellDirectory, { recursive: true });
+      await writeFile(powerShell, "");
       assert.deepEqual(harnessLaunch("opencode", undefined, { config: {}, env }), {
-        command: "C:\\fixture-windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        command: powerShell,
         args: ["-NoProfile", "-File", shim],
       });
     }
