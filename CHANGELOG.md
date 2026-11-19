@@ -31,6 +31,7 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 
 ### Changed
 
+- The standard Bun install skips optional native binaries. Claude session transport uses the installed Claude Code CLI.
 - OpenCode support requires OpenCode V2. The OpenCode V1 runtime and host integration are removed.
 - Harnest does not choose models. The lead uses the model the user names in the prompt, then the user's routing preferences, then the downstream CLI's own default.
 - Codex, Cursor, and the Devin example use the daemon-backed stdio bridge. Generic clients can generate a stdio snippet or write the local HTTP credential directly into private configuration.

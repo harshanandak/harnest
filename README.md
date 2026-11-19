@@ -48,7 +48,7 @@ You need **Git**, **Bun**, and **Node.js 20.6.0 or newer**. Install and log in t
 ```sh
 git clone https://github.com/harshanandak/harnest.git
 cd harnest
-bun install --frozen-lockfile
+bun install --frozen-lockfile --omit optional
 ```
 
 **2. Connect your lead agent.** This example uses Codex. Pick your own host below.
@@ -278,7 +278,7 @@ Call `handoff_routing_preview` to see the chosen route before dispatch.
 <details>
 <summary><b>Update or roll back</b></summary>
 
-Fetch tags, check out the release tag you want, run `bun install --frozen-lockfile`, rerun the integration installer, and restart the host. Keep the installer backups. To roll back, repeat with the previous tag, or follow the [host restore instructions](docs/users/integrations.md) for configuration changes.
+Fetch tags, check out the release tag you want, run `bun install --frozen-lockfile --omit optional`, rerun the integration installer, and restart the host. Keep the installer backups. To roll back, repeat with the previous tag, or follow the [host restore instructions](docs/users/integrations.md) for configuration changes.
 </details>
 
 <details>

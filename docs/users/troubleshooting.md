@@ -18,6 +18,8 @@ Run `bun run doctor` for a broad machine profile, but interpret its individual c
 
 ## The server appears stale after an update
 
+After updating the checkout, refresh dependencies with `bun install --frozen-lockfile --omit optional`.
+
 Call `handoff_host_info` and inspect `runtime.root`, `loadedFingerprint`, `diskFingerprint`, and `sourceStatus`. Let active jobs settle, then reload the MCP connection or restart the host. Editing files does not replace modules already loaded in a running server process.
 
 ## A write request is rejected before launch

@@ -37,7 +37,7 @@ jobs:
           python-version: '3.12'
       # The vendored plugin validator imports yaml.
       - run: python -m pip install PyYAML==6.0.2
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --omit optional
       - run: bun run check
       - run: bun run smoke:mcp
       - run: bun run smoke:mcp --bridge
@@ -64,7 +64,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install PyYAML==6.0.2
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --omit optional
       - run: node scripts/check-mcp-memory.mjs --budget-mib 120
       - run: node scripts/check-daemon-memory.mjs
         if: always()

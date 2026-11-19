@@ -18,7 +18,7 @@ Clone the repository and install dependencies from its default branch:
 ```sh
 git clone https://github.com/harshanandak/harnest.git
 cd harnest
-bun install --frozen-lockfile
+bun install --frozen-lockfile --omit optional
 ```
 
 ## Add the MCP server

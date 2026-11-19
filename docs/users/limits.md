@@ -4,7 +4,7 @@ Harnest `v0.1.0` is distributed as a tagged source checkout from the public `har
 
 ## Distribution and verification
 
-- Follow the [tagged install instructions](getting-started.md#install-from-github) for `bun install --frozen-lockfile` and daemon setup.
+- Follow the [tagged install instructions](getting-started.md#install-from-github) for `bun install --frozen-lockfile --omit optional` and daemon setup.
 - CI verifies host installation with fixtures. Live host installation is unverified. `bun run smoke:mcp`, tool discovery, plugin validation, and fake-harness tests are model-free and leave provider login, quota, model behavior, and paid end-to-end handoffs unverified.
 - Native installation and authentication remain the operator's responsibility for every downstream CLI. Harnest does not copy or forward lead credentials.
 
