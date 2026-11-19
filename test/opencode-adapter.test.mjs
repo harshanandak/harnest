@@ -404,6 +404,40 @@ test("executes a FlowSpec through the pinned taskflow handler with fake phase pr
   });
 });
 
+test("OpenCode Taskflow treats an empty deny policy as an empty phase tool list", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-empty-deny-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args, options) {
+      calls.push({ args, options });
+      return new FakeChild(streamLines(`phase-session-${calls.length}`, "phase result"));
+    },
+  });
+  const output = await adapter.run(request({
+    cwd,
+    route: { model: "openai/gpt-test" },
+    policy: { write: true, tools: { deny: [] } },
+    workflow: { spec: {
+      name: "empty-deny-flow",
+      phases: [
+        { id: "inspect", type: "agent", task: "Inspect.", tools: ["read", "write"] },
+        { id: "final", type: "agent", task: "Return the result.", from: ["inspect"], final: true },
+      ],
+    } },
+  }));
+
+  assert.equal(output.result.finalText, "phase result");
+  assert.equal(calls.length, 2);
+  for (const { args, options } of calls) {
+    assert.match(args[1], /"policy":\{"write":true,"tools":\[\]/);
+    const { permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
+    assert.equal(permission.read, "allow");
+    assert.equal(permission.write, undefined);
+  }
+});
+
 test("a workflow phase carries the shared context once with identifiers after the stable prefix", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "harnest-opencode-prefix-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));

@@ -778,13 +778,15 @@ export class OpenCodeAdapter {
     // rendered root prompt into `task` while also supplying `context` in the
     // same envelope shipped two full copies to every phase process.
     const rootTask = request.task;
+    // Only legacy lists and empty deny policies can reach Taskflow.
+    const tools = Array.isArray(request.policy?.tools) ? request.policy.tools : [];
+    const authorizedTools = new Set(tools);
     const runner = {
       usageAccounting: "available",
       runTask: async (defaultCwd, agents, agentName, task, opts, globalThinking) => {
         const agent = agents.find((candidate) => candidate.name === agentName) || {};
         const phaseTask = `${rootTask}\n\nPhase task:\n${task}`;
         const phaseTools = opts?.tools ?? agent.tools;
-        const authorizedTools = new Set(request.policy?.tools || []);
         const phaseRequest = {
           ...request,
           cwd: opts?.cwd ?? defaultCwd ?? request.cwd,
@@ -792,7 +794,7 @@ export class OpenCodeAdapter {
             ...request.policy,
             tools: phaseTools
               ? phaseTools.filter((tool) => authorizedTools.has(tool))
-              : request.policy?.tools || [],
+              : tools,
           },
         };
         try {
