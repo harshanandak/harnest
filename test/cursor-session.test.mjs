@@ -733,7 +733,7 @@ test("graph workflows are rejected before spawn", async () => {
   let created = 0;
   adapter.createTransport = () => { created += 1; return wireHandshake(new FakeTransport()); };
   await assert.rejects(
-    adapter.run(baseRequest({ workflow: { spec: { name: "flow" } } })),
+    adapter.run({ ...baseRequest(), workflow: { spec: { name: "flow" } } }),
     (error) => error.details?.kind === "policy",
   );
   assert.equal(created, 0);

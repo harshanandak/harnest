@@ -883,7 +883,7 @@ test("policy rejections happen before any process is spawned", async () => {
     (error) => error.details?.kind === "policy" && /maxCostUsd/.test(error.message),
   );
   await assert.rejects(
-    adapter.run(request({ workflow: { spec: { nodes: [] } } })),
+    adapter.run({ ...request(), workflow: { spec: { nodes: [] } } }),
     (error) => error.details?.kind === "policy",
   );
   await assert.rejects(

@@ -182,7 +182,7 @@ test("phase timing keeps an uncertain historical attempt in its original phase",
 test("assertDynamicLeaf rejects workflow smuggling", () => {
   const request = { target: "pi", route: {}, policy: { write: false, tools: [], maxCostUsd: null }, workflow: "evil" };
   assert.throws(() => assertDynamicLeaf(request), /cannot set a workflow/);
-  assert.doesNotThrow(() => assertDynamicLeaf(request));
+  assert.doesNotThrow(() => assertDynamicLeaf({ ...request, workflow: null }));
 });
 
 test("agent execution accepts session transport and rejects unknown modes", async (t) => {

@@ -79,8 +79,8 @@ test("ACP is opt-in, write-only, agent-selected, and rejects unimplemented route
     request({ route: {} }),
     request({ policy: { write: false } }),
     request({ route: { agent: "fixture", provider: "invented" } }),
-    request({ workflow: { spec: {} } }),
   ]) assert.throws(() => normalizeRequest(bad), /ACP|acp/i);
+  assert.throws(() => normalizeRequest(request({ workflow: { spec: {} } })), /request.workflow is unsupported/);
 
   assert.deepEqual(adapterRouteRejectionReasons("acp", { agent: "fixture" }), []);
   const controls = { agent: "fixture", model: "native-model", variant: "native-mode", options: { review: false } };
