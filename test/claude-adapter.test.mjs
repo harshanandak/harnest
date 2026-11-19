@@ -57,13 +57,14 @@ function request(overrides = {}) {
   });
 }
 
-test("Claude maps extra read directories, instructions, fork, and max turns to native argv", async () => {
+test("Claude combines a named fast agent with extra directories, instructions, fork, and max turns", async () => {
   const cwd = await realpath(process.cwd());
   const calls = [];
   const adapter = new ClaudeAdapter({
     command: "fake-claude",
     spawnFn(_command, args) {
       calls.push(args);
+      if (args[0] === "--version") return new FakeChild({ stdout: "2.1.219 (Claude Code)\n" });
       if (args[0] === "--help") return new FakeChild({ stdout: [
         "  --add-dir <directories...>", "  --tools <tools...>", "  --strict-mcp-config",
         "  --append-system-prompt <prompt>", "  --fork-session",
@@ -71,17 +72,19 @@ test("Claude maps extra read directories, instructions, fork, and max turns to n
       if (args.length === 1 && args[0] === "--max-turns") {
         return new FakeChild({ code: 1, stderr: "error: option '--max-turns <turns>' argument missing\n" });
       }
-      return new FakeChild({ stdout: streamJsonResult("forked", "claude-new") });
+      return new FakeChild({ stdout: streamJsonResult("forked", "claude-new", { fast_mode_state: "on" }) });
     },
   });
-  const output = await adapter.run(request({ execution: {
-    addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3,
-  } }));
+  const output = await adapter.run(request({
+    route: { agent: "reviewer", serviceTier: "fast" },
+    execution: { addDirs: [cwd], instructions: "Keep the reply short.", sessionAction: "fork", sessionId: "claude-old", maxTurns: 3 },
+  }));
   assert.equal(output.sessionId, "claude-new");
-  assert.deepEqual(calls.slice(0, 2), [["--help"], ["--max-turns"]]);
-  assert.deepEqual(calls[2].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
-  assert.deepEqual(calls[2].slice(-11), [
-    "--permission-mode", "plan", "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
+  assert.deepEqual(calls.slice(0, 3), [["--version"], ["--help"], ["--max-turns"]]);
+  assert.deepEqual(calls[3].slice(0, 3), ["--resume", "claude-old", "--fork-session"]);
+  assert.deepEqual(calls[3].slice(-15), [
+    "--permission-mode", "plan", "--agent", "reviewer", "--settings", '{"fastMode":true}',
+    "--append-system-prompt", "Keep the reply short.", "--max-turns", "3",
     "--tools", "Read,Glob,Grep", "--strict-mcp-config", "--add-dir", cwd,
   ]);
 });

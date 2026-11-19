@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_ADD_DIRS, MAX_ATTACHMENTS, MAX_INSTRUCTIONS_BYTES } from "./execution-controls.mjs";
 import {
   CODEX_PROFILE_PATTERN,
   CODEX_SERVICE_TIERS,
@@ -31,6 +32,15 @@ export const routeInputSchema = z.object({
     maxProperties: MAX_ROUTE_OPTIONS,
   }).optional(),
 }).strict();
+
+export const nativeExecutionInputFields = {
+  sessionId: z.string().optional(),
+  addDirs: z.array(z.string().max(1024)).max(MAX_ADD_DIRS).optional().describe("Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval."),
+  attachments: z.array(z.object({ type: z.enum(["image", "file"]), path: z.string().max(1024) }).strict()).max(MAX_ATTACHMENTS).optional().describe("Absolute local paths, up to 256 KiB each. Codex and Pi accept images. OpenCode and capable ACP agents accept images and files."),
+  instructions: z.string().min(1).max(MAX_INSTRUCTIONS_BYTES).optional().describe("Append up to 8000 UTF-8 bytes to the Claude or Pi system prompt."),
+  sessionAction: z.enum(["resume", "fork"]).optional().describe("Requires sessionId. Resume is the default. Fork uses native support on Claude, Codex, OpenCode, or Pi."),
+  maxTurns: z.number().int().positive().optional().describe("Maximum Claude print-mode agentic turns."),
+};
 
 export const policyInputSchema = z.object({
   write: z.boolean().describe("Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true.").optional(),
@@ -69,7 +79,10 @@ export const graphInputSchema = z.object({
     context: object.optional(),
     policy: policyInputSchema.optional(),
     metadata: metadataInputSchema.optional(),
-    execution: z.object({ timeoutMs: z.number().int().min(1).max(86400000).optional() }).strict().optional(),
+    execution: z.object({
+      timeoutMs: z.number().int().min(1).max(86400000).optional(),
+      ...nativeExecutionInputFields,
+    }).strict().optional(),
   }).strict()).min(1).max(256),
   outputs: z.array(nodeId).min(1).max(256).optional(),
 }).strict().describe("Agent-authored DAG. Each node is a prompt-only handoff; dependencies pass attributed results. Different nodes may use different harnesses. Completed nodes are preserved during recovery.");

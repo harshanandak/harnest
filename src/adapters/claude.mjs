@@ -400,10 +400,7 @@ export class ClaudeAdapter {
         let supported = false;
         try {
           await runProcess(this.launch.command, [...launchArgs, "--max-turns"], {
-            cwd: request.cwd,
-            env,
-            spawnFn: this.spawnFn || spawnNativeCommand,
-            signal: execution.signal,
+            ...processOptions,
             timeoutMs: Math.min(5_000, request.execution.timeoutMs ?? 5_000),
           });
         } catch (error) {

@@ -81,16 +81,22 @@ test("createAdapter supports codex target", () => {
   assert.ok(adapter instanceof CodexAdapter);
 });
 
-test("Codex applies native fork, image input, and approved workspace roots", async (t) => {
+test("Codex combines profile and service tier with native fork, an image, and an approved workspace root", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "harnest-codex-controls-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const imagePath = join(root, "input.png");
   writeFileSync(imagePath, "fixture image");
+  await writeFile(join(root, "review.config.toml"), "# fixture profile\n");
   const calls = [];
   const spawn = fakeSpawn(calls, { stdout: streamJsonResult("codex-new") });
   const adapter = codexAdapter({
     command: "fake-codex",
+    env: { CODEX_HOME: root },
     spawnFn(command, args, options) {
+      if (args[0] === "--version") {
+        calls.push({ args });
+        return new FakeChild({ stdout: "codex-cli 0.170.0\n" });
+      }
       if (args.at(-1) === "--help") {
         calls.push({ args });
         const stdout = args.includes("fork")
@@ -105,16 +111,18 @@ test("Codex applies native fork, image input, and approved workspace roots", asy
     },
   });
   const output = await adapter.run(request({
+    route: { profile: "review", serviceTier: "flex" },
     policy: { write: true },
     metadata: { harnest: { writeApproved: true } },
     execution: { addDirs: [root], attachments: [{ type: "image", path: imagePath }], sessionAction: "fork", sessionId: "codex-old" },
   }));
   assert.equal(output.sessionId, "codex-new");
-  assert.deepEqual(calls.slice(0, 2).map(({ args }) => args), [["exec", "--help"], ["exec", "fork", "--help"]]);
-  const args = calls[2].args;
+  assert.deepEqual(calls.slice(0, 3).map(({ args }) => args), [["--version"], ["exec", "--help"], ["exec", "fork", "--help"]]);
+  const args = calls[3].args;
   assert.equal(args[args.indexOf("-s") + 1], "workspace-write");
   const staged = join(dirname(args[args.indexOf("-o") + 1]), "0-input.png");
-  assert.deepEqual(args.slice(-7), ["--add-dir", await realpath(root), "fork", "-i", staged, "codex-old", "-"]);
+  assert.deepEqual(args.slice(5), ["--profile", "review", "--strict-config", "-c", 'service_tier="flex"',
+    "--json", "-o", join(dirname(staged), "final.txt"), "--add-dir", await realpath(root), "fork", "-i", staged, "codex-old", "-"]);
 });
 
 test("Codex rejects fork when installed help falls back to exec usage", async () => {
@@ -189,16 +197,22 @@ test("Codex adapter maps read-only to exec with read-only sandbox and -o file", 
   assert.equal(output.result.quota.status, "unknown");
 });
 
-test("Codex sends the profile and service tier as native exec options before resume", async (t) => {
+test("Codex sends profile and service tier before resume and its image after resume", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "harnest-codex-profile-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, "review.config.toml"), "# fixture profile\n");
+  const imagePath = join(directory, "resume.png");
+  await writeFile(imagePath, "fixture image");
   const calls = [];
   const launchExec = fakeSpawn(calls);
   const adapter = codexAdapter({
     command: "fake-codex",
     env: { CODEX_HOME: directory },
     spawnFn(command, args, options) {
+      if (args.at(-1) === "--help") {
+        calls.push({ args });
+        return new FakeChild({ stdout: "  -i, --image <FILE>\n" });
+      }
       if (args[0] === "exec") return launchExec(command, args, options);
       calls.push({ args });
       const stdout = args[0] === "--version" ? "codex-cli 0.170.0\n" : "fast_mode stable true\n";
@@ -206,14 +220,18 @@ test("Codex sends the profile and service tier as native exec options before res
     },
   });
   const output = await adapter.run(request({
-    route: { profile: "review", serviceTier: "fast" }, execution: { sessionId: "native-thread" },
+    route: { profile: "review", serviceTier: "fast" },
+    execution: { sessionId: "native-thread", sessionAction: "resume", attachments: [{ type: "image", path: imagePath }] },
   }));
+  const execArgs = calls[3].args;
+  const outFile = execArgs[execArgs.indexOf("-o") + 1];
   assert.deepEqual(calls.map(({ args }) => args), [
     ["--version"],
     ["features", "--enable", "fast_mode", "list"],
+    ["exec", "resume", "--help"],
     ["exec", "-C", process.cwd(), "-s", "read-only", "--profile", "review",
       "--strict-config", "-c", 'service_tier="fast"', "--enable", "fast_mode", "--json", "-o",
-      calls[2].args[calls[2].args.indexOf("-o") + 1], "resume", "native-thread", "-"],
+      outFile, "resume", "-i", join(dirname(outFile), "0-resume.png"), "native-thread", "-"],
   ]);
   assert.equal(output.route.profile, "review");
   assert.equal(output.route.serviceTier, "fast");

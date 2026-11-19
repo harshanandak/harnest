@@ -164,6 +164,28 @@ test("two runner instances deduplicate starts and resume commands", async (t) =>
   assert.equal(c.generation, d.generation); assert.equal(launches, 2);
 });
 
+test("graph starts an explicit fork and resumes the observed child on retry", { timeout: 30_000 }, async (t) => {
+  const seen = [];
+  const f = await fixture(t, async (request, { onProgress }) => {
+    seen.push(request);
+    await onProgress({ sessionId: "forked-session" });
+    if (seen.length === 1) throw new Error("retry after the fork");
+    return { result: { finalText: "recovered" } };
+  });
+  const first = await f.runner.start(f.graph([node("fork", [], {
+    target: "claude",
+    route: { agent: "reviewer" },
+    execution: { sessionId: "source-session", sessionAction: "fork", maxTurns: 3 },
+  })]));
+  assert.equal(first.state, "partial");
+  const retried = await f.runner.resume({ graphId: first.graphId, commandId: "retry-fork", background: false });
+  assert.equal(retried.state, "completed");
+  assert.deepEqual(seen.map(({ route, execution }) => [route.agent, execution.sessionId, execution.sessionAction, execution.maxTurns]), [
+    ["reviewer", "source-session", "fork", 3],
+    ["reviewer", "forked-session", "resume", 3],
+  ]);
+});
+
 test("graph child polling reuses one job snapshot per status observation", { timeout: 30_000 }, async (t) => {
   // Regression for the measured duplicate read: every Companion.status poll
   // used to read the job file, then have traceSummary read it again. A graph
@@ -219,11 +241,18 @@ test("overlapping and symlink writers serialize while isolated writers overlap",
   const active = [], overlaps = [];
   const f = await fixture(t, async (r) => { overlaps.push([r.task, ...active]); active.push(r.task); await sleep(70); active.splice(active.indexOf(r.task), 1); return { result: { finalText: "ok" } }; });
   const parent = join(f.root, "work"), child = join(parent, "child"), separate = join(f.root, "isolated"), alias = join(f.root, "alias");
+  const extraRootUser = join(f.root, "extra-root-user");
   await mkdir(child, { recursive: true }); await mkdir(separate); await symlink(parent, alias, process.platform === "win32" ? "junction" : "dir");
-  const result = await f.runner.start(f.graph([node("parent", [], { cwd: parent }), node("child", [], { cwd: child }), node("alias", [], { cwd: alias }), node("isolated", [], { cwd: separate })], { policy: { write: true } }));
+  await mkdir(extraRootUser);
+  const result = await f.runner.start(f.graph([
+    node("parent", [], { cwd: parent }), node("child", [], { cwd: child }),
+    node("alias", [], { cwd: alias }), node("isolated", [], { cwd: separate }),
+    node("extra-root", [], { cwd: extraRootUser, target: "claude", execution: { addDirs: [alias] } }),
+  ], { policy: { write: true }, metadata: { harnest: { writeApproved: true } } }));
   assert.equal(result.state, "completed");
   assert.ok(overlaps.some((x) => x.includes("parent") && x.includes("isolated")));
   assert.ok(!overlaps.some((x) => ["parent", "child", "alias"].filter((id) => x.includes(id)).length > 1));
+  assert.ok(!overlaps.some((x) => x.includes("extra-root") && ["parent", "child", "alias"].some((id) => x.includes(id))));
 });
 
 test("write retry requires approval; completed write nodes never rerun", async (t) => {
@@ -309,6 +338,11 @@ test("resolver cannot rewrite pins, identity, cwd, context, timeout or policy; a
   assert.equal(result.state, "completed");
   assert.equal(resolved[0].target, "claude");
   assert.equal(resolved[0].route.model, "claude-fake");
+  const withControls = await auto.runner.start(auto.graph([
+    node("auto", [], { target: "auto", execution: { maxTurns: 3 } }),
+  ], { requestId: "auto-controls" }));
+  assert.equal(withControls.state, "completed");
+  assert.equal(resolved[1].execution.maxTurns, 3);
 });
 
 test("failed optional lease sidecar refresh does not terminate a live graph", { timeout: 90_000 }, async (t) => {

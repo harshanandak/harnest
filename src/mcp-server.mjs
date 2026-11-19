@@ -6,10 +6,9 @@ import { pathToFileURL } from "node:url";
 import { createRuntimeServices } from "./runtime-services.mjs";
 import { runtimeInfo } from "./runtime-info.mjs";
 import { readLocalConfig } from "./config.mjs";
-import { metadataInputSchema, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
+import { metadataInputSchema, nativeExecutionInputFields, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
 import { registerDynamicTools } from "./dynamic-tools.mjs";
 import { registerRoutingTools } from "./routing-tools.mjs";
-import { MAX_ADD_DIRS, MAX_ATTACHMENTS, MAX_INSTRUCTIONS_BYTES } from "./execution-controls.mjs";
 
 // A stdio MCP caller commonly abandons a tool call after ~60s. A foreground
 // handoff whose declared wall-clock budget exceeds this safe wait must not
@@ -68,12 +67,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     execution: z.object({
       background: z.boolean().optional(),
       timeoutMs: z.number().describe("Positive integer up to 86400000; validated by the protocol for structured errors.").optional(),
-      sessionId: z.string().optional(),
-      addDirs: z.array(z.string().max(1024)).max(MAX_ADD_DIRS).optional().describe("Existing absolute directories for Claude, Codex, Cursor, or Gemini. Codex requires write policy. External write roots require confirmed write approval."),
-      attachments: z.array(z.object({ type: z.enum(["image", "file"]), path: z.string().max(1024) }).strict()).max(MAX_ATTACHMENTS).optional().describe("Absolute local paths, up to 256 KiB each. Codex and Pi accept images. OpenCode and capable ACP agents accept images and files."),
-      instructions: z.string().min(1).max(MAX_INSTRUCTIONS_BYTES).optional().describe("Append up to 8000 UTF-8 bytes to the Claude or Pi system prompt."),
-      sessionAction: z.enum(["resume", "fork"]).optional().describe("Requires sessionId. Resume is the default. Fork uses native support on Claude, Codex, OpenCode, or Pi."),
-      maxTurns: z.number().int().positive().optional().describe("Maximum Claude print-mode agentic turns."),
+      ...nativeExecutionInputFields,
       transport: z.enum(["oneshot", "session"]).optional().describe("Session transport uses the native interactive protocol; unsupported controls never silently fall back to one-shot execution."),
     }).strict().optional(),
     policy: policyInputSchema.optional(),

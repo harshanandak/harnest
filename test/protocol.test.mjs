@@ -136,6 +136,7 @@ test("native route fields reject unsupported targets, transports and values", ()
     ["codex", { profile: "review" }, { transport: "session" }, /route\.profile requires Codex one-shot/],
     ["codex", { serviceTier: "fast" }, { transport: "session" }, /route\.serviceTier requires/],
     ["claude", { agent: "reviewer" }, { transport: "session" }, /route\.agent requires Claude one-shot/],
+    ["claude", { agent: "reviewer" }, { transport: "session", sessionAction: "fork", sessionId: "prior" }, /route\.agent requires Claude one-shot/],
     ["claude", { profile: "review" }, {}, /route\.profile requires Codex one-shot/],
     ["opencode", { options: {} }, {}, /route\.options requires a registered ACP agent/],
   ]) {

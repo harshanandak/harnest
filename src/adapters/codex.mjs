@@ -126,6 +126,7 @@ function buildArgs(request, launchArgs, outFile) {
   if (serviceTier === "fast" || serviceTier === "priority") args.push("--enable", "fast_mode");
   args.push("--json", "-o", outFile);
   for (const dir of addDirs ?? []) args.push("--add-dir", dir);
+  // Profile and directory flags belong to exec. Continue with subcommand-local image flags.
   if (sessionId) args.push(sessionAction === "fork" ? "fork" : "resume");
   for (const { path } of attachments ?? []) args.push("-i", path);
   if (sessionId) args.push(String(sessionId));
