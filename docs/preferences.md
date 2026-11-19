@@ -81,10 +81,9 @@ node scripts/setup-routing.mjs
   Automatic selection includes OpenCode, Codex, Cursor, and Gemini only
   when configured with a model. Pi and Claude can use native defaults. A
   direct Codex request without a model can also use the native default.
-  The example's Codex entry is a per-harness pin for a coding lane. For
-  individual tasks, use the [leaf defaults](#model-defaults-for-leaf-tasks)
-  unless the caller supplies a pin. Use `route.variant` for Amp's native
-  thread mode. DeepSeek models run through Pi or OpenCode provider routes.
+  The example's Codex entry is a saved model choice. For individual tasks,
+  [name the model in your prompt](#choosing-models). Use `route.variant` for
+  Amp's native thread mode. DeepSeek models run through Pi or OpenCode routes.
 
 Generic ACP registrations are explicit only: `target: "acp"` must carry
 `route.agent`, and the built-in wizard/automatic candidate set never selects an
@@ -156,16 +155,14 @@ live steering, fastest effective loop. Route elsewhere only for what Pi lacks:
   ranked route automatically).
 - **codex:** Codex CLI (`codex exec`) — scriptable one-shot with JSONL
   events, `-m` model flag, `--sandbox` mapping, and `exec resume` follow-ups.
-  Choose the model and effort by task. The optional browser-task starter rule
-  prefers Codex, but verified computer-use capability is unavailable on the
-  one-shot CLI routes.
+  The optional browser-task starter rule prefers Codex. The one-shot CLI
+  routes have no verified computer-use capability.
 - **opencode:** OpenCode Go high-limit catalogs and v2 live control. Note the
   auto lane assumes the v1 path (no live control); pin `route.harnessVersion`
   `v2` with `capabilities.liveControl` for steerable runs.
 - **cursor:** NAMED cheap models only (`cursor-cheap` grok lane,
   `cursor-flagship`, …). The bare Cursor default earns no auto lane — without
-  a name it adds nothing over Pi. Inside Cursor with a subscription, Composer
-  Standard is cheapest-in-class (marginal ~$0); Fast at 6× is never the default.
+  a name it adds nothing over Pi.
 - **gemini:** prompt-only attached Gemini CLI execution. Named models are
   accepted only when the adapter can pin them; mode names are not treated as
   arbitrary model IDs. Live controls and session transport are unsupported.
@@ -224,9 +221,8 @@ verbatim, or documents why it cannot:
 | Cursor, Claude | recorded in the receipt; CLI passthrough unverified, so no flag is sent today |
 | Gemini, Amp | no generic thinking mapping is advertised; unsupported values reject before inference (Amp uses `route.variant` instead) |
 
-Set `route.thinking` to `high` when preparing a new Codex leaf route. The
-following rules apply when reasoning effort is omitted or a route declares
-supported levels.
+Pass any effort the user names in `route.thinking`. The following rules apply
+when reasoning effort is omitted or a route declares supported levels.
 
 1. **Derived default when unnamed.** Tier and difficulty each imply a level
    (`quick`/`trivial`→`low`, `balanced`/`bounded`→`medium`,
@@ -255,22 +251,19 @@ what was fixed and scores the current state only. Reviewer routes must
 resolve distinctly (same-model-twice is rejected); lanes are read-only and
 capped at 3 rounds, one fallback-free run each.
 
-## Model defaults for leaf tasks
+## Choosing models
 
-Use these defaults when choosing a new Codex route.
+Tell your lead agent which model to use. The lead puts that model in
+`route.model` and passes any effort you name in `route.thinking`. For an exact model ID, it
+also sets `metadata.routing.modelVersion` to `pin` to keep that version.
+Aliases such as `sonnet` stay unpinned, because pin mode rejects them.
 
-| Task | Model | `route.thinking` |
-|---|---|---|
-| Write code | `gpt-6.2-sol` | `high` |
-| Review code or investigate a problem | `gpt-6.1-sol` | `high` |
-| Read-only non-code research, lookups, or audits | `gpt-6.1-terra` | `high` |
-
-An explicit caller pin takes precedence. Use `metadata.routing.modelVersion`
-`pin` for the exact version. The native Codex worker bridges
-use `gpt-6.1-terra` at high effort to forward requests. Their downstream
-agents follow the routes selected by the lead. User-configured automatic
-routes still use the existing rules and candidate catalog. For other
-providers, verify the available model IDs before dispatch.
+You can also [set routing preferences once](#set-up-from-the-terminal). If
+you leave the model out of your prompt, the lead uses your saved preferences.
+If neither supplies a model, the lead omits `route.model` so the downstream
+CLI can use its configured default. OpenCode requires a model from your prompt
+or a configured route. Use `handoff_routing_preview` to see the chosen route
+before dispatch.
 
 ## Model freshness
 
@@ -291,22 +284,19 @@ delegation loop. Patterns, not viral posts:
   (-9pts on neutral harnesses), over-codes and overcomplicates without tight
   scope; needs small focused tasks, acceptance canaries, and a flagship
   reviewer. Never solo for architecture, taste-critical copy, or legacy spelunking.
-- **Composer (Cursor lanes):** best default inside Cursor for routine work —
-  but **Fast costs 6× Standard and is the default**, the #1 bill shock. Route
-  Standard unless latency is truly critical; set dashboard spend caps.
-  Escalate cursed bugs and architecture to Opus/Fable/GPT.
+- **Composer (Cursor lanes):** the Fast and Standard variants have different
+  costs. Check the variant when setting a routing preference.
 - **GPT/Codex lanes:** long-horizon and async-review kings; brittle tool
   plumbing (spurious calls, infinite retry loops, low-verbosity narrator
-  halts). Demand file:line receipts and verify programmatically. `high`
-  effort, not `xhigh`, unless security/architecture.
+  halts). Demand file:line receipts and verify programmatically.
 - **Claude lanes:** quality/taste ceiling and best-studied subagents — but
   burn dominates complaints. Documented failure cluster (fabricated
   completion with zero tool calls, silent hangs, scope expansion) is why
   workers must return receipts verbatim and never paraphrase machine fields.
 - **DeepSeek lanes:** best-value open worker; verbose receipts need the
   strict format envelope (already the handoff contract). Flash frequently
-  beats Pro on agent tasks — Flash default stands. Re-evaluate after
-  post-train pushes; independent numbers are thinner than vendor ones.
+  beat Pro on some agent tasks in the reported comparisons. Independent
+  numbers are thinner than vendor ones.
 - **Spark (Meta Muse Spark, OpenCode Go contributor channel):** plan/code
   review specialist, AA-leading intelligence, fast, somewhat verbose, effectively
   $0 — but prompts/completions may train Meta models, so never route private,
@@ -391,9 +381,7 @@ Generic ACP is excluded from read-only compare and review for the same reason: i
 | Amp | rejected | Amp native selection | Use only `route.variant` `low`, `medium`, `high`, or `ultra`; arbitrary provider/model/thinking fields reject. Requires explicit write approval with empty tools and no cost budget on native Linux/macOS or with the entire MCP server inside WSL. Resume with `execution.sessionId` and omit `route.variant` because the existing thread retains its mode; session transport, live controls, read-only, and detached orbs are unsupported. |
 | DSH | — | not a target | Protocol rejects `target: "dsh"`. Run DeepSeek models via Pi or OpenCode provider routes. |
 
-Preserve explicit model and effort pins. Use the leaf defaults when preparing
-a new Codex route and check the active catalog before selecting a model on
-another provider.
+Follow the [user's model and effort choices](#choosing-models).
 
 ## Worked example
 

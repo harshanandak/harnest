@@ -2,7 +2,6 @@
 # Edit the shared template / per-target blocks in that script and re-run it.
 name = "claude_worker"
 description = "Native Codex child-thread bridge for one-shot Claude Code (claude print mode) work. Use when Claude Code work must remain visible, inspectable, and resumable in Codex's subagent panel."
-model = "gpt-6.1-terra"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 nickname_candidates = ["bridge-1", "bridge-2", "bridge-3", "bridge-4", "bridge-5", "bridge-6", "bridge-7", "bridge-8"]

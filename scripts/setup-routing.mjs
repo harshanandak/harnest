@@ -23,7 +23,6 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const TARGETS = ["pi", "claude", "codex", "opencode", "cursor", "gemini", "amp"];
 const DEFAULT_SUBSCRIPTIONS = ["pi", "claude", "codex", "opencode", "cursor"];
 const TIERS = ["quick", "balanced", "deep", "review"];
-const CODEX_LEAF_GUIDANCE = "Codex leaf routes use high thinking: gpt-6.2-sol for code, gpt-6.1-sol for review and investigation, gpt-6.1-terra for read-only research, lookups, and audits. An explicit model or effort pin takes precedence.";
 
 function parseArgs(argv) {
   const options = { models: {} };
@@ -83,7 +82,6 @@ export async function interactive(detected, { rl = createInterface({ input: stdi
     const tierRaw = (await rl.question("Default tier quick/balanced/deep/review [balanced]: ")).trim().toLowerCase();
     const tier = TIERS.includes(tierRaw) ? tierRaw : "balanced";
     console.log("Model per harness (Enter = default; opencode REQUIRES one to be usable):");
-    console.log(CODEX_LEAF_GUIDANCE);
     const models = {};
     for (const target of TARGETS) {
       if (target === "amp") {
@@ -149,7 +147,6 @@ if (options.help) {
     "  [--model target=model] [--budget 2] [--cheap-lane model-id] [--flagship-lane model-id]",
     "  [--sub target=1] [--no-rules] [--allow-training-endpoints|--no-training-endpoints] [--out path] [--yes]",
     "Writes the simple preference keys plus starter task rules; the engine expands them into full policy.",
-    CODEX_LEAF_GUIDANCE,
   ].join("\n"));
   process.exit(0);
 }
