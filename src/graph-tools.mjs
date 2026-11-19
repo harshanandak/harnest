@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { CODEX_SERVICE_TIERS, MAX_ROUTE_OPTION_ID, MAX_ROUTE_OPTION_VALUE } from "./protocol.mjs";
+import {
+  CODEX_PROFILE_PATTERN,
+  CODEX_SERVICE_TIERS,
+  MAX_ROUTE_OPTIONS,
+  MAX_ROUTE_OPTION_ID,
+  MAX_ROUTE_OPTION_VALUE,
+  RESERVED_ROUTE_OPTION_IDS,
+} from "./protocol.mjs";
 
 const target = z.enum(["auto", "pi", "claude", "codex", "opencode", "cursor", "gemini", "amp", "acp"]);
 const nodeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
@@ -15,9 +22,14 @@ export const routeInputSchema = z.object({
   harnessVersion: z.enum(["v1", "v2"]).optional(),
   serverUrl: nonEmpty.optional(),
   serviceTier: z.enum(CODEX_SERVICE_TIERS).describe("One-shot only. Claude supports fast.").optional(),
-  profile: nonEmpty.describe("Codex one-shot native config profile name.").optional(),
-  options: z.record(z.string().min(1).max(MAX_ROUTE_OPTION_ID), z.union([z.string().max(MAX_ROUTE_OPTION_VALUE), z.boolean()]))
-    .describe("ACP session option IDs mapped to advertised values. At most 16 entries.").optional(),
+  profile: z.string().regex(CODEX_PROFILE_PATTERN).describe("Codex one-shot native config profile name.").optional(),
+  options: z.record(
+    z.string().regex(/\S/).max(MAX_ROUTE_OPTION_ID).meta({ not: { enum: [...RESERVED_ROUTE_OPTION_IDS] } }),
+    z.union([z.string().max(MAX_ROUTE_OPTION_VALUE), z.boolean()]),
+  ).meta({
+    description: "ACP session option IDs mapped to advertised values.",
+    maxProperties: MAX_ROUTE_OPTIONS,
+  }).optional(),
 }).strict();
 
 export const policyInputSchema = z.object({

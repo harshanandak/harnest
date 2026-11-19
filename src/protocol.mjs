@@ -7,9 +7,11 @@ export const SESSION_TARGETS = new Set(["claude", "codex", "cursor"]);
 export const ROUTE_FIELDS = Object.freeze(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
 export const ACP_ROUTE_FIELDS = Object.freeze(["agent", "model", "variant", "options"]);
 export const CODEX_SERVICE_TIERS = Object.freeze(["default", "fast", "priority", "flex"]);
+export const CODEX_PROFILE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 export const MAX_ROUTE_OPTIONS = 16;
 export const MAX_ROUTE_OPTION_ID = 128;
 export const MAX_ROUTE_OPTION_VALUE = 256;
+export const RESERVED_ROUTE_OPTION_IDS = Object.freeze(["__proto__", "prototype", "constructor"]);
 export const HARNESS_VERSIONS = Object.freeze(["v1", "v2"]);
 export const POLICY_FIELDS = Object.freeze(["write", "readOnly", "allowWrites", "tools", "maxCostUsd"]);
 function invalid(message) {
@@ -81,7 +83,7 @@ export function normalizeRoute(route, label = "route") {
   const entries = Object.entries(options);
   if (entries.length > MAX_ROUTE_OPTIONS) throw invalid(`${label}.options allows at most ${MAX_ROUTE_OPTIONS} entries`);
   for (const [id, value] of entries) {
-    if (!id.trim() || id.length > MAX_ROUTE_OPTION_ID || ["__proto__", "prototype", "constructor"].includes(id)) {
+    if (!id.trim() || id.length > MAX_ROUTE_OPTION_ID || RESERVED_ROUTE_OPTION_IDS.includes(id)) {
       throw invalid(`${label}.options contains an invalid option ID`);
     }
     if (typeof value !== "boolean" && (typeof value !== "string" || value.length > MAX_ROUTE_OPTION_VALUE)) {
@@ -94,7 +96,7 @@ export function normalizeRoute(route, label = "route") {
 export function routeControlError(target, route = {}, transport) {
   if (route.profile !== undefined) {
     if (target !== "codex" || transport === "session") return "route.profile requires Codex one-shot execution";
-    if (typeof route.profile !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(route.profile)) {
+    if (typeof route.profile !== "string" || !CODEX_PROFILE_PATTERN.test(route.profile)) {
       return "route.profile must be a Codex config profile name of up to 128 characters";
     }
   }

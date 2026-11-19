@@ -159,13 +159,13 @@ async function applySessionRoute(transport, sessionId, session, route, rpcOption
     config = response.configOptions;
     applied.set(option.id, { field, value });
   };
-  const setSelection = async (field, category, value, legacy, availableKey, idKey, method) => {
+  const setSelection = async (field, category, value, advertised, advertisedIdKey, parameterIdKey, method) => {
     if (value === undefined) return;
     const option = config.find((item) => item?.category === category);
     if (option) {
       await setOption(option, value, field);
-    } else if (Array.isArray(legacy?.[availableKey]) && legacy[availableKey].some((entry) => entry?.[idKey] === value)) {
-      if (!isObject(await set(method, { [idKey]: value }, field))) {
+    } else if (Array.isArray(advertised) && advertised.some((entry) => entry?.[advertisedIdKey] === value)) {
+      if (!isObject(await set(method, { [parameterIdKey]: value }, field))) {
         throw fail(field, "was not acknowledged by the agent");
       }
     } else {
@@ -173,8 +173,8 @@ async function applySessionRoute(transport, sessionId, session, route, rpcOption
     }
   };
   // ACP config options supersede the legacy mode API and can affect later option choices.
-  await setSelection("route.model", "model", route.model, session?.models, "availableModels", "modelId", "session/set_model");
-  await setSelection("route.variant", "mode", route.variant, session?.modes, "availableModes", "modeId", "session/set_mode");
+  await setSelection("route.model", "model", route.model, session?.models?.availableModels, "modelId", "modelId", "session/set_model");
+  await setSelection("route.variant", "mode", route.variant, session?.modes?.availableModes, "id", "modeId", "session/set_mode");
   for (const [id, value] of Object.entries(route.options ?? {})) {
     const option = config.find((item) => item?.id === id);
     if ((option?.category === "model" && route.model !== undefined) ||
