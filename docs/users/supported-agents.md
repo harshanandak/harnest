@@ -26,8 +26,10 @@ Blank cells indicate unsupported controls. The [MCP usage guide](mcp-usage.md#na
 | `cursor` | Cursor | Read or approved write handoffs, one-shot resume, and optional session transport | Cursor UI subagents do not automatically inherit UI MCP servers. |
 | `claude` | Claude Code | Read or approved write handoffs, one-shot resume, and optional session transport | One-shot supports named agents and fast mode when the native CLI confirms it. Live message and reroute require session transport. |
 | `codex` | Codex | Read-only sandbox or approved workspace-write handoffs, one-shot resume, and optional session transport | One-shot supports native config profiles and service tiers on CLI 0.170.0 or later. Write mode uses `workspace-write`. |
-| `gemini` | Gemini CLI | Prompt-only read or approved write handoffs with native-session follow-up | This target requires Gemini CLI v0.62.0. Inherited include directories mean its read policy is not a filesystem sandbox. Session transport and live controls are unsupported. |
+| `gemini` | Gemini CLI (legacy) | Prompt-only read or approved write handoffs with native-session follow-up | This target requires Gemini CLI v0.62.0. Inherited include directories mean its read policy is not a filesystem sandbox. Session transport and live controls are unsupported. |
 | `amp` | Amp | Approved write-only prompt handoffs with native-session follow-up | Downstream execution needs native Linux/macOS or the entire Harnest MCP server inside WSL. Native Windows downstream launch rejects before inference. Read-only, session transport, and live controls are unsupported. |
+
+Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the `antigravity` ACP preset. See [Google's transition announcement](https://github.com/google-gemini/gemini-cli/discussions/27274).
 
 DeepSeek is a model choice through Pi or OpenCode, not a separate downstream target.
 
@@ -52,7 +54,8 @@ Explicit `policy.mode` and `policy.sandbox` are available only on Cursor print. 
 |---|---|---|
 | Claude Code | Native adapter (`claude`) | Yes |
 | Codex CLI | Native adapter (`codex`) | Yes |
-| Gemini CLI | Native adapter (`gemini`) | Yes |
+| Gemini CLI (legacy) | Native adapter (`gemini`) | Yes |
+| Antigravity CLI | ACP preset (`antigravity`) | No |
 | Cursor CLI | Native adapter (`cursor`) | Yes |
 | OpenCode | Native adapter (`opencode`) | Yes |
 | Pi | Native adapter (`pi`) | Yes |
@@ -83,12 +86,14 @@ ACP model, mode, and config choices vary by agent. Use the IDs and values the na
 
 Install and authenticate the CLI first. Run `bun run acp add <preset-id>` to inspect the executable and arguments, then repeat with `--trust` to save the local registration. Use the preset ID in `route.agent` and provide explicit write approval on each handoff.
 
+For Antigravity CLI, run `bun run acp add antigravity` to preview `agy acp`. On Windows, the installer puts `agy.exe` in `%LOCALAPPDATA%\agy\bin` by default. Add that directory to `PATH` if Harnest cannot find `agy`. See [Google's Antigravity install guide](https://antigravity.google/docs/cli/tutorial/).
+
 See [Registered ACP agents](../acp-agents.md) for registration and protocol details.
 
 ## Lead clients
 
 A compatible client can lead a Harnest handoff through the HTTP daemon or the stdio bridge. The repository also supplies optional host experiences for Codex, Claude Code, OpenCode, Pi, and Cursor. Gemini CLI and Amp can connect through their MCP configuration.
 
-GitHub Copilot CLI, Qwen Code, Kilo, Cline CLI, Kiro CLI, Factory Droid, Auggie, Kimi CLI, and Devin CLI have automatic user-level MCP setup. Goose and Mistral Vibe have manual setup instructions. Each preset setup has CI fixture coverage only, with no live CLI testing. See the [lead configuration table](integrations.md#acp-presets-as-lead-clients) for paths and setup commands.
+GitHub Copilot CLI, Qwen Code, Kilo, Cline CLI, Kiro CLI, Factory Droid, Auggie, Kimi CLI, and Devin CLI have automatic user-level MCP setup. Harnest prints manual configuration for Goose and Mistral Vibe. Those setup commands have CI fixture coverage only. See the [lead configuration table](integrations.md#acp-presets-as-lead-clients) for paths and setup commands. Antigravity CLI uses [manual MCP configuration](integrations.md#antigravity-cli-as-a-lead-client) based on Google's docs.
 
 Connecting a lead client does not install or authenticate a downstream agent. Configure each downstream CLI through its own supported install and login flow, then select it with the request's `target`.

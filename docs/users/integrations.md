@@ -62,6 +62,8 @@ Omit `--project` to use the Harnest checkout. Setup backs up and updates the use
 
 ## Gemini CLI as a lead client
 
+The native `gemini` target is legacy. Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the `antigravity` ACP preset. See [Google's transition announcement](https://github.com/google-gemini/gemini-cli/discussions/27274).
+
 Install the bridge in the user Gemini settings with `trust: false`:
 
 ```sh
@@ -105,7 +107,7 @@ The command saves a private backup before removing the `harnest` MCP entry. It k
 
 ## ACP presets as lead clients
 
-Run `bun run setup <host>` using the host ID below. For automatic setup, reload the CLI and run `bun run doctor --host <host>` to check the configured bridge and discover the Harnest tools. Each preset setup has CI fixture coverage only, with no live CLI testing.
+For automatic setup, run `bun run setup <host>` using the host ID below. Reload the CLI and run `bun run doctor --host <host>` to check the configured bridge and discover the Harnest tools. Harnest's preset setup commands have CI fixture coverage only.
 
 `~` means the user's home on macOS and Linux and `%USERPROFILE%` on Windows. An override marked **none documented** means the linked CLI documentation specifies a default user path and describes no environment variable for changing it.
 
@@ -122,10 +124,34 @@ Run `bun run setup <host>` using the host ID below. For automatic setup, reload 
 | `kimi` | Automatic | `~/.kimi/mcp.json` or `$KIMI_SHARE_DIR/mcp.json` for the `kimi` executable. | JSON · `mcpServers` | [Paths and override](https://moonshotai.github.io/kimi-cli/en/configuration/data-locations.html), [stdio fields](https://moonshotai.github.io/kimi-cli/en/customization/mcp.html) |
 | `mistral-vibe` | Manual | `~/.vibe/config.toml` or `$VIBE_HOME/config.toml`. | TOML · `[[mcp_servers]]` | [Path and override](https://github.com/mistralai/mistral-vibe#custom-vibe-home-directory), [stdio fields](https://docs.mistral.ai/vibe/code/cli/mcp-servers) |
 | `devin` | Automatic | `~/.config/devin/mcp_config.json` on macOS and Linux, `%APPDATA%\devin\mcp_config.json` on Windows. Requires Devin v3000.3 or newer. Override none documented. | JSON with comments · `mcpServers` | [Paths and stdio fields](https://docs.devin.ai/cli/extensibility/mcp/configuration#via-config-file), [comment support](https://docs.devin.ai/cli/reference/configuration/config-file#json-with-comments) |
+| `antigravity` | [Manual](#antigravity-cli-as-a-lead-client) | `~/.gemini/config/mcp_config.json` | JSON · `mcpServers` | [MCP path and stdio fields](https://antigravity.google/docs/mcp?tab=cli) |
 
-For Goose and Mistral Vibe, setup prints the resolved path and a ready-to-merge snippet with the bridge command, arguments, and state directories. Make a copy of the configuration before editing. Verify Goose with `goose info -v` and Vibe with `/mcp harnest` in a new Vibe session.
+For Goose and Mistral Vibe, run `bun run setup goose` or `bun run setup mistral-vibe` to print the resolved path and a ready-to-merge snippet with the bridge command, arguments, and state directories. Make a copy of the configuration before editing. Verify Goose with `goose info -v` and Vibe with `/mcp harnest` in a new Vibe session.
 
 For Kiro, open `/mcp` to check that Harnest loaded. If a custom agent omits global MCP configuration, set `includeMcpJson` to `true` in that agent's configuration. [Kiro custom agent configuration](https://kiro.dev/docs/cli/v3/agent-config/#includemcpjson-field)
+
+### Antigravity CLI as a lead client
+
+Add a stdio server to `~/.gemini/config/mcp_config.json`. A minimal configuration for the default state directories looks like this.
+
+```json
+{
+  "mcpServers": {
+    "harnest": {
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/harnest/src/mcp-bridge.mjs"]
+    }
+  }
+}
+```
+
+From the Harnest checkout, print the snippet with the paths for your installation.
+
+```sh
+bun run setup other
+```
+
+Merge the printed `mcpServers.harnest` entry into your config. If the file does not exist, use the whole printed JSON object. Restart `agy` and run `/mcp` to check the connection. Harnest has not verified this setup against the real CLI. See [Google's MCP configuration docs](https://antigravity.google/docs/mcp?tab=cli).
 
 ## Registered ACP agents
 

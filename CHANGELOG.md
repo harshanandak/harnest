@@ -16,8 +16,9 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 - Dependency graphs and JavaScript workflows with durable status, bounded traces, cancellation, and recovery.
 - A shared per-user daemon with loopback HTTP, a stdio bridge, and login startup on Windows, macOS, and Linux. The CI budget for the daemon plus 10 clients is ≤ 320 MiB. The shared-daemon measurements were 237 MiB on Ubuntu and 214 MiB on Windows.
 - `bun run setup <host>` for Claude Code, Codex, OpenCode, Cursor, Pi, Gemini CLI, and Amp. Setup migrates older Agent Companion registrations with timestamped backups and accepts an explicit Cursor workspace.
-- Eleven [ACP registration presets](docs/users/supported-agents.md#downstream-coverage), including Copilot CLI and Devin. `bun run acp add <preset-id>` shows the documented launch. With `--trust`, it saves and prints the absolute executable path, which also appears in `bun run acp list`. Each preset is unverified with Harnest.
-- [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. Each preset has CI fixture coverage only, with no live CLI testing.
+- Twelve [ACP registration presets](docs/users/supported-agents.md#downstream-coverage), including Copilot CLI and Devin. `bun run acp add <preset-id>` shows the documented launch. With `--trust`, it saves and prints the absolute executable path, which also appears in `bun run acp list`. Each preset is unverified with Harnest.
+- The `antigravity` ACP preset launches `agy acp`. Antigravity CLI uses [manual MCP configuration](docs/users/integrations.md#antigravity-cli-as-a-lead-client) when it leads a handoff.
+- [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. These setup commands have CI fixture coverage only.
 - `bun run setup remove <host>` for the nine automatic ACP presets, Gemini CLI, Amp, and Cursor. It backs up the user config and removes only the Harnest MCP entry. Fresh setup prints this reverse path.
 - Per-phase agent counts, reported token totals, and elapsed time for JavaScript workflows, plus a runnable bounded verification-loop example.
 - Native service tier selection for Codex one-shot handoffs and fast mode for Claude one-shot handoffs.
@@ -30,6 +31,7 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 
 ### Changed
 
+- User docs, setup, and doctor mark the native `gemini` target as legacy and point personal Google accounts to the `antigravity` ACP preset.
 - Renamed Agent Companion to Harnest and standardized installation on the tagged GitHub checkout.
 - OpenCode support requires OpenCode V2. The OpenCode V1 runtime and host integration are removed.
 - Harnest does not choose models. The lead uses the model the user names in the prompt, then the user's routing preferences, then the downstream CLI's own default.

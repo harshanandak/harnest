@@ -196,7 +196,9 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
       }
     });
   }
-  assert.deepEqual([...Object.keys(jsonHosts), "goose", "mistral-vibe"].sort(), ACP_PRESETS.map(({ id }) => id).sort());
+  const setupPresets = ACP_PRESETS.map(({ id }) => id).filter((id) => id !== "antigravity");
+  assert.deepEqual([...Object.keys(jsonHosts), "goose", "mistral-vibe"].sort(), setupPresets.sort());
+  await assert.rejects(cli(fixture, "setup", "antigravity", "--no-autostart"), /Usage: bun run setup/);
 });
 
 test("preset lead config honors user path overrides", () => {

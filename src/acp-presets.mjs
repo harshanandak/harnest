@@ -109,4 +109,14 @@ export const ACP_PRESETS = [
     docsUrl: "https://docs.devin.ai/cli/reference/commands#devin-acp",
     verified: false,
   },
+  {
+    // https://antigravity.google/docs/cli/acp.md
+    id: "antigravity",
+    name: "Antigravity CLI",
+    command: "agy",
+    args: ["acp"],
+    installHint: "Install Antigravity CLI, put agy on PATH, and sign in with agy.",
+    docsUrl: "https://antigravity.google/docs/cli/acp.md",
+    verified: false,
+  },
 ];
