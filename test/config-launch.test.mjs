@@ -68,11 +68,14 @@ test("OpenCode discovery uses the supplied PATH and Windows shim environment", a
   const supplied = await mkdtemp(join(tmpdir(), "harnest-opencode-supplied-path-"));
   for (const directory of [host, supplied]) t.after(() => rm(directory, { recursive: true, force: true }));
   const windows = process.platform === "win32";
-  const name = windows ? "opencode2.exe" : "opencode2";
+  const extension = windows ? ".exe" : "";
+  const name = `opencode2${extension}`;
   for (const directory of [host, supplied]) await writeFile(join(directory, name), "fixture", { mode: 0o755 });
   await withEnv("PATH", host, () => withEnv("HARNEST_OPENCODE_V2", undefined, async () => {
-    assert.equal(harnessLaunch("opencode", undefined, { config: {} }).command, join(host, name));
-    const env = windows ? { Path: supplied, PATHEXT: ".EXE", SystemRoot: "C:\\fixture-windows" } : { PATH: supplied };
+    await withEnv("PATHEXT", extension || undefined, () => {
+      assert.equal(harnessLaunch("opencode", undefined, { config: {} }).command, join(host, name));
+    });
+    const env = windows ? { Path: supplied, PATHEXT: extension, SystemRoot: "C:\\fixture-windows" } : { PATH: supplied };
     assert.equal(harnessLaunch("opencode", undefined, { config: {}, env }).command, join(supplied, name));
     if (windows) {
       await rm(join(supplied, name));
