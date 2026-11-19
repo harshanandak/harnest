@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0 - 2026-11-19
+## 0.0.1 - 2026-11-19
 
-Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`. The [install guide](docs/users/getting-started.md#install-from-github) covers the checkout, frozen Bun install, and daemon setup.
+Install from the public `harshanandak/harnest` GitHub repository at tag `v0.0.1`. The [install guide](docs/users/getting-started.md#install-from-github) covers the checkout, frozen Bun install, and daemon setup.
 
 ### Added
 

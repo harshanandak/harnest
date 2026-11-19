@@ -519,7 +519,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
 
   return () => {
     const protocol = new McpServer(
-      { name: "harnest", version: "0.1.0" },
+      { name: "harnest", version: "0.0.1" },
       {
         instructions: "One harness owns each handoff. For mixed-harness dependency graphs, validate then start with handoff_graph_validate/handoff_graph_start, retain graphId, poll graph status and inspect individual child traces. Preserve completed nodes when resuming unsuccessful graphs. For one handoff use requestId+cwd+context+workflow+route+policy, start background, poll handoff_trace with afterSequence, return handoff_result verbatim. Never merge or deploy unless policy grants it. Call handoff_host_info when unsure of the launch path.",
       },

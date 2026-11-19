@@ -5,9 +5,9 @@
 3. Tag that commit and create the GitHub Release. Copy that version's changelog entry into the release notes.
 
    ```sh
-   git tag -a v0.1.0 <verified-merged-main-sha> -m "Harnest v0.1.0"
-   git push origin v0.1.0
-   gh release create v0.1.0 --verify-tag --title "Harnest v0.1.0" --notes-file <release-notes-file>
+   git tag -a v0.0.1 <verified-merged-main-sha> -m "Harnest v0.0.1"
+   git push origin v0.0.1
+   gh release create v0.0.1 --verify-tag --title "Harnest v0.0.1" --notes-file <release-notes-file>
    ```
 
 4. Verify the GitHub Release points to the tagged commit and that a fresh checkout can install the exact tag with `bun install --frozen-lockfile`. Harnest ships through GitHub source releases. Skip npm publication.

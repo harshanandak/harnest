@@ -11,7 +11,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const modern = process.argv.includes("--modern");
 const client = new Client(
-  { name: "harnest-edge", version: "0.1.0" },
+  { name: "harnest-edge", version: "0.0.1" },
   modern ? { versionNegotiation: { mode: "auto" } } : {},
 );
 const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, "src", "mcp-server.mjs")], cwd: root });

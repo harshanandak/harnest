@@ -24,7 +24,7 @@ export const ACP_CAPABILITIES = Object.freeze({
 const CLIENT_INFO = Object.freeze({
   name: "harnest",
   title: "Harnest",
-  version: "0.1.0",
+  version: "0.0.1",
 });
 const DEFAULT_TIMEOUT_MS = 3_600_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;

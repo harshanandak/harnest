@@ -30,7 +30,7 @@ import { summarizeUsage } from "../usage.mjs";
 const PROVIDER = "openai/codex";
 const CLIENT_NAME = "harnest";
 const CLIENT_TITLE = "Harnest";
-const CLIENT_VERSION = "0.1.0";
+const CLIENT_VERSION = "0.0.1";
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 const DEFAULT_IDLE_CLOSE_MS = 300_000;

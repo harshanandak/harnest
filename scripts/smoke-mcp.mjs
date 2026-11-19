@@ -11,7 +11,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const modern = process.argv.includes("--modern");
 const bridge = process.argv.includes("--bridge");
 const client = new Client(
-  { name: "harnest-smoke", version: "0.1.0" },
+  { name: "harnest-smoke", version: "0.0.1" },
   modern ? { versionNegotiation: { mode: "auto" } } : {},
 );
 let fixture, daemon;
