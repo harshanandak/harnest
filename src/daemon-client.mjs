@@ -102,7 +102,9 @@ async function ensure({ port, version }) {
       const health = await inspect(port);
       if (health && !isOlder(health.version, version)) return health;
       try {
-        await exchange(`${daemonAddress(port)}/health`, { signal: AbortSignal.timeout(250) });
+        // A fresh connection (no keep-alive reuse) sees ECONNREFUSED as soon
+        // as the old listener closes.
+        await exchange(`${daemonAddress(port)}/health`, { signal: AbortSignal.timeout(250), agent: false });
       } catch (error) {
         if (error.code === "ECONNREFUSED") break;
       }

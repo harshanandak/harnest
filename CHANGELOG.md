@@ -43,6 +43,7 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 ### Fixed
 
 - Managed OpenCode V2 handoffs wait for `/global/health`, where OpenCode 2.2.1 serves health. Before this fix, they timed out with "OpenCode server did not become ready".
+- Replacing an older daemon no longer misses its startup deadline when a client polls over keep-alive. The stopping daemon drops all connections, and the client probes for port release on a fresh connection.
 - JavaScript workflows finalize pending controls when they settle or recover. Workers reject ambiguous unstamped controls when claiming a later attempt, and late acknowledgements can resolve controls whose delivery was in flight.
 - JavaScript workflow controls stay with the attempt that accepted them. Resume finalizes pending controls before queuing the next attempt.
 - Claude resolves its HTTP headers helper from the installed plugin root. Codex native workers honor `CODEX_HOME`, and Codex-to-Codex guidance uses the MCP tool directly.

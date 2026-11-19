@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -180,6 +181,24 @@ async function freePort() {
   await new Promise((resolve) => listener.close(resolve));
   return port;
 }
+
+test("closing the daemon drops connections that are mid-request", { timeout: 15_000 }, async (t) => {
+  const { stateDir, directory } = await fixture(t);
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => createRuntimeServices({ stateDir }) });
+  // A partial request keeps the connection active, so server.close() alone
+  // would wait on it until the request timeout.
+  const socket = connect({ host: "127.0.0.1", port: daemon.port });
+  socket.on("error", () => {}); // the daemon resets this socket on close
+  await once(socket, "connect");
+  socket.write("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+  const closed = once(socket, "close");
+  const outcome = await Promise.race([
+    daemon.close().then(() => "closed"),
+    delay(5_000).then(() => "hung"),
+  ]);
+  assert.equal(outcome, "closed");
+  await closed;
+});
 
 test("concurrent callers converge, retain the token and replace an older daemon only when idle", { timeout: 30_000 }, async (t) => {
   const { stateDir, directory, env } = await fixture(t);
