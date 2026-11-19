@@ -72,6 +72,17 @@ test("policy narrowing never widens write, tools or cost", () => {
   assert.throws(() => normalizePolicy({ readOnly: true, allowWrites: true }), /contradictory write policy aliases/);
 });
 
+test("inherited explicit deny lists, plan mode and sandbox survive child overrides", () => {
+  const parent = normalizePolicy({ tools: { allow: ["Read", "Glob"], deny: ["Bash"] }, mode: "plan", sandbox: true });
+  assert.deepEqual(normalizePolicy({ tools: { allow: ["Read"], deny: ["Glob"] } }, parent), {
+    write: false, maxCostUsd: null, tools: { allow: ["Read"], deny: ["Bash", "Glob"] }, mode: "plan", sandbox: true,
+  });
+  assert.deepEqual(normalizePolicy({ tools: { deny: [] } }, parent), parent);
+  assert.throws(() => normalizePolicy({ tools: { allow: ["Edit"] } }, parent), /cannot widen allowed tools/);
+  assert.throws(() => normalizePolicy({ tools: [] }, parent), /cannot change inherited tool policy format/);
+  assert.throws(() => normalizePolicy({ sandbox: false }, parent), /cannot disable inherited sandbox/);
+});
+
 test("agent options default the label, merge context and reject widening", async (t) => {
   const root = await tmp(t);
   const spec = await normalizeDynamicSpec({

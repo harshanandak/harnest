@@ -167,6 +167,40 @@ test("Cursor adapter maps write to default mode with --force and no ask", async 
   });
 });
 
+test("Cursor emits explicit plan and sandbox flags without force", async () => {
+  const calls = [];
+  const adapter = new CursorAdapter({
+    command: "fake-cursor",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild({ stdout: streamJsonResult("planned") });
+    },
+  });
+  for (const { policy, flags, mode, write } of [
+    { policy: { write: true, mode: "plan" }, flags: ["--mode", "plan"], mode: "plan", write: false },
+    { policy: { write: false, mode: "plan", sandbox: true }, flags: ["--mode", "plan", "--sandbox", "enabled"], mode: "plan", write: false },
+    { policy: { write: false, sandbox: true }, flags: ["--mode", "ask", "--sandbox", "enabled"], mode: "ask", write: false },
+    { policy: { write: true, sandbox: true }, flags: ["--sandbox", "enabled"], mode: "agent", write: true },
+  ]) {
+    const req = request({ route: {}, policy, metadata: { harnest: { writeApproved: policy.write } } });
+    const result = await adapter.run(req);
+    assert.deepEqual(calls.at(-1).slice(0, -1), [
+      "--trust", "-p", "--output-format", "stream-json", "--stream-partial-output", ...flags, "--workspace", req.cwd,
+    ]);
+    assert.equal(result.execution.effectivePolicy.mode, mode);
+    assert.equal(result.execution.effectivePolicy.write, write);
+  }
+  await assert.rejects(
+    adapter.run(request({ policy: { write: true, sandbox: false } })),
+    (error) => error.details?.kind === "policy" && /sandbox=false/.test(error.message),
+  );
+  await assert.rejects(
+    adapter.run(request({ policy: { tools: { deny: ["Read"] } } })),
+    (error) => error.details?.kind === "policy" && /policy.tools/.test(error.message),
+  );
+  assert.equal(calls.length, 4);
+});
+
 test("Cursor rejects a successful envelope that explicitly says every tool call was blocked", async () => {
   const blocked = "Every tool call was blocked before it ran. No report file was created.";
   const adapter = new CursorAdapter({

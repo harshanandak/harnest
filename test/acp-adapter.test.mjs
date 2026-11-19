@@ -550,6 +550,7 @@ test("unsupported fields and absent write approval reject before spawn", async (
     request({ route: { serverUrl: "http://127.0.0.1:9999" } }),
     request({ route: { customExecutable: "bad" } }),
     request({ policy: { tools: ["shell"] } }),
+    request({ policy: { write: true, tools: { deny: ["shell"] } } }),
     request({ policy: { maxCostUsd: 1 } }),
     request({ workflow: { nodes: [{ id: "x" }] } }),
     request({ execution: { transport: "session" } }),

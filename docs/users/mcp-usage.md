@@ -63,6 +63,17 @@ Use one normalized policy field and include the guarded-host approval marker aft
 
 Do not combine contradictory `write`, `readOnly`, and `allowWrites` values. Harnest validates policy before launch. A write-capable retry also needs renewed lead approval.
 
+## Narrow the tool policy
+
+`policy.tools` accepts an object with `allow`, `deny`, or both. Use exact native tool names. Deny wins when both lists name a tool. An empty allow list selects no tools on targets that support it. The existing array form keeps its previous behavior.
+
+For example, a read-only Gemini handoff can use `"policy": { "write": false, "tools": { "allow": ["read_file", "glob"], "deny": ["glob"] } }` to keep only `read_file`. Claude print also supports both lists, with `allow` limited to `Read`, `Glob`, and `Grep`. Pi and fresh local OpenCode V1 runs accept `deny` only. See the [per-target tool names and limits](supported-agents.md#per-run-policy-controls).
+
+Use `"policy": { "write": false, "mode": "plan", "sandbox": true }` with Cursor print to request read-only planning and enable its shell sandbox. Plan mode takes precedence over agent mode even with approved write access. Sandbox can also be enabled without selecting plan mode. Omit `sandbox` to inherit Cursor's settings. Harnest rejects `sandbox: false` because it could turn off configured isolation.
+
+These controls preserve the existing write authorization and approval checks. Unsupported targets, transports, and CLI versions fail before inference.
+For JavaScript workflows, set `execution.transport: "oneshot"` on Claude or Cursor calls using these controls.
+
 ## Generic ACP handoff
 
 The generic route is selected by both `target: "acp"` and the trusted registration ID in `route.agent`:

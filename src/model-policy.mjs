@@ -1,3 +1,5 @@
+import { hasToolPolicy } from "./protocol.mjs";
+
 export function isClaudeRoute(route) {
   const value = route && typeof route === "object" ? route : {};
   const provider = typeof value.provider === "string" ? value.provider.toLowerCase() : "";
@@ -97,16 +99,23 @@ export function assertAdapterRoute(target, route) {
   }
 }
 
-export function adapterPolicyRejectionReasons(target, policy = {}) {
+export function adapterPolicyRejectionReasons(target, policy = {}, execution = {}) {
   const reasons = [];
   if (["amp", "acp"].includes(target) && policy.write !== true) reasons.push("read-only");
-  if (["gemini", "amp", "acp"].includes(target) && Array.isArray(policy.tools) && policy.tools.length) reasons.push("granular-tools");
+  if (hasToolPolicy(policy.tools)) {
+    const legacy = Array.isArray(policy.tools);
+    if (["amp", "acp", "codex", "cursor"].includes(target)
+      || (["claude", "gemini"].includes(target) && (legacy || execution.transport === "session"))
+      || (["opencode", "pi"].includes(target) && !legacy && policy.tools.allow !== undefined)) reasons.push("granular-tools");
+  }
+  if (policy.mode !== undefined && (target !== "cursor" || execution.transport === "session")) reasons.push("policy.mode");
+  if (policy.sandbox !== undefined && (target !== "cursor" || execution.transport === "session" || policy.sandbox === false)) reasons.push("policy.sandbox");
   if (["gemini", "amp", "acp"].includes(target) && policy.maxCostUsd != null) reasons.push("cost-budget");
   return reasons;
 }
 
-export function assertAdapterPolicy(target, policy = {}) {
-  const reasons = adapterPolicyRejectionReasons(target, policy);
+export function assertAdapterPolicy(target, policy = {}, execution) {
+  const reasons = adapterPolicyRejectionReasons(target, policy, execution);
   if (reasons.includes("read-only")) {
     const name = target === "acp" ? "ACP" : "Amp";
     throw Object.assign(new Error(`${name} cannot enforce a read-only request; set policy.write true only when workspace writes are intended`), {
@@ -115,10 +124,16 @@ export function assertAdapterPolicy(target, policy = {}) {
     });
   }
   if (reasons.includes("granular-tools")) {
-    const name = target === "gemini" ? "Gemini" : target === "acp" ? "Acp" : "Amp";
-    throw Object.assign(new Error(`${name === "Acp" ? "ACP" : name} does not support granular policy.tools`), {
+    const name = target === "acp" ? "ACP" : target[0].toUpperCase() + target.slice(1);
+    throw Object.assign(new Error(`${name} does not support granular policy.tools in this form or transport`), {
       name: `${name}AdapterError`,
-      details: { kind: "policy", hint: "omit policy.tools and rely on the adapter's fixed native policy" },
+      details: { kind: "policy", field: "policy.tools" },
+    });
+  }
+  const cursorControl = reasons.find((reason) => reason.startsWith("policy."));
+  if (cursorControl) {
+    throw Object.assign(new Error(`${cursorControl} is unsupported for ${target} with this value or transport; Cursor print mode supports plan and sandbox=true`), {
+      details: { kind: "policy", field: cursorControl },
     });
   }
   if (reasons.includes("cost-budget")) {

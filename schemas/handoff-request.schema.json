@@ -2,6 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local.harnest/schemas/handoff-request.schema.json",
   "title": "Harnest handoff request",
+  "$defs": {
+    "exactToolNames": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$" }
+    }
+  },
   "type": "object",
   "additionalProperties": false,
   "required": ["requestId", "target", "task", "cwd"],
@@ -52,7 +58,22 @@
         "write": { "type": "boolean", "description": "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true." },
         "readOnly": { "type": "boolean", "description": "Legacy alias for !write; must not contradict write or allowWrites" },
         "allowWrites": { "type": "boolean", "description": "Legacy alias for write; must not contradict write or readOnly" },
-        "tools": { "type": "array", "items": { "type": "string" } },
+        "tools": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "allow": { "$ref": "#/$defs/exactToolNames" },
+                "deny": { "$ref": "#/$defs/exactToolNames" }
+              }
+            }
+          ]
+        },
+        "mode": { "const": "plan", "description": "Read-only plan mode for Cursor print requests." },
+        "sandbox": { "type": "boolean", "description": "True enables Cursor's native sandbox. False is rejected." },
         "maxCostUsd": { "type": "number", "minimum": 0 }
       }
     },

@@ -15,7 +15,7 @@ test("published graph schema matches MCP input and accepts task-aware automatic 
   assert.equal(graphInputSchema.safeParse({ ...graph, nodes: [{ ...graph.nodes[0], workflow: { spec: {} } }] }).success, false);
   assert.equal(graphInputSchema.safeParse({ ...graph, execution: { maxConcurrency: 7 } }).success, false);
   const schema = z.toJSONSchema(graphInputSchema);
-  assert.deepEqual(Object.keys(schema.properties.policy.properties), ["write", "readOnly", "allowWrites", "tools", "maxCostUsd"]);
+  assert.deepEqual(Object.keys(schema.properties.policy.properties), ["write", "readOnly", "allowWrites", "tools", "mode", "sandbox", "maxCostUsd"]);
   assert.equal(schema.properties.policy.additionalProperties, false);
   assert.deepEqual(Object.keys(schema.properties.nodes.items.properties.route.properties), ["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
   assert.equal(schema.properties.nodes.items.properties.route.additionalProperties, false);
@@ -39,6 +39,26 @@ test("graph runtime errors list accepted policy and route fields", async () => {
     normalizeGraph({ ...graph, nodes: [{ ...graph.nodes[0], route: { reasoningEffort: "xhigh" } }] }),
     /node\.route\.reasoningEffort is unsupported; expected one of provider, model, agent, variant, thinking, harnessVersion, serverUrl/,
   );
+});
+
+test("graph leaves inherit restrictions and reject a weaker sandbox", async () => {
+  const graph = {
+    requestId: "graph-policy-inheritance",
+    cwd: process.cwd(),
+    policy: { tools: { deny: ["Bash"] } },
+    nodes: [{ id: "review", target: "claude", task: "review", policy: { tools: { allow: ["Read"], deny: ["Glob"] } } }],
+  };
+  const normalized = await normalizeGraph(graph);
+  assert.deepEqual(normalized.nodes[0].request.policy.tools, { allow: ["Read"], deny: ["Bash", "Glob"] });
+
+  const cursorGraph = { ...graph, policy: { mode: "plan", sandbox: true }, nodes: [{ id: "plan", target: "auto", task: "plan" }] };
+  const cursor = await normalizeGraph(cursorGraph);
+  assert.equal(cursor.nodes[0].request.target, "cursor");
+  assert.equal(cursor.nodes[0].request.policy.mode, "plan");
+  assert.equal(cursor.nodes[0].request.policy.sandbox, true);
+  await assert.rejects(normalizeGraph({
+    ...cursorGraph, nodes: [{ ...cursorGraph.nodes[0], policy: { sandbox: false } }],
+  }), /cannot disable inherited sandbox/);
 });
 
 test("graph status is a flat strict-host schema and forwards bounded long-poll options", async () => {

@@ -382,7 +382,8 @@ export class DynamicWorkflowRunner {
 
   #probeLeaf(spec) {
     if (!spec.target && !Object.keys(spec.route).length) return;
-    const requested = spec.target === "auto" || spec.target === null ? "pi" : spec.target;
+    const defaultTarget = spec.policy.mode !== undefined || spec.policy.sandbox !== undefined ? "cursor" : "pi";
+    const requested = spec.target === "auto" || spec.target === null ? defaultTarget : spec.target;
     const request = normalizeRequest({
       requestId: `${runIdFor(spec.requestId)}-probe`,
       target: requested,
@@ -1709,7 +1710,8 @@ export class DynamicWorkflowRunner {
     const spec = active.spec;
     const requested = effective.target ?? spec.target;
     const automatic = requested === null || requested === "auto";
-    const baseTarget = automatic ? "pi" : requested;
+    const defaultTarget = effective.policy.mode !== undefined || effective.policy.sandbox !== undefined ? "cursor" : "pi";
+    const baseTarget = automatic ? defaultTarget : requested;
     const remaining = Math.max(1, (active.record.deadlineAt ?? this.clock() + 60_000) - this.clock());
     const timeoutMs = Math.max(1, Math.min(effective.execution.timeoutMs ?? remaining, remaining));
     const context = { ...effective.context, dynamic: {

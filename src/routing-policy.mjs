@@ -428,7 +428,7 @@ function explicitMatches(requestRoute, candidate) {
 function rejectionReasons(candidate, request, directive, contextTokens, now) {
   const reasons = [
     ...adapterRouteRejectionReasons(candidate.target, candidate.route),
-    ...adapterPolicyRejectionReasons(candidate.target, request.policy),
+    ...adapterPolicyRejectionReasons(candidate.target, request.policy, request.execution),
   ];
   const capabilities = candidate.capabilities;
   const health = candidate.health;
@@ -650,13 +650,13 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
   if (mode === "pin" || (hasExplicitRoute(request) && mode !== "auto" && mode !== "prefer")) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
-    assertAdapterPolicy(pinTarget, request.policy);
+    assertAdapterPolicy(pinTarget, request.policy, request.execution);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), selected: "explicit-route", rejected: [], alternatives: [] } };
   }
   if (hasExplicitRoute(request) && request.metadata?.routing?.mode == null) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
-    assertAdapterPolicy(pinTarget, request.policy);
+    assertAdapterPolicy(pinTarget, request.policy, request.execution);
     return { target: pinTarget, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
   }
 
@@ -696,7 +696,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
       ...(request.route?.thinking != null ? { thinking: request.route.thinking } : {}),
     }, fallbackTarget);
     assertAdapterRoute(fallbackTarget, route);
-    assertAdapterPolicy(fallbackTarget, request.policy);
+    assertAdapterPolicy(fallbackTarget, request.policy, request.execution);
     const incompatible = rejected.filter((entry) => !entry.reasons.includes("target")
       && entry.reasons.some((reason) => [
         "claude-model", "thinking-control", "gemini-provider", "gemini-model", "gemini-route-control",
@@ -715,7 +715,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
   }
   const finalTarget = preferredTarget || selected.candidate.target;
   const configuredRoute = selected.candidate.route;
-  assertAdapterPolicy(finalTarget, request.policy);
+  assertAdapterPolicy(finalTarget, request.policy, request.execution);
   return {
     target: finalTarget,
     route: configuredRoute,

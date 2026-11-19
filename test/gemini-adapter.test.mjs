@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { GeminiAdapter } from "../src/adapters/gemini.mjs";
@@ -234,6 +235,8 @@ test("Gemini rejects unsupported workflow, route, tools, budget, thinking, and s
     request({ requestId: "req-gemini-provider", route: { provider: "anthropic", model: "gemini-2.5-pro" } }),
     request({ requestId: "req-gemini-model", route: { model: "claude-opus" } }),
     request({ requestId: "req-gemini-tools", policy: { write: false, tools: ["read"] } }),
+    request({ requestId: "req-gemini-unknown-deny", policy: { tools: { deny: ["unknown"] } } }),
+    request({ requestId: "req-gemini-unknown-allow", policy: { tools: { allow: ["unknown"] } } }),
     request({ requestId: "req-gemini-budget", policy: { write: false, maxCostUsd: 1 } }),
     request({ requestId: "req-gemini-thinking", route: { model: "gemini-2.5-pro", thinking: "high" } }),
   ];
@@ -245,6 +248,36 @@ test("Gemini rejects unsupported workflow, route, tools, budget, thinking, and s
     (error) => error.details?.kind === "policy" && /transport/.test(error.message),
   );
   assert.equal(launches, 0);
+});
+
+test("Gemini applies the same narrowed list to native settings and the admin policy", async (t) => {
+  const systemPoliciesDir = await mkdtemp(join(tmpdir(), "harnest-gemini-filter-"));
+  t.after(() => rm(systemPoliciesDir, { recursive: true, force: true }));
+  const calls = [];
+  const adapter = new GeminiAdapter({
+    command: "fake-gemini",
+    policyOptions: { systemPoliciesDir },
+    spawnFn(_command, args, { env }) {
+      calls.push(args);
+      if (args[0] === "--version") return new FakeChild({ stdout: "0.62.0\n" });
+      const root = dirname(env.GEMINI_CLI_SYSTEM_SETTINGS_PATH);
+      const admin = join(root, "admin-policy");
+      assert.deepEqual(args, [
+        "--approval-mode", "default", "--admin-policy", admin, "--policy", join(root, "user-policy"),
+        "--extensions", "none", "-p", "", "--output-format", "stream-json",
+      ]);
+      const settings = JSON.parse(readFileSync(env.GEMINI_CLI_SYSTEM_SETTINGS_PATH, "utf8"));
+      const rules = readFileSync(join(admin, "harnest.toml"), "utf8");
+      assert.deepEqual(settings.tools.core, ["read_file"]);
+      assert.match(rules, /toolName = \[\s*"read_file",\s*\][\s\S]*decision = "allow"/);
+      assert.match(rules, /toolName = "\*"[\s\S]*decision = "deny"/);
+      assert.doesNotMatch(rules, /"glob"|"run_shell_command"|"write_file"/);
+      return new FakeChild({ stdout: successfulStream() });
+    },
+  });
+  await adapter.run(request({ policy: { write: false, tools: { allow: ["read_file", "glob", "run_shell_command", "write_file"], deny: ["glob"] } } }));
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], ["--version"]);
 });
 
 test("Gemini requires a successful native terminal and nonempty assistant final text", async () => {

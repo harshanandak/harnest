@@ -127,6 +127,61 @@ function terminalChildFactory({ finalText = "workflow output", withTaskflow = fa
   return { spawnFn, get child() { return child; }, get launch() { return launch; } };
 }
 
+test("Pi subtracts exact denies from its authorized tools and probes the native flags", async () => {
+  const help = "--tools --no-tools --exclude-tools --no-extensions --no-mcp";
+  for (const { write, deny, selection } of [
+    { write: false, deny: ["grep", "bash"], selection: ["--tools", "read,find,ls"] },
+    { write: true, deny: ["edit", "write"], selection: ["--tools", "read,grep,find,ls,bash"] },
+    { write: false, deny: ["read", "grep", "find", "ls"], selection: ["--no-tools"] },
+  ]) {
+    const terminal = terminalChildFactory();
+    const calls = [];
+    const adapter = new PiAdapter({
+      command: "fake-pi",
+      spawnFn(command, args, options) {
+        calls.push(args);
+        if (args[0] !== "--help") return terminal.spawnFn(command, args, options);
+        const child = new FakeChild(() => {});
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from(help));
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    });
+    await adapter.run(request(process.cwd(), { policy: { write, tools: { deny } } }));
+    assert.deepEqual(calls, [
+      ["--help"],
+      ["--mode", "rpc", ...selection, "--exclude-tools", deny.join(","), "--no-extensions", "--no-mcp"],
+    ]);
+  }
+});
+
+test("Pi rejects unsupported tool names, allow lists, Taskflow and versions before a prompt", async () => {
+  const calls = [];
+  const adapter = new PiAdapter({
+    command: "fake-pi",
+    spawnFn(_command, args) {
+      calls.push(args);
+      const child = new FakeChild(() => {});
+      queueMicrotask(() => {
+        child.stdout.emit("data", Buffer.from("Usage: pi --tools <tools>"));
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+  });
+  for (const [overrides, reason] of [
+    [{ policy: { tools: { allow: ["read"] } } }, /deny only/],
+    [{ policy: { tools: { deny: ["unknown"] } } }, /exact built-in/],
+    [{ policy: { tools: { deny: ["read"] } }, workflow: { nodes: [] } }, /Taskflow/],
+    [{ policy: { tools: { deny: ["read"] } } }, /version cannot enforce/],
+  ]) {
+    await assert.rejects(adapter.run(request(process.cwd(), overrides)), (error) => error.details?.kind === "policy" && reason.test(error.message));
+  }
+  assert.deepEqual(calls, [["--help"]]);
+});
+
 test("surfaces the provider error instead of a missing taskflow result", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "harnest-pi-provider-error-"));
   const providerError = "404: no endpoints satisfy the configured routing policy";

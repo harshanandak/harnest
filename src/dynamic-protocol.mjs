@@ -6,7 +6,7 @@
 // forwards host objects, credentials or module paths into a script.
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { digestContext, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, SESSION_TARGETS, stableJson, TARGETS } from "./protocol.mjs";
+import { digestContext, inheritPolicyControls, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, POLICY_FIELDS, SESSION_TARGETS, stableJson, TARGETS } from "./protocol.mjs";
 import { assertGraphLeaf, bytes, compactError, cwdOverlaps, mergeData } from "./graph-protocol.mjs";
 import { addUsageToTotals, emptyUsageTotals } from "./usage.mjs";
 
@@ -36,7 +36,6 @@ export const MAX_SCHEMA_BYTES = 100_000;
 
 const ROUTE_FIELDS = new Set(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
 const AGENT_TARGETS = new Set([...TARGETS, "auto"]);
-const POLICY_KEYS = ["write", "readOnly", "allowWrites", "tools", "maxCostUsd"];
 const EXECUTION_KEYS = ["background", "timeoutMs", "maxConcurrency", "maxAgents", "prefixStaggerMs", "transport", "providerWait"];
 const AGENT_OPTION_KEYS = ["label", "target", "route", "cwd", "context", "metadata", "schema", "execution", "policy"];
 const AGENT_EXECUTION_KEYS = ["timeoutMs", "transport"];
@@ -86,7 +85,7 @@ export function normalizeRoute(input = {}, label = "route") {
 
 export function normalizePolicy(input = {}, parent) {
   const policy = input ?? {};
-  only(policy, POLICY_KEYS, "policy");
+  only(policy, POLICY_FIELDS, "policy");
   for (const key of ["write", "readOnly", "allowWrites"]) {
     if (policy[key] !== undefined && typeof policy[key] !== "boolean") throw dynamicError("validation", `policy.${key} must be boolean`);
   }
@@ -94,19 +93,13 @@ export function normalizePolicy(input = {}, parent) {
   if (aliases.some((value) => value !== aliases[0])) throw dynamicError("policy", "contradictory write policy aliases");
   const result = {
     write: aliases[0] ?? parent?.write ?? false,
-    tools: policy.tools ?? parent?.tools ?? [],
+    ...inheritPolicyControls(policy, parent, (message) => dynamicError("policy", message)),
     maxCostUsd: policy.maxCostUsd ?? parent?.maxCostUsd ?? null,
   };
-  if (!Array.isArray(result.tools) || result.tools.some((value) => typeof value !== "string" || !value.trim())) {
-    throw dynamicError("validation", "policy.tools must be an array of tool names");
-  }
   if (result.maxCostUsd !== null && (!Number.isFinite(result.maxCostUsd) || result.maxCostUsd <= 0)) {
     throw dynamicError("validation", "policy.maxCostUsd must be positive");
   }
   if (parent && result.write && !parent.write) throw dynamicError("policy", "agent call cannot escalate write policy");
-  if (parent?.tools.length && (!result.tools.length || result.tools.some((tool) => !parent.tools.includes(tool)))) {
-    throw dynamicError("policy", "agent call cannot widen allowed tools");
-  }
   if (parent?.maxCostUsd != null && result.maxCostUsd > parent.maxCostUsd) throw dynamicError("policy", "agent call cannot increase cost ceiling");
   return result;
 }

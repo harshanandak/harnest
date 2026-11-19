@@ -31,7 +31,7 @@ import { aborted } from "node:util";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, hasToolPolicy } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -813,8 +813,10 @@ function assertThinkingUnsupported(route) {
 }
 
 function assertSessionPolicySupported(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
-  if (tools.length > 0) {
+  if (policy.mode !== undefined || policy.sandbox !== undefined) {
+    throw adapterError("Explicit policy.mode and policy.sandbox require Cursor print mode", "policy");
+  }
+  if (hasToolPolicy(policy.tools)) {
     throw adapterError(
       "Cursor ACP session transport has no per-tool filter; policy.tools is rejected rather than silently ignored",
       "policy",

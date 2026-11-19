@@ -221,6 +221,53 @@ test("runs a read-only OpenCode handoff and extracts identifiers, output, and us
   });
 });
 
+test("OpenCode V1 applies explicit denies in the selected fresh agent", async () => {
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args, options) {
+      calls.push({ args, options });
+      return new FakeChild(args[0] === "--version" ? ["1.18.18"] : streamLines());
+    },
+  });
+  const req = request({ route: { model: "openai/gpt-test" }, policy: { write: true, tools: { deny: ["read", "list"] } } });
+  await adapter.run(req);
+  assert.deepEqual(calls[0].args, ["--version"]);
+  const { args, options } = calls[1];
+  const { agent, permission } = JSON.parse(options.env.OPENCODE_CONFIG_CONTENT);
+  const [scopedAgent] = Object.keys(agent);
+  assert.deepEqual(args, ["run", args[1], "--format", "json", "--pure", "--dir", req.cwd, "--model", "openai/gpt-test", "--agent", scopedAgent]);
+  assert.deepEqual(permission, { "*": "deny", grep: "allow", glob: "allow", read: "deny", list: "deny" });
+  assert.deepEqual(agent[scopedAgent], { mode: "primary", permission });
+  assert.equal(calls.length, 2);
+});
+
+test("OpenCode rejects denies it cannot enforce before running a prompt", async () => {
+  const calls = [];
+  const adapter = new OpenCodeAdapter({
+    command: "fake-opencode",
+    spawnFn(_command, args) {
+      calls.push(args);
+      return new FakeChild(["2.2.1"]);
+    },
+  });
+  const route = { model: "openai/gpt-test" };
+  const policy = { tools: { deny: ["read"] } };
+  for (const [overrides, reason] of [
+    [{ policy: { tools: { allow: ["read"] } } }, /deny only/],
+    [{ policy: { tools: { deny: ["unknown"] } } }, /exact default/],
+    [{ route: { ...route, harnessVersion: "v2" } }, /fresh local V1/],
+    [{ route: { ...route, serverUrl: "http://127.0.0.1:4096" } }, /fresh local V1/],
+    [{ route: { ...route, agent: "reviewer" } }, /fresh local V1/],
+    [{ execution: { sessionId: "previous" } }, /fresh local V1/],
+    [{ workflow: { spec: {} } }, /fresh local V1/],
+    [{}, /version 1\.18\.18/],
+  ]) {
+    await assert.rejects(adapter.run(request({ route, policy, ...overrides })), (error) => error.details?.kind === "policy" && reason.test(error.message));
+  }
+  assert.deepEqual(calls, [["--version"]]);
+});
+
 test("foldOpenCodeEvent reports only the usage keys an event actually supplied", () => {
   const state = {
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },

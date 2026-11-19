@@ -6,7 +6,8 @@ export const TARGETS = new Set(["opencode", "pi", "cursor", "claude", "codex", "
 export const SESSION_TARGETS = new Set(["claude", "codex", "cursor"]);
 export const ROUTE_FIELDS = Object.freeze(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
 export const HARNESS_VERSIONS = Object.freeze(["v1", "v2"]);
-export const POLICY_FIELDS = Object.freeze(["write", "readOnly", "allowWrites", "tools", "maxCostUsd"]);
+export const POLICY_FIELDS = Object.freeze(["write", "readOnly", "allowWrites", "tools", "maxCostUsd", "mode", "sandbox"]);
+export const EXACT_TOOL_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 function invalid(message) {
   return Object.assign(new TypeError(message), { details: { kind: "validation" } });
 }
@@ -71,11 +72,66 @@ function normalizeRoute(inputRoute) {
   return route;
 }
 
+export function normalizePolicyControls(policy) {
+  const tools = policy.tools ?? [];
+  if (Array.isArray(tools)) {
+    if (tools.some((tool) => typeof tool !== "string" || !tool.trim())) {
+      throw invalid("policy.tools must be an array of non-empty strings");
+    }
+  } else {
+    if (typeof tools !== "object") throw invalid("policy.tools must be an array of non-empty strings or an allow/deny object");
+    strictObject(tools, ["allow", "deny"], "policy.tools");
+    if (!Object.keys(tools).length) throw invalid("policy.tools must specify allow or deny");
+    for (const [key, names] of Object.entries(tools)) {
+      if (!Array.isArray(names) || names.some((name) => typeof name !== "string" || !EXACT_TOOL_NAME.test(name))) {
+        throw invalid(`policy.tools.${key} must be an array of exact native tool names`);
+      }
+    }
+  }
+  const { mode, sandbox } = policy;
+  if (mode !== undefined && mode !== "plan") throw invalid("policy.mode must be plan");
+  if (sandbox !== undefined && typeof sandbox !== "boolean") throw invalid("policy.sandbox must be a boolean");
+  return { tools, ...(mode === undefined ? {} : { mode }), ...(sandbox === undefined ? {} : { sandbox }) };
+}
+
+export function hasToolPolicy(tools) {
+  return Array.isArray(tools) ? tools.length > 0 : tools != null;
+}
+
+export function inheritPolicyControls(input, parent, policyError) {
+  const controls = normalizePolicyControls({
+    tools: input.tools ?? parent?.tools,
+    mode: input.mode === undefined ? parent?.mode : input.mode,
+    sandbox: input.sandbox === undefined ? parent?.sandbox : input.sandbox,
+  });
+  const inherited = parent?.tools;
+  const tools = controls.tools;
+  if (hasToolPolicy(inherited)) {
+    if (Array.isArray(inherited) !== Array.isArray(tools)) {
+      throw policyError("child cannot change inherited tool policy format");
+    }
+    if (Array.isArray(inherited)) {
+      if (!tools.length || tools.some((tool) => !inherited.includes(tool))) {
+        throw policyError("child cannot widen allowed tools");
+      }
+    } else {
+      const allow = tools.allow ?? inherited.allow;
+      if (inherited.allow && allow.some((tool) => !inherited.allow.includes(tool))) {
+        throw policyError("child cannot widen allowed tools");
+      }
+      controls.tools = {
+        ...(allow === undefined ? {} : { allow }),
+        deny: [...new Set([...(inherited.deny ?? []), ...(tools.deny ?? [])])],
+      };
+    }
+  }
+  if (parent?.sandbox === true && controls.sandbox !== true) throw policyError("child cannot disable inherited sandbox");
+  return controls;
+}
+
 function normalizePolicy(inputPolicy) {
   const policy = strictObject(inputPolicy ?? {}, POLICY_FIELDS, "policy");
-  if (policy.tools !== undefined && policy.tools !== null && (!Array.isArray(policy.tools) || policy.tools.some((tool) => typeof tool !== "string" || tool.trim().length === 0))) {
-    throw invalid("policy.tools must be an array of non-empty strings");
-  }
+  const controls = normalizePolicyControls(policy);
   if (policy.maxCostUsd !== undefined && policy.maxCostUsd !== null && (typeof policy.maxCostUsd !== "number" || !Number.isFinite(policy.maxCostUsd) || policy.maxCostUsd < 0)) {
     throw invalid("policy.maxCostUsd must be a non-negative number");
   }
@@ -108,16 +164,9 @@ function normalizePolicy(inputPolicy) {
   if (hasWrite && hasDerived && Boolean(rawWrite) !== derived) {
     throw invalid("contradictory policy: policy.write conflicts with readOnly/allowWrites alias");
   }
-  if (hasDerived && !hasWrite) {
-    return {
-      write: derived,
-      tools: policy.tools ?? [],
-      maxCostUsd: policy.maxCostUsd ?? null,
-    };
-  }
   return {
-    write: Boolean(rawWrite),
-    tools: policy.tools ?? [],
+    write: hasDerived && !hasWrite ? derived : Boolean(rawWrite),
+    ...controls,
     maxCostUsd: policy.maxCostUsd ?? null,
   };
 }
@@ -162,13 +211,19 @@ export function normalizeRequest(input) {
 
   const route = normalizeRoute(input.route);
   const policy = normalizePolicy(input.policy);
+  if (policy.mode !== undefined || policy.sandbox !== undefined) {
+    const field = policy.mode !== undefined ? "mode" : "sandbox";
+    if (input.target !== "cursor" || transport === "session") {
+      throw invalid(`policy.${field} is supported only by Cursor print mode`);
+    }
+  }
   if (input.target === "acp") {
     if (!route.agent) throw invalid("ACP requires route.agent naming a trusted local registration");
     const unsupportedRoute = ROUTE_FIELDS.filter((field) => field !== "agent" && route[field] !== undefined);
     if (unsupportedRoute.length) throw invalid(`ACP route supports only route.agent; unsupported: ${unsupportedRoute.join(", ")}`);
     if (input.workflow != null) throw invalid("ACP does not support structured workflows");
     if (policy.write !== true) throw invalid("ACP is write-only; policy.write must be true");
-    if (policy.tools.length) throw invalid("ACP does not support granular policy.tools");
+    if (hasToolPolicy(policy.tools)) throw invalid("ACP does not support granular policy.tools");
     if (policy.maxCostUsd != null) throw invalid("ACP does not enforce policy.maxCostUsd");
   }
 

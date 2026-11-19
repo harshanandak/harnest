@@ -14,6 +14,8 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 - [ACP preset lead setup](docs/users/integrations.md#acp-presets-as-lead-clients) installs and checks the stdio bridge for nine CLIs. Goose and Mistral Vibe get manual configuration snippets. Each preset has CI fixture coverage only, with no live CLI testing.
 - `bun run setup remove <host>` for the nine automatic ACP presets, Gemini CLI, Amp, and Cursor. It backs up the user config and removes only the Harnest MCP entry. Fresh setup prints this reverse path.
 - Per-phase agent counts, reported token totals, and elapsed time for JavaScript workflows, plus a runnable bounded verification-loop example.
+- Explicit tool allow and deny lists for Claude print and Gemini, and exact deny lists for Pi and local OpenCode V1.
+- Cursor print can request read-only plan mode and enable the native shell sandbox independently of write approval.
 
 ### Changed
 

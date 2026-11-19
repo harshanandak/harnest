@@ -208,11 +208,17 @@ const HandoffRouteSchema = Type.Object({
   serverUrl: Type.Optional(Type.String({ minLength: 1, description: "OpenCode private server URL." })),
 }, { additionalProperties: false, description: "Explicit route; omit for policy selection via metadata.routing mode auto." });
 
+const ExactToolNames = Type.Array(Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_.-]*$" }));
 const HandoffPolicySchema = Type.Object({
   write: Type.Optional(Type.Boolean({ description: "Write-capable request. On guarded hosts, confirm scope and set metadata.harnest.writeApproved=true." })),
   readOnly: Type.Optional(Type.Boolean({ description: "Legacy alias for !write; must not contradict write or allowWrites." })),
   allowWrites: Type.Optional(Type.Boolean({ description: "Legacy alias for write; must not contradict write or readOnly." })),
-  tools: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+  tools: Type.Optional(Type.Union([
+    Type.Array(Type.String({ minLength: 1 })),
+    Type.Object({ allow: Type.Optional(ExactToolNames), deny: Type.Optional(ExactToolNames) }, { additionalProperties: false, minProperties: 1 }),
+  ], { description: "Legacy list or exact native allow and deny names. Claude print and Gemini support both lists. Pi and local OpenCode V1 support deny only." })),
+  mode: Type.Optional(Type.Literal("plan", { description: "Cursor print only. Selects read-only plan mode regardless of write authorization." })),
+  sandbox: Type.Optional(Type.Boolean({ description: "Cursor print only. True enables native isolation. False is rejected." })),
   maxCostUsd: Type.Optional(Type.Number({ minimum: 0 })),
 }, { additionalProperties: false });
 
@@ -740,7 +746,7 @@ export default function harnestExtension(pi) {
     name: "handoff_workflow",
     label: "Hand off workflow",
     description:
-      "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Generic ACP is opt-in through route.agent, write-only, and rejects model/provider pins, granular tools, cost budgets, persistent session transport, and live controls. Use execution.background=true for durable status/result retrieval. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
+      "Run one complete workflow in OpenCode, Pi, Cursor, Claude, Codex, Gemini, Amp, or a trusted locally registered ACP agent and return a parent-visible receipt. Generic ACP is opt-in through route.agent, write-only, and rejects model/provider pins, granular tools, cost budgets, persistent session transport, and live controls. Use explicit tool lists with Claude print or Gemini, deny only with Pi or fresh local OpenCode V1, and plan or sandbox controls with Cursor print. Use execution.background=true for durable status/result retrieval. On guarded hosts, any write-capable policy requires metadata.harnest.writeApproved=true after the lead confirms scope.",
     promptSnippet: "Delegate a whole workflow to a downstream harness via handoff_workflow",
     promptGuidelines: [
       "Use handoff_workflow with execution.background=true when the task runs longer than one turn; then poll handoff_status and handoff_trace, and finish with handoff_result.",

@@ -2,7 +2,7 @@ import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { assertAdapterRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, hasToolPolicy } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -47,7 +47,7 @@ function validatePolicy(policy = {}) {
       reason: "read-only-unenforceable",
     });
   }
-  if (Array.isArray(policy.tools) && policy.tools.length) {
+  if (hasToolPolicy(policy.tools)) {
     throw adapterError(`Amp policy.tools is unsupported; generic tool names cannot be mapped to a stable native Amp tool set. ${AMP_SUPPORTED_POLICY_HELP}`, "policy", {
       reason: "unsupported-tools",
     });

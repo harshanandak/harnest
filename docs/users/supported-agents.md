@@ -16,6 +16,19 @@ The lead client is the application connected to Harnest through MCP. The downstr
 
 DeepSeek is a model choice through Pi or OpenCode, not a separate downstream target.
 
+## Per-run policy controls
+
+| Target | Controls and limits |
+|---|---|
+| Claude Code print | `policy.tools.allow` accepts `Read`, `Glob`, and `Grep`. Harnest restricts the available tools with `--tools` and uses `--allowedTools` for the selected read tools. `policy.tools.deny` passes exact native tool names to `--disallowedTools`. Claude session transport rejects tool lists. |
+| Gemini CLI v0.62.0 | `policy.tools.allow` and `policy.tools.deny` narrow the native admin policy. Read tools are `glob`, `grep_search`, `list_directory`, `read_file`, `read_many_files`, `get_internal_docs`, `google_web_search`, and `web_fetch`. Approved write policy also permits `write_file`, `replace`, and `run_shell_command`. |
+| Pi | `policy.tools.deny` removes names from `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`. Pi must expose `--exclude-tools`, `--no-tools`, `--no-extensions`, and `--no-mcp`. Filtered runs disable extensions and MCP and reject Taskflow. |
+| OpenCode V1.18.18 | `policy.tools.deny` removes `read`, `grep`, `glob`, or `list` from the Harnest default tool set using native agent permissions. Use a fresh local prompt handoff without an explicit agent, server URL, session ID, or Taskflow. OpenCode V2 rejects explicit denies because its server owns tool permissions. |
+| Cursor print | `policy.mode: "plan"` uses `--mode plan`. `policy.sandbox: true` uses `--sandbox enabled` for shell commands. Both omit `--force`. Cursor rejects granular tools, sandbox disablement, and these controls on ACP session transport. |
+| Codex, Amp, registered ACP | Granular tool policy is unsupported. |
+
+Explicit `policy.mode` and `policy.sandbox` are available only on Cursor print. The legacy tool array keeps its existing target-specific behavior.
+
 ## Downstream coverage
 
 “Tested with Harnest” refers to agent-specific downstream adapter tests. Those tests may use fixtures. ACP registration tests use a fake executable and do not establish compatibility with the real CLI.

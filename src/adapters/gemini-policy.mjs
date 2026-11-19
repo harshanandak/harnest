@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { boundedProviderText, mergeProcessEnv, runProcess } from "../process.mjs";
+import { normalizePolicyControls } from "../protocol.mjs";
 
 export const GEMINI_CLI_VERSION = "0.62.0";
 
@@ -19,6 +20,7 @@ const READ_TOOLS = [
 ];
 
 const WRITE_TOOLS = ["write_file", "replace", "run_shell_command"];
+const NATIVE_TOOLS = new Set([...READ_TOOLS, ...WRITE_TOOLS]);
 
 function policyError(message, kind = "policy", details = {}) {
   const error = new Error(message);
@@ -53,8 +55,22 @@ async function assertNoSystemToml(systemPoliciesDir, fsApi) {
   }
 }
 
-function settingsJson(write = false) {
-  const core = [...READ_TOOLS, ...(write ? WRITE_TOOLS : [])];
+export function geminiTools(policy = {}) {
+  const { tools } = normalizePolicyControls(policy);
+  if (Array.isArray(tools) && tools.length) {
+    throw policyError("Gemini policy.tools requires explicit allow or deny with native Gemini tool names", "policy", {
+      reason: "unsupported-tools",
+    });
+  }
+  const { allow, deny } = tools;
+  if ([...(allow ?? []), ...(deny ?? [])].some((name) => !NATIVE_TOOLS.has(name))) {
+    throw policyError("Gemini policy.tools contains a name outside Harnest's verified native tool set");
+  }
+  return [...READ_TOOLS, ...(policy.write === true ? WRITE_TOOLS : [])]
+    .filter((name) => (allow === undefined || allow.includes(name)) && !deny?.includes(name));
+}
+
+function settingsJson(core) {
   return `${JSON.stringify({
     security: {
       disableYoloMode: true,
@@ -75,10 +91,11 @@ function settingsJson(write = false) {
   }, null, 2)}\n`;
 }
 
-function policyToml(write) {
-  const allowed = [...READ_TOOLS, ...(write ? WRITE_TOOLS : [])];
+function policyToml(allowed) {
+  const deny = '[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 998\ndenyMessage = "Tool denied by the Harnest invocation policy."\n';
+  if (!allowed.length) return deny;
   const quoted = allowed.map((tool) => `  ${JSON.stringify(tool)},`).join("\n");
-  return `# Generated per invocation by Harnest.\n\n[[rule]]\ntoolName = [\n${quoted}\n]\ndecision = "allow"\npriority = 999\ninteractive = false\n\n[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 998\ndenyMessage = "Tool denied by the Harnest invocation policy."\n`;
+  return `# Generated per invocation by Harnest.\n\n[[rule]]\ntoolName = [\n${quoted}\n]\ndecision = "allow"\npriority = 999\ninteractive = false\n\n${deny}`;
 }
 
 export async function probeGeminiVersion({ command, launchArgs = [], cwd, env, spawnFn, signal, unsetEnv = [], timeoutMs = 10_000 } = {}) {
@@ -134,6 +151,7 @@ export function createGeminiPolicyPreparer(options = {}) {
   const versionProbe = options.versionProbe || probeGeminiVersion;
   return {
     async prepare({ request, policy, cwd, launch, spawnFn, env, signal, timeoutMs }) {
+      const allowedTools = geminiTools(policy);
       const launchArgs = Array.isArray(launch?.args) ? launch.args : [];
       if (signal?.aborted) throw policyError("Gemini execution aborted before native policy preparation", "abort", { aborted: true });
       await assertNoSystemToml(systemPoliciesDir, fsApi);
@@ -152,9 +170,9 @@ export function createGeminiPolicyPreparer(options = {}) {
           fsApi.mkdir(dirname(systemSettingsPath), { recursive: true, mode: 0o700 }),
         ]);
         await Promise.all([
-          fsApi.writeFile(systemSettingsPath, settingsJson(Boolean(policy?.write)), { encoding: "utf8", mode: 0o600 }),
+          fsApi.writeFile(systemSettingsPath, settingsJson(allowedTools), { encoding: "utf8", mode: 0o600 }),
           fsApi.writeFile(systemDefaultsPath, "{}\n", { encoding: "utf8", mode: 0o600 }),
-          fsApi.writeFile(adminPolicyPath, policyToml(Boolean(policy?.write)), { encoding: "utf8", mode: 0o600 }),
+          fsApi.writeFile(adminPolicyPath, policyToml(allowedTools), { encoding: "utf8", mode: 0o600 }),
         ]);
         const isolatedEnv = mergeProcessEnv({
           ...(launch?.env || {}),

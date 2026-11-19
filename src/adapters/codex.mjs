@@ -6,7 +6,7 @@ import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { CODEX_QUOTA_SOURCE, probeCodexQuota } from "../codex-quota.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, hasToolPolicy } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -41,9 +41,8 @@ function reportProgress(onProgress, event) {
 }
 
 function isPolicySupported(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
   const maxCost = policy.maxCostUsd;
-  if (tools.length > 0) return { supported: false, reason: "policy.tools granular filtering is not supported by codex exec; no per-tool CLI flag exists" };
+  if (hasToolPolicy(policy.tools)) return { supported: false, reason: "policy.tools granular filtering is not supported by codex exec; no per-tool CLI flag exists" };
   if (maxCost != null) return { supported: false, reason: "policy.maxCostUsd budget enforcement is not supported by codex exec" };
   return { supported: true };
 }

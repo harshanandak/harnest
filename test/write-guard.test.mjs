@@ -71,6 +71,18 @@ test("write with approval is allowed", async () => {
   assert.equal(result.code, 0);
 });
 
+test("tool denies and Cursor plan or sandbox leave the write approval gate intact", async () => {
+  for (const [target, controls] of [
+    ["pi", { tools: { deny: ["write"] } }],
+    ["cursor", { mode: "plan", sandbox: true }],
+  ]) {
+    const request = writeRequest({ target, policy: { write: true, ...controls } });
+    assert.equal((await run(hookPayload({ request }))).code, 2);
+    assert.equal((await run(hookPayload({ request: { ...request, metadata: { harnest: { writeApproved: true } } } }))).code, 0);
+    assert.equal((await run(hookPayload({ request: { ...request, policy: { write: false, ...controls } } }))).code, 0);
+  }
+});
+
 test("Gemini and Amp write handoffs use the same explicit approval marker", async () => {
   for (const target of ["gemini", "amp"]) {
     const blocked = await run(hookPayload({ request: writeRequest({ target }) }));

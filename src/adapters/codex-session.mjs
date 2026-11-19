@@ -15,7 +15,7 @@ import { resolve as resolvePath } from "node:path";
 import { harnessLaunch } from "../config.mjs";
 import { assertNoClaudeRoute } from "../model-policy.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, hasToolPolicy } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -107,8 +107,7 @@ function executionSignal(parentSignal, timeoutMs) {
 }
 
 function isPolicySupported(policy = {}) {
-  const tools = Array.isArray(policy.tools) ? policy.tools : [];
-  if (tools.length > 0) {
+  if (hasToolPolicy(policy.tools)) {
     return { supported: false, reason: "policy.tools granular filtering has no codex app-server request equivalent" };
   }
   if (policy.maxCostUsd != null) {

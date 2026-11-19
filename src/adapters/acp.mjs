@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 import { resolveAcpAgent } from "../acp-registry.mjs";
 import { boundedProviderText, classifyProviderFailure, mergeProcessEnv, redactSecrets } from "../process.mjs";
+import { hasToolPolicy } from "../protocol.mjs";
 import { structuredResult } from "../result.mjs";
 import { AcpRpcError, AcpTransport } from "./acp-transport.mjs";
 
@@ -98,7 +99,7 @@ function assertPolicy(request) {
       field: "metadata.harnest.writeApproved",
     });
   }
-  if (Array.isArray(request?.policy?.tools) && request.policy.tools.length > 0) {
+  if (hasToolPolicy(request?.policy?.tools)) {
     throw adapterError("Generic ACP cannot enforce policy.tools; granular tool policy is unsupported", "policy", { field: "policy.tools" });
   }
   if (request?.policy?.maxCostUsd != null) {
