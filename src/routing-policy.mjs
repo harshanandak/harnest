@@ -646,6 +646,8 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
     ...explanationBase(mode, appliedScopes, matchedRules, contextTokens),
     ...(has(directive, "fallbacks") ? { fallbacks: directive.fallbacks } : {}),
     modelVersion: directive.modelVersion ?? "latest",
+    // Recorded so routing.mjs can re-check a trusted resolver override.
+    ...(directive.require?.liveControl === true ? { requireLiveControl: true } : {}),
     ...(stringList(directive.avoid?.models).length ? { versionAvoidModels: stringList(directive.avoid.models) } : {}),
     ...(directive.maxCostUsd != null || request.policy.maxCostUsd != null || directive.require?.minContextTokens != null || directive.require?.computerUse === true
       ? { versionUpgradeRestricted: true } : {}),

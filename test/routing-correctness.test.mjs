@@ -38,6 +38,20 @@ test("explicit fields survive policy and trusted hook, including thinking", asyn
   assert.deepEqual(actual.route, { provider: "chosen", model: "chosen", thinking: "high" });
 });
 
+test("a trusted hook cannot move live-control work onto a shared-service OpenCode node", async (t) => {
+  const dir = await fixture(t);
+  const hook = join(dir, "hook.mjs");
+  await writeFile(hook, 'export default () => ({target:"opencode",route:{model:"fixture/model"}})');
+  const graphRequest = () => ({ ...request(), context: { graph: { graphId: "fixture" } }, metadata: { routing: { mode: "auto" } } });
+  const userPolicy = { require: { liveControl: true } };
+  const shared = createRouteResolver({ config: {}, env: {}, resolverModule: hook, userPolicy });
+  await assert.rejects(shared(graphRequest()), /Shared-service OpenCode graph nodes/);
+  const attached = createRouteResolver({ config: {}, env: {}, resolverModule: hook, userPolicy, openCodeServerUrl: "http://127.0.0.1:43991" });
+  const routed = await attached(graphRequest());
+  assert.equal(routed.target, "opencode");
+  assert.equal(routed.metadata.harnest.routingDecision.requireLiveControl, true);
+});
+
 test("malformed sugar reports its field instead of disappearing", () => {
   for (const policy of [{ models: [] }, { models: null }, { subscriptions: "yes" },
     { subscriptions: { pi: { subsdy: 1 } } }, { models: { typo: "model" } }]) {

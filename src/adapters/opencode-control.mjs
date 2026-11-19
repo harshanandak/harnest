@@ -206,8 +206,16 @@ export class OpenCodeControl {
       });
     }
     if (command.message) {
+      // stop() clears the client. A run that ended during switchModel must not
+      // receive a prompt afterwards.
+      const live = this.client?.session;
+      if (!live) {
+        throw new OpenCodeControlError(model
+          ? "OpenCode switched the model, but the run ended before the message was sent"
+          : "OpenCode V2 client is not ready", "not-ready", model ? { modelSwitchApplied: true, model } : {});
+      }
       try {
-        await session.prompt({
+        await live.prompt({
           sessionID: sessionId,
           id: `msg_${randomUUID().replaceAll("-", "")}`,
           text: command.message,

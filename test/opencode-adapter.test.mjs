@@ -752,6 +752,28 @@ test("OpenCode reports lost prompt acknowledgements and preserves an applied mod
   assert.ok(calls.every(([, input]) => input.sessionID === "ack-session"));
 });
 
+test("OpenCode skips the prompt when the run stops during a model switch", async () => {
+  const calls = [];
+  let finishSwitch;
+  const switching = new Promise((resolve) => { finishSwitch = resolve; });
+  const control = new OpenCodeControl({ fetchFn: healthyFetch, clientFactory: () => ({ session: {
+    async switchModel(input) { calls.push(["switch", input]); await switching; },
+    async prompt(input) { calls.push(["prompt", input]); },
+  } }) });
+  await control.start({ serverUrl: SERVER_URL });
+  control.setSessionId("stop-session");
+  const pending = control.control({ kind: "reroute", route: { provider: "fixture", model: "new-model" }, message: "late" });
+  await new Promise((resolve) => setImmediate(resolve));
+  await control.stop();
+  finishSwitch();
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.details.kind, "not-ready");
+    assert.equal(error.details.modelSwitchApplied, true);
+    return true;
+  });
+  assert.deepEqual(calls.map(([kind]) => kind), ["switch"]);
+});
+
 test("default V2 handoff starts and cleans up a private server", async () => {
   let serverChild;
   const calls = [];
