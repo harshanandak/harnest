@@ -697,6 +697,38 @@ test("V2 reroute switches model and can omit a message", async () => {
   await run;
 });
 
+test("a control sent during preflight waits for the control server", async () => {
+  const clientCalls = [];
+  let releaseHelp;
+  const helpGate = new Promise((resolve) => { releaseHelp = resolve; });
+  const adapter = new OpenCodeAdapter({
+    ...managedOptions(),
+    clientFactory: () => ({ session: {
+      async prompt(input) { clientCalls.push(["prompt", input]); },
+      async switchModel(input) { clientCalls.push(["switchModel", input]); },
+    } }),
+    command: "fake-opencode-v2",
+    spawnFn(_command, args) {
+      if (args.at(-1) === "--help") {
+        const child = new FakeChild(["  --session, -s string"], { hang: true });
+        helpGate.then(() => child.emit("close", 0, null));
+        return child;
+      }
+      return new DelayedChild(streamLines("v2-preflight-session"), 100);
+    },
+  });
+  const run = adapter.run(request({ execution: { sessionId: "v2-preflight-session" } }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const ack = adapter.control({ commandId: "v2-preflight-1", kind: "message", delivery: "steer", message: "sent during preflight", route: null });
+  releaseHelp();
+  const delivered = await ack;
+  assert.equal(delivered.sessionId, "v2-preflight-session");
+  assert.equal(clientCalls[0][0], "prompt");
+  assert.equal(clientCalls[0][1].text, "sent during preflight");
+  assert.equal(clientCalls[0][1].delivery, "steer");
+  await run;
+});
+
 test("OpenCode reports lost prompt acknowledgements and preserves an applied model switch", async () => {
   const calls = [];
   const control = new OpenCodeControl({ fetchFn: healthyFetch, clientFactory: () => ({ session: {

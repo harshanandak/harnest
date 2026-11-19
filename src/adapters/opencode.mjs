@@ -573,6 +573,14 @@ export class OpenCodeAdapter {
     }) : null;
     this.hostAttached = hostAttached;
     this.controlRuntime = controlRuntime;
+    // Controls that arrive during preflight (Taskflow load, version and flag
+    // probes) wait for the control server instead of failing as not ready.
+    let controlGate = null;
+    if (controlRuntime) {
+      controlGate = {};
+      this.controlStart = new Promise((resolve, reject) => Object.assign(controlGate, { resolve, reject }));
+      this.controlStart.catch(() => {});
+    }
     let scratch;
     try {
       const taskflow = flowSpec !== null ? await this.#loadTaskflowCore() : null;
@@ -592,11 +600,14 @@ export class OpenCodeAdapter {
         ...(fork ? [["sessionAction", "--fork"]] : []),
         ...(attachments?.length ? [["attachments", "--file"]] : []),
       ]);
-      this.controlStart = controlRuntime?.start({
-        request, launch, env, signal: execution.signal,
-        serverUrl: this.options.serverUrl || request.route?.serverUrl,
-      });
-      if (this.controlStart) await this.controlStart;
+      if (controlGate) {
+        const started = Promise.resolve(controlRuntime.start({
+          request, launch, env, signal: execution.signal,
+          serverUrl: this.options.serverUrl || request.route?.serverUrl,
+        }));
+        started.then(controlGate.resolve, controlGate.reject);
+        await started;
+      }
       if (taskflow) {
         return await this.#runWorkflow(request, flowSpec, execution, state, onProgress, taskflow.makeToolHandlers, preparedFlow);
       }
@@ -614,6 +625,11 @@ export class OpenCodeAdapter {
       if (error instanceof NativeLaunchError || error?.name === "OpenCodeAdapterError" || error?.details?.kind === "validation") throw error;
       throw processFailure(error, { ...execution.state, ...state });
     } finally {
+      // No-op once the server started; otherwise release waiting controls.
+      controlGate?.reject(Object.assign(new Error("OpenCode run ended before the control server started"), {
+        name: "OpenCodeControlError",
+        details: { kind: "not-ready" },
+      }));
       await controlRuntime?.stop().catch(() => {});
       this.controlRuntime = null;
       this.controlStart = null;
@@ -635,8 +651,9 @@ export class OpenCodeAdapter {
         details: { kind: hostAttached ? "unsupported-control" : "not-ready" },
       });
     }
+    const runtime = this.controlRuntime;
     await this.controlStart;
-    return this.controlRuntime.control(command, signal);
+    return runtime.control(command, signal);
   }
 
   async #spawn(request, prompt, execution, state, onProgress, options = {}) {
