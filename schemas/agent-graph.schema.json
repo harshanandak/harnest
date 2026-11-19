@@ -169,6 +169,19 @@
               "serverUrl": {
                 "type": "string",
                 "minLength": 1
+              },
+              "serviceTier": {
+                "enum": ["default", "fast", "priority", "flex"]
+              },
+              "profile": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+              },
+              "options": {
+                "type": "object",
+                "maxProperties": 16,
+                "propertyNames": { "pattern": "\\S", "maxLength": 128, "not": { "enum": ["__proto__", "prototype", "constructor"] } },
+                "additionalProperties": { "anyOf": [{ "type": "string", "maxLength": 256 }, { "type": "boolean" }] }
               }
             },
             "additionalProperties": false

@@ -4,7 +4,12 @@ import { isAbsolute, resolve } from "node:path";
 export const PROTOCOL_VERSION = "1.0";
 export const TARGETS = new Set(["opencode", "pi", "cursor", "claude", "codex", "gemini", "amp", "acp"]);
 export const SESSION_TARGETS = new Set(["claude", "codex", "cursor"]);
-export const ROUTE_FIELDS = Object.freeze(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl"]);
+export const ROUTE_FIELDS = Object.freeze(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serverUrl", "serviceTier", "profile", "options"]);
+export const ACP_ROUTE_FIELDS = Object.freeze(["agent", "model", "variant", "options"]);
+export const CODEX_SERVICE_TIERS = Object.freeze(["default", "fast", "priority", "flex"]);
+export const MAX_ROUTE_OPTIONS = 16;
+export const MAX_ROUTE_OPTION_ID = 128;
+export const MAX_ROUTE_OPTION_VALUE = 256;
 export const HARNESS_VERSIONS = Object.freeze(["v1", "v2"]);
 export const POLICY_FIELDS = Object.freeze(["write", "readOnly", "allowWrites", "tools", "maxCostUsd"]);
 function invalid(message) {
@@ -55,20 +60,64 @@ function strictObject(value, allowed, label) {
   return value;
 }
 
-function normalizeRoute(inputRoute) {
-  const route = strictObject(inputRoute ?? {}, ROUTE_FIELDS, "route");
-  for (const key of ["provider", "model", "agent", "variant", "serverUrl"]) {
+export function normalizeRoute(route, label = "route") {
+  strictObject(route, ROUTE_FIELDS, label);
+  for (const key of ["provider", "model", "agent", "variant", "serverUrl", "serviceTier", "profile"]) {
     if (route[key] !== undefined && (typeof route[key] !== "string" || route[key].trim().length === 0)) {
-      throw invalid(`route.${key} must be a non-empty string`);
+      throw invalid(`${label}.${key} must be a non-empty string`);
     }
   }
   if (route.thinking !== undefined && (typeof route.thinking !== "boolean" && (typeof route.thinking !== "string" || route.thinking.trim().length === 0))) {
-    throw invalid("route.thinking must be a non-empty string or boolean");
+    throw invalid(`${label}.thinking must be a non-empty string or boolean`);
   }
   if (route.harnessVersion !== undefined && !HARNESS_VERSIONS.includes(route.harnessVersion)) {
-    throw invalid("route.harnessVersion must be v1 or v2");
+    throw invalid(`${label}.harnessVersion must be v1 or v2`);
   }
-  return route;
+  if (route.options === undefined) return route;
+  const options = route.options;
+  if (!options || typeof options !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(options))) {
+    throw invalid(`${label}.options must be an object`);
+  }
+  const entries = Object.entries(options);
+  if (entries.length > MAX_ROUTE_OPTIONS) throw invalid(`${label}.options allows at most ${MAX_ROUTE_OPTIONS} entries`);
+  for (const [id, value] of entries) {
+    if (!id.trim() || id.length > MAX_ROUTE_OPTION_ID || ["__proto__", "prototype", "constructor"].includes(id)) {
+      throw invalid(`${label}.options contains an invalid option ID`);
+    }
+    if (typeof value !== "boolean" && (typeof value !== "string" || value.length > MAX_ROUTE_OPTION_VALUE)) {
+      throw invalid(`${label}.options values must be booleans or strings of at most ${MAX_ROUTE_OPTION_VALUE} characters`);
+    }
+  }
+  return { ...route, options: Object.fromEntries(entries) };
+}
+
+export function routeControlError(target, route = {}, transport) {
+  if (route.profile !== undefined) {
+    if (target !== "codex" || transport === "session") return "route.profile requires Codex one-shot execution";
+    if (typeof route.profile !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(route.profile)) {
+      return "route.profile must be a Codex config profile name of up to 128 characters";
+    }
+  }
+  if (route.serviceTier !== undefined) {
+    if (!["codex", "claude"].includes(target) || transport === "session") {
+      return "route.serviceTier requires Codex or Claude one-shot execution";
+    }
+    const tiers = target === "codex" ? CODEX_SERVICE_TIERS : ["fast"];
+    if (!tiers.includes(route.serviceTier)) return `route.serviceTier for ${target} must be ${tiers.join(", ")}`;
+  }
+  if (route.options !== undefined && target !== "acp") return "route.options requires a registered ACP agent";
+  if (route.agent !== undefined && !["opencode", "claude", "acp"].includes(target)) {
+    return "route.agent requires OpenCode, Claude one-shot execution, or a registered ACP agent";
+  }
+  if (route.agent !== undefined && target === "claude" && transport === "session") {
+    return "route.agent requires Claude one-shot execution";
+  }
+  return null;
+}
+
+export function hasNativeRouteControls(target, route) {
+  return route?.profile !== undefined || route?.serviceTier !== undefined
+    || route?.options !== undefined || (["claude", "acp"].includes(target) && route?.agent !== undefined);
 }
 
 function normalizePolicy(inputPolicy) {
@@ -160,12 +209,14 @@ export function normalizeRequest(input) {
     throw invalid("session transport is supported only for claude, codex, or cursor");
   }
 
-  const route = normalizeRoute(input.route);
+  const route = normalizeRoute(input.route ?? {});
+  const controlError = routeControlError(input.target, route, transport);
+  if (controlError) throw invalid(controlError);
   const policy = normalizePolicy(input.policy);
   if (input.target === "acp") {
     if (!route.agent) throw invalid("ACP requires route.agent naming a trusted local registration");
-    const unsupportedRoute = ROUTE_FIELDS.filter((field) => field !== "agent" && route[field] !== undefined);
-    if (unsupportedRoute.length) throw invalid(`ACP route supports only route.agent; unsupported: ${unsupportedRoute.join(", ")}`);
+    const unsupportedRoute = ROUTE_FIELDS.filter((field) => !ACP_ROUTE_FIELDS.includes(field) && route[field] !== undefined);
+    if (unsupportedRoute.length) throw invalid(`ACP route does not support: ${unsupportedRoute.join(", ")}`);
     if (input.workflow != null) throw invalid("ACP does not support structured workflows");
     if (policy.write !== true) throw invalid("ACP is write-only; policy.write must be true");
     if (policy.tools.length) throw invalid("ACP does not support granular policy.tools");

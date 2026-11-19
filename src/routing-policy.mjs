@@ -1,4 +1,5 @@
 import { adapterPolicyRejectionReasons, adapterRouteRejectionReasons, assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
+import { hasNativeRouteControls, normalizeRoute } from "./protocol.mjs";
 
 const AXES = ["quality", "speed", "efficiency", "reliability"];
 const DEFAULT_WEIGHTS = Object.freeze({ quality: 4, speed: 3, efficiency: 3, reliability: 4 });
@@ -54,7 +55,7 @@ export function defaultThinking(tier, difficulty) {
   return options.sort((a, b) => (THINKING_RANK[b] ?? 3) - (THINKING_RANK[a] ?? 3))[0];
 }
 const CANDIDATE_FIELDS = new Set(["id", "target", "route", "scores", "model", "harness", "subsidy", "capabilities", "health", "tags", "available", "costUsd", "latencyMs", "priority"]);
-const ROUTE_FIELDS = new Set(["provider", "model", "agent", "variant", "thinking", "harnessVersion"]);
+const ROUTE_FIELDS = new Set(["provider", "model", "agent", "variant", "thinking", "harnessVersion", "serviceTier", "profile", "options"]);
 const REQUIRE_FIELDS = new Set(["liveControl", "taskflow", "provider", "minContextTokens", "computerUse"]);
 const PREFERENCE_FIELDS = new Set(["ids", "targets", "providers", "models", "tags"]);
 const CAPABILITY_FIELDS = new Set(["readOnly", "write", "taskflow", "liveControl", "maxContextTokens", "computerUse", "thinking"]);
@@ -148,8 +149,10 @@ function validateRoute(route, label) {
   requireObject(route, `${label}.route`);
   rejectUnknown(route, ROUTE_FIELDS, `${label}.route`);
   for (const key of ROUTE_FIELDS) {
+    if (key === "options") continue;
     if (route[key] != null) requireString(route[key], `${label}.route.${key}`);
   }
+  if (route.options !== undefined) normalizeRoute({ options: route.options }, `${label}.route`);
 }
 
 function candidateId(raw, index) {
@@ -647,6 +650,12 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
       ? { versionUpgradeRestricted: true } : {}),
   };
   const pinTarget = hasExplicitRoute(request) ? request.target : (preferredTarget || request.target);
+  if (hasNativeRouteControls(request.target, request.route) && request.target !== "auto") {
+    const route = withThinking(mergeObject(directive.route, request.route), request.target);
+    assertAdapterRoute(request.target, route);
+    assertAdapterPolicy(request.target, request.policy);
+    return { target: request.target, route, explanation: { ...base, ...thinkingFields(route), mode: "pin", selected: "explicit-route", rejected: [], alternatives: [] } };
+  }
   if (mode === "pin" || (hasExplicitRoute(request) && mode !== "auto" && mode !== "prefer")) {
     const route = withThinking(mergeObject(directive.route, request.route), pinTarget);
     assertAdapterRoute(pinTarget, route);
@@ -700,7 +709,7 @@ export function resolvePolicyRoute(request, policyScopes = [], options = {}) {
     const incompatible = rejected.filter((entry) => !entry.reasons.includes("target")
       && entry.reasons.some((reason) => [
         "claude-model", "thinking-control", "gemini-provider", "gemini-model", "gemini-route-control",
-        "amp-route-control", "amp-variant", "acp-route-control", "granular-tools", "cost-budget", "read-only",
+        "amp-route-control", "amp-variant", "acp-route-control", "native-route-control", "granular-tools", "cost-budget", "read-only",
       ].includes(reason)));
     if (incompatible.length) {
       throw Object.assign(new Error(`no adapter-compatible routing candidate: ${[...new Set(incompatible.flatMap((entry) => entry.reasons))].join(", ")}`), {

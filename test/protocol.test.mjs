@@ -74,6 +74,36 @@ test("normalization rejects unsupported route and policy keys with the accepted 
   );
 });
 
+test("native route fields reject unsupported targets, transports and values", () => {
+  const base = { requestId: "native-route-controls", task: "test", cwd: process.cwd() };
+  for (const [target, route, execution, expected] of [
+    ["pi", { serviceTier: "fast" }, {}, /route\.serviceTier requires/],
+    ["claude", { serviceTier: "flex" }, {}, /route\.serviceTier for claude must be fast/],
+    ["codex", { serviceTier: "unknown" }, {}, /route\.serviceTier for codex/],
+    ["codex", { profile: "../review" }, {}, /route\.profile must be a Codex config profile name/],
+    ["codex", { profile: "review" }, { transport: "session" }, /route\.profile requires Codex one-shot/],
+    ["codex", { serviceTier: "fast" }, { transport: "session" }, /route\.serviceTier requires/],
+    ["claude", { agent: "reviewer" }, { transport: "session" }, /route\.agent requires Claude one-shot/],
+    ["claude", { profile: "review" }, {}, /route\.profile requires Codex one-shot/],
+    ["opencode", { options: {} }, {}, /route\.options requires a registered ACP agent/],
+  ]) {
+    assert.throws(() => normalizeRequest({ ...base, target, route, execution }), expected);
+  }
+});
+
+test("ACP route options validate their shape, keys, and size", () => {
+  const base = { requestId: "acp-options-bounds", target: "acp", task: "test", cwd: process.cwd(), policy: { write: true } };
+  const normalize = (options) => normalizeRequest({ ...base, route: { agent: "fixture", options } }).route.options;
+  assert.deepEqual(normalize({ speed: "slow", review: false }), { speed: "slow", review: false });
+  for (const options of [
+    null, [], { flag: 1 }, { flag: "x".repeat(257) }, { " ": true },
+    { ["x".repeat(129)]: true }, JSON.parse('{"__proto__":true}'),
+    Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`option-${index}`, true])),
+  ]) {
+    assert.throws(() => normalize(options), /route\.options/);
+  }
+});
+
 test("normalization rejects malformed known route and policy values before dispatch", () => {
   const base = { requestId: "strict-request-values", target: "pi", task: "test", cwd: process.cwd() };
   assert.throws(() => normalizeRequest({ ...base, route: { model: 123 } }), /route\.model must be a non-empty string/);

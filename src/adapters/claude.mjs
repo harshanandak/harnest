@@ -1,7 +1,7 @@
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, spawnNativeCommand } from "../launch-command.mjs";
 import { assertPromptOnlyWorkflow } from "../one-shot-policy.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, routeControlError } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -13,6 +13,7 @@ import {
 } from "../process.mjs";
 import { structuredResult } from "../result.mjs";
 import { summarizeUsage } from "../usage.mjs";
+import { requireRouteVersion } from "./route-version.mjs";
 
 export const CLAUDE_SUPPORTED_POLICY_HELP = "Claude print mode maps read-only policy to --permission-mode plan and write policy to --permission-mode acceptEdits, both with --permission-prompts none. policy.maxCostUsd maps to --max-budget-usd (a client-side estimate, subagent spend included). Generic policy.tools lists cannot be honestly mapped to Claude tool names, so they are rejected rather than silently weakened.";
 
@@ -104,6 +105,10 @@ function buildArgs(request, launchArgs) {
   args.push("--permission-mode", policy.write ? "acceptEdits" : "plan");
   const model = resolvedModel(request.route || {});
   if (model) args.push("--model", model);
+  const { agent, serviceTier } = request.route || {};
+  if (agent) args.push("--agent", agent);
+  // Claude Code documents --settings fastMode as the print-mode opt-in.
+  if (serviceTier === "fast") args.push("--settings", '{"fastMode":true}');
   const effort = resolvedEffort(request.route || {});
   if (effort) args.push("--effort", effort);
   if (policy.maxCostUsd != null) args.push("--max-budget-usd", String(policy.maxCostUsd));
@@ -284,6 +289,9 @@ export class ClaudeAdapter {
   async run(request, { signal, onProgress } = {}) {
     assertPromptOnlyWorkflow("claude", request?.workflow);
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
+    const route = request.route || {};
+    const controlError = routeControlError("claude", route, request.execution?.transport);
+    if (controlError) throw adapterError(controlError, "policy");
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Claude policy not supported: ${policyCheck.reason} — ${CLAUDE_SUPPORTED_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
@@ -295,12 +303,15 @@ export class ClaudeAdapter {
     let sessionId = request.execution?.sessionId || null;
     let usage = null;
     let deltaCount = 0;
+    let fastFallback = false;
     const observe = (event) => {
       if (!event || typeof event !== "object") return;
       const priorSession = sessionId;
       if (typeof event.session_id === "string" && event.session_id) sessionId = event.session_id;
       const nextUsage = observedUsage(event);
       if (nextUsage) usage = nextUsage;
+      if (route.serviceTier === "fast" && event.type === "system" && event.subtype === "notification"
+          && /fast mode (?:disabled|paused)|standard speed/i.test(event.message ?? "")) fastFallback = true;
       if (event.type === "result") {
         terminal = event;
         const failure = terminalFailure(event);
@@ -356,11 +367,18 @@ export class ClaudeAdapter {
       // may write, never whether Claude Code can authenticate. Credential and
       // profile values are inherited and never logged.
       const env = mergeProcessEnv({ ...(this.launch.env || {}), ...this.env });
-      const result = await runProcess(this.launch.command, args, {
+      const processOptions = {
         cwd: request.cwd,
         env,
         spawnFn: this.spawnFn || spawnNativeCommand,
         signal: execution.signal,
+      };
+      // 2.1.219 added the fast-mode state needed to detect a standard-speed fallback.
+      if (route.serviceTier === "fast") {
+        await requireRouteVersion(this.launch.command, launchArgs, processOptions, "", [2, 1, 219], "route.serviceTier");
+      }
+      const result = await runProcess(this.launch.command, args, {
+        ...processOptions,
         timeoutMs: request.execution?.timeoutMs,
         onStdoutLine: (line) => observe(parseJsonLine(line)),
       });
@@ -374,6 +392,15 @@ export class ClaudeAdapter {
           stdout: stdoutText.slice(0, 4000),
         });
       }
+      if (route.serviceTier === "fast" && (fastFallback || terminal.fast_mode_state !== "on" || terminal.fast_mode_disabled_reason)) {
+        throw adapterError("Claude did not confirm route.serviceTier fast", "policy", {
+          field: "route.serviceTier",
+          reason: boundedProviderText(terminal.fast_mode_disabled_reason || terminal.fast_mode_state || "unreported", 100),
+        });
+      }
+      if (route.agent && /agent[^\r\n]*(?:not found|no longer exists|does not exist)/i.test(result.stderr || "")) {
+        throw adapterError("Claude could not resolve route.agent", "policy", { field: "route.agent" });
+      }
       const finalText = typeof terminal.result === "string" ? terminal.result.trim() : "";
       if (!finalText) {
         throw adapterError(`Claude completed with an empty result (subtype=${terminal.subtype || "unknown"})`, "downstream", {
@@ -385,7 +412,6 @@ export class ClaudeAdapter {
       if (onProgress) {
         await reportProgress(onProgress, { type: "claude_stdout", text: finalText.slice(0, 2000) });
       }
-      const route = request.route || {};
       return {
         sessionId,
         workflowRunId: `claude:${request.requestId}`,
@@ -395,6 +421,8 @@ export class ClaudeAdapter {
           model: typeof route.model === "string" && route.model ? route.model : "default",
           variant: null,
           thinking: resolvedEffort(route),
+          ...(route.agent ? { agent: route.agent } : {}),
+          ...(route.serviceTier ? { serviceTier: route.serviceTier } : {}),
           requested: route,
         },
         result: structuredResult(finalText, {

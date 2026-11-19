@@ -63,6 +63,19 @@ Use one normalized policy field and include the guarded-host approval marker aft
 
 Do not combine contradictory `write`, `readOnly`, and `allowWrites` values. Harnest validates policy before launch. A write-capable retry also needs renewed lead approval.
 
+## Native route controls
+
+Set these fields on `request.route` for the named target.
+
+| Target | Field | Native selection |
+| --- | --- | --- |
+| Codex | `serviceTier` | `default`, `fast`, `priority`, or `flex` via `-c service_tier=...`. `fast` and `priority` both request priority processing. The model and account must support the tier. |
+| Codex | `profile` | `--profile <name>` loads the named `<name>.config.toml` in the native Codex home. |
+| Claude | `serviceTier` | `fast` via `--settings '{"fastMode":true}'`. Harnest requires a native result that confirms fast mode. |
+| Claude | `agent` | `--agent <name>` selects the named Claude Code agent. Use a plugin-qualified name where needed. |
+
+These Codex and Claude settings require one-shot execution. In a JavaScript workflow, set `execution.transport` to `"oneshot"` on the agent call. Codex route controls require CLI 0.170.0 or later. Claude fast mode requires Claude Code 2.1.219 or later so Harnest can check its reported state.
+
 ## Generic ACP handoff
 
 The generic route is selected by both `target: "acp"` and the trusted registration ID in `route.agent`:
@@ -85,6 +98,8 @@ The generic route is selected by both `target: "acp"` and the trusted registrati
 ```
 
 The registration supplies the executable and arguments. Requests cannot supply a command, environment secrets, or registry install command. Read [the ACP trust boundary](../acp-agents.md) before using this route.
+
+Add `route.model` or `route.variant` to select a model or mode ID advertised during native session setup. Use `route.options` for up to 16 advertised configuration IDs, each up to 128 characters, mapped to a boolean or an advertised string of up to 256 characters. Use each model or mode control once. Harnest applies the selections before prompting and rejects missing, unadvertised, or unconfirmed choices.
 
 ## Multi-agent graph
 

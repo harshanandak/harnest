@@ -1,6 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
-import { digestContext, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRequest, POLICY_FIELDS, ROUTE_FIELDS, stableJson, TARGETS } from "./protocol.mjs";
+import { digestContext, MAX_CONTEXT_BYTES, MAX_TIMEOUT_MS, normalizeRequest, normalizeRoute, POLICY_FIELDS, stableJson, TARGETS } from "./protocol.mjs";
 import { assertAdapterPolicy, assertAdapterRoute } from "./model-policy.mjs";
 
 export const GRAPH_TERMINAL = new Set(["completed", "partial", "cancelled"]);
@@ -22,7 +22,7 @@ export function assertGraphLeaf(request) {
   // path, and OpenCode has no prompt-only budget enforcement either.
   if (target !== "claude" && policy.maxCostUsd != null) throw graphError("policy", `${target} does not enforce maxCostUsd for prompt-only graph nodes`);
   if (target === "opencode" && !route.model) throw graphError("validation", "OpenCode graph node requires explicit route.model");
-  if (route.model && !/^[a-zA-Z0-9._/[\]=,+-]+$/.test(route.model)) throw graphError("validation", `invalid ${target} route.model`);
+  if (target !== "acp" && route.model && !/^[a-zA-Z0-9._/[\]=,+-]+$/.test(route.model)) throw graphError("validation", `invalid ${target} route.model`);
   if (route.provider && !/^[a-zA-Z0-9._/-]+$/.test(route.provider)) throw graphError("validation", `invalid ${target} route.provider`);
   if (route.harnessVersion && !["v1", "v2"].includes(route.harnessVersion)) throw graphError("validation", "invalid harnessVersion");
 }
@@ -40,19 +40,6 @@ function only(value, keys, label) {
 function text(value, label) {
   if (typeof value !== "string" || !value.trim()) throw graphError("validation", `${label} is required`);
   return value.trim();
-}
-
-function route(input, label) {
-  only(input, ROUTE_FIELDS, label);
-  for (const [key, value] of Object.entries(input)) {
-    if (key === "thinking") {
-      if (typeof value === "boolean") continue;
-      if (typeof value === "string" && value.trim()) continue;
-      throw graphError("validation", `invalid ${label}.thinking`);
-    }
-    if (typeof value !== "string" || !value.trim()) throw graphError("validation", `invalid ${label}.${key}`);
-  }
-  return input;
 }
 
 function policy(input = {}, parent) {
@@ -130,7 +117,7 @@ export async function normalizeGraph(input) {
     only(node.execution ?? {}, ["timeoutMs"], "node.execution");
     const nodeTimeoutMs = node.execution?.timeoutMs;
     if (nodeTimeoutMs !== undefined && (!Number.isInteger(nodeTimeoutMs) || nodeTimeoutMs < 1 || nodeTimeoutMs > MAX_TIMEOUT_MS)) throw graphError("validation", `node ${id} execution.timeoutMs must be an integer between 1 and ${MAX_TIMEOUT_MS}`);
-    route(node.route ?? {}, "node.route");
+    normalizeRoute(node.route ?? {}, "node.route");
     const request = normalizeRequest({
       requestId: childIdFor(graphIdFor(requestId), id, 1), target: node.target === "auto" ? "pi" : node.target, task: node.task,
       cwd: node.cwd === undefined ? cwd : await directory(node.cwd),

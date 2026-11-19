@@ -32,7 +32,16 @@
         "variant": { "type": "string" },
         "thinking": { "type": ["string", "boolean"] },
         "harnessVersion": { "type": "string", "enum": ["v1", "v2"], "description": "OpenCode version selector. Other targets may reject this field according to their adapter contract." },
-        "serverUrl": { "type": "string", "minLength": 1, "description": "OpenCode private server URL." }
+        "serverUrl": { "type": "string", "minLength": 1, "description": "OpenCode private server URL." },
+        "serviceTier": { "type": "string", "enum": ["default", "fast", "priority", "flex"], "description": "Native one-shot service tier. Claude accepts only fast." },
+        "profile": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$", "description": "Codex one-shot native config profile name." },
+        "options": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": { "pattern": "\\S", "maxLength": 128, "not": { "enum": ["__proto__", "prototype", "constructor"] } },
+          "additionalProperties": { "anyOf": [{ "type": "string", "maxLength": 256 }, { "type": "boolean" }] },
+          "description": "ACP session option IDs mapped to advertised values."
+        }
       }
     },
     "execution": {

@@ -21,6 +21,8 @@ The first command prints the preset command and arguments, then exits with a `--
 
 The ID you add is the `route.agent` value for `target: "acp"`. Each handoff still requires both `policy.write: true` and `metadata.harnest.writeApproved: true`.
 
+An ACP session can advertise model and mode IDs and typed config options. Use `route.model`, `route.variant`, and `route.options` to select from those choices. Harnest validates the session's advertisements and requires the agent to acknowledge the requested changes before prompting.
+
 ## Register manually
 
 The metadata helper reads the official registry for discovery only:

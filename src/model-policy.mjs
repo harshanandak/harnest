@@ -1,3 +1,5 @@
+import { ACP_ROUTE_FIELDS, routeControlError } from "./protocol.mjs";
+
 export function isClaudeRoute(route) {
   const value = route && typeof route === "object" ? route : {};
   const provider = typeof value.provider === "string" ? value.provider.toLowerCase() : "";
@@ -9,7 +11,7 @@ export function isClaudeRoute(route) {
 }
 
 export function assertNoClaudeRoute(target, route) {
-  if (target === "claude" || !isClaudeRoute(route)) return;
+  if (target === "claude" || target === "acp" || !isClaudeRoute(route)) return;
   const name = ({ pi: "Pi", opencode: "OpenCode", codex: "Codex", cursor: "Cursor", gemini: "Gemini", amp: "Amp", acp: "ACP" })[target] ?? String(target || "Adapter");
   throw Object.assign(new Error(`${name} cannot run Claude models; request target "claude" (Claude Code CLI) instead`), {
     name: `${name}AdapterError`,
@@ -19,7 +21,7 @@ export function assertNoClaudeRoute(target, route) {
 
 export function adapterRouteRejectionReasons(target, route) {
   const reasons = [];
-  if (target !== "claude" && isClaudeRoute(route)) reasons.push("claude-model");
+  if (!["claude", "acp"].includes(target) && isClaudeRoute(route)) reasons.push("claude-model");
   if (target === "gemini") {
     const provider = typeof route?.provider === "string" ? route.provider.toLowerCase() : null;
     if (provider && !["google", "gemini", "google-gemini", "google/gemini"].includes(provider)) reasons.push("gemini-provider");
@@ -38,13 +40,15 @@ export function adapterRouteRejectionReasons(target, route) {
     if (route?.variant != null && !["low", "medium", "high", "ultra"].includes(route.variant)) reasons.push("amp-variant");
   }
   if (target === "acp") {
-    const unsupported = ["provider", "model", "variant", "thinking", "harnessVersion", "serverUrl"]
-      .filter((field) => route?.[field] != null);
+    const unsupported = Object.keys(route ?? {}).filter((field) => !ACP_ROUTE_FIELDS.includes(field) && route[field] != null);
     if (unsupported.length || typeof route?.agent !== "string" || !route.agent.trim()) reasons.push("acp-route-control");
   }
   const thinking = route?.thinking;
   if (["cursor", "gemini"].includes(target) && thinking != null && (typeof thinking !== "string" || thinking.trim())) {
     reasons.push("thinking-control");
+  }
+  if (!reasons.includes(`${target}-route-control`) && routeControlError(target, route)) {
+    reasons.push("native-route-control");
   }
   return reasons;
 }
@@ -83,9 +87,9 @@ export function assertAdapterRoute(target, route) {
     });
   }
   if (reasons.includes("acp-route-control")) {
-    throw Object.assign(new Error("ACP route supports only route.agent naming a trusted local registration"), {
+    throw Object.assign(new Error("ACP requires route.agent and supports only advertised model, variant, and options controls"), {
       name: "AcpAdapterError",
-      details: { kind: "policy", hint: "set route.agent and remove provider, model, variant, thinking, harnessVersion, and serverUrl" },
+      details: { kind: "policy", hint: "select a trusted registration and omit unsupported route controls" },
     });
   }
   if (reasons.includes("thinking-control")) {
@@ -94,6 +98,9 @@ export function assertAdapterRoute(target, route) {
       name: `${name}AdapterError`,
       details: { kind: "policy", hint: target === "cursor" ? "set route.model to a thinking-capable model ID instead of route.thinking" : "omit route.thinking" },
     });
+  }
+  if (reasons.includes("native-route-control")) {
+    throw Object.assign(new Error(routeControlError(target, route)), { details: { kind: "policy" } });
   }
 }
 

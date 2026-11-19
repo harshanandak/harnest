@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -117,6 +117,58 @@ test("Codex adapter maps read-only to exec with read-only sandbox and -o file", 
   assert.equal(output.result.finalText, "final answer from Codex");
   assert.equal(output.usage, null);
   assert.equal(output.result.quota.status, "unknown");
+});
+
+test("Codex sends the profile and service tier as native exec options before resume", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "harnest-codex-profile-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, "review.config.toml"), "# fixture profile\n");
+  const calls = [];
+  const launchExec = fakeSpawn(calls);
+  const adapter = codexAdapter({
+    command: "fake-codex",
+    env: { CODEX_HOME: directory },
+    spawnFn(command, args, options) {
+      if (args[0] === "exec") return launchExec(command, args, options);
+      calls.push({ args });
+      const stdout = args[0] === "--version" ? "codex-cli 0.170.0\n" : "fast_mode stable true\n";
+      return new FakeChild({ stdout });
+    },
+  });
+  const output = await adapter.run(request({
+    route: { profile: "review", serviceTier: "fast" }, execution: { sessionId: "native-thread" },
+  }));
+  assert.deepEqual(calls.map(({ args }) => args), [
+    ["--version"],
+    ["features", "--enable", "fast_mode", "list"],
+    ["exec", "-C", process.cwd(), "-s", "read-only", "--profile", "review",
+      "--strict-config", "-c", 'service_tier="fast"', "--enable", "fast_mode", "--json", "-o",
+      calls[2].args[calls[2].args.indexOf("-o") + 1], "resume", "native-thread", "-"],
+  ]);
+  assert.equal(output.route.profile, "review");
+  assert.equal(output.route.serviceTier, "fast");
+});
+
+test("Codex route controls reject an older CLI, missing profile, or disabled fast mode before exec", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "harnest-codex-no-profile-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cases = [
+    [{ serviceTier: "flex" }, "codex-cli 0.20.0\n", /route\.serviceTier requires codex-cli 0\.170\.0/],
+    [{ profile: "missing" }, "codex-cli 0.170.0\n", /route\.profile.*no native config file/],
+    [{ serviceTier: "priority" }, "codex-cli 0.170.0\n", /route\.serviceTier.*fast_mode/],
+  ];
+  for (const [route, version, expected] of cases) {
+    const calls = [];
+    const adapter = codexAdapter({
+      command: "fake-codex", env: { CODEX_HOME: directory },
+      spawnFn(_command, args) {
+        calls.push(args);
+        return new FakeChild({ stdout: args[0] === "--version" ? version : "fast_mode stable false\n" });
+      },
+    });
+    await assert.rejects(adapter.run(request({ route })), expected);
+    assert.equal(calls.some(([subcommand]) => subcommand === "exec"), false);
+  }
 });
 
 test("Codex warns before inference at 95 percent and records safe quota metadata", async () => {

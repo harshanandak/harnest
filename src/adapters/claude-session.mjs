@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Transform } from "node:stream";
 import { harnessLaunch } from "../config.mjs";
 import { NativeLaunchError, requireNativeCommand, spawnNativeCommand } from "../launch-command.mjs";
-import { digestContext } from "../protocol.mjs";
+import { digestContext, routeControlError } from "../protocol.mjs";
 import {
   boundedProviderText,
   classifyProviderFailure,
@@ -1454,6 +1454,8 @@ export class ClaudeSessionAdapter {
   async run(request, { signal, onProgress } = {}) {
     if (!request || typeof request !== "object") throw new TypeError("request must be an object");
     assertSessionWorkflow(request?.workflow);
+    const controlError = routeControlError("claude", request.route, "session");
+    if (controlError) throw adapterError(controlError, "policy");
     const policyCheck = isPolicySupported(request.policy || {});
     if (!policyCheck.supported) {
       throw adapterError(`Claude session policy not supported: ${policyCheck.reason} — ${CLAUDE_SESSION_POLICY_HELP}`, "policy", { reason: policyCheck.reason });
