@@ -8,4 +8,4 @@ The per-user daemon binds to `127.0.0.1` and requires a local bearer credential.
 
 Requests, task context, traces, receipts, and downstream output may be stored as plaintext in the local state directory. Keep secrets out of handoffs and protect the state directory. See [release limits](docs/users/limits.md) for the v0.1.0 verification boundary.
 
-Report vulnerabilities privately to the repository maintainer through your existing access channel. Use the [private repository issue tracker](https://github.com/harshanandak/harnest/issues) for general installation and usage problems. Remove credentials, private source, transcripts, and machine-specific paths before reporting routine issues.
+Report vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/harshanandak/harnest/security/advisories/new). Use the [issue tracker](https://github.com/harshanandak/harnest/issues) for general installation and usage problems. Remove credentials, private source, transcripts, and machine-specific paths before reporting routine issues.

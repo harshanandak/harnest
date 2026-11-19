@@ -4,7 +4,7 @@ Harnest MCP runs from a source checkout. Clients share one local HTTP daemon. A 
 
 ## Requirements
 
-- Git with authenticated access to the private `harshanandak/harnest` repository.
+- Git.
 - Bun and Node.js 22.19 or newer for the default installation with optional Taskflow packages.
 - An MCP client that supports Streamable HTTP or stdio.
 - At least one [supported downstream agent](supported-agents.md), installed and authenticated through its native instructions.
@@ -13,7 +13,7 @@ Harnest does not accept a downstream provider key in a handoff request and does 
 
 ## Install from GitHub
 
-Clone the private repository and install dependencies from its default branch:
+Clone the repository and install dependencies from its default branch:
 
 ```sh
 git clone https://github.com/harshanandak/harnest.git
