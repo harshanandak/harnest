@@ -210,7 +210,7 @@ The [example graph](examples/agent-graph.json) reviews a plan with four agents:
 flowchart LR
     a["architecture<br/>claude"] --> c["correctness<br/>codex"]
     a --> e["efficiency<br/>cursor"]
-    c --> z["conclusion<br/>opencode"]
+    c --> z["conclusion<br/>pi"]
     e --> z
 ```
 

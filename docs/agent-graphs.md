@@ -53,10 +53,10 @@ A dependent review can use `difficulty:"hard"` and `tier:"review"`, or an explic
 
 Graph lifecycle: queued → running → completed / partial / cancelled. Node lifecycle: pending → running → completed / failed / partial / cancelled; unsuccessful prerequisites produce blocked dependents. Resume returns eligible unsuccessful and blocked nodes to pending and retains prior attempts. Completed nodes are immutable within a graph run. A child timeout or owner-crash `interrupted` receipt remains retryable; a stop that was requested but never acknowledged fails closed until reconciled.
 
-The [example graph](../examples/agent-graph.json) pins user-selected Claude, Cursor, and OpenCode routes to demonstrate cross-provider review. Check those pins against the native catalogs before running it.
+The [example graph](../examples/agent-graph.json) uses Claude, Codex, and Cursor for review and Pi for read-only synthesis. Check the pinned models against the native catalogs before running it.
 
 ## Verification commands
 
 `node scripts/demo-agent-graph.mjs` exercises a five-harness diamond, failed step, and selective resume using the real coordinator/store with fake adapters. It asserts six dispatches: five nodes and one failed-node retry. It prints a retained evidence path, peak concurrency, and elapsed time; no model calls occur.
 
-`node scripts/live-agent-graph.mjs --live` explicitly invokes two bounded read-only models in a disposable repository. Codex emits a canary, then OpenCode verifies it through the dependency context. A fresh coordinator re-fetches every node before the command reports success. `--resume <graphId> --state <jobsDir>` recovers an interrupted run in place: completed nodes are retained and only the unsuccessful node is retried. The live command is never part of the normal test suite.
+`node scripts/live-agent-graph.mjs --live` explicitly invokes two bounded read-only models in a disposable repository. Codex emits a canary, then Pi verifies it through the dependency context. A fresh coordinator re-fetches every node before the command reports success. `--resume <graphId> --state <jobsDir>` recovers an interrupted run in place: completed nodes are retained and only the unsuccessful node is retried. The live command is never part of the normal test suite.

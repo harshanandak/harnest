@@ -62,7 +62,7 @@ export const WORKFLOW_SOURCE = [
   "    items: args.items,",
   "    failFirst: args.failReview !== false,",
   "  }),",
-  '  { label: "review", target: "opencode", route: { model: "demo/opencode" } },',
+  '  { label: "review", target: "codex" },',
   ");",
   "",
   'await phase("finish");',

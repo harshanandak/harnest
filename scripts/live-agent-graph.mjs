@@ -31,7 +31,7 @@ if (process.argv.includes("--resume")) {
   await runner.resume({ graphId, commandId: `resume-${graphId.slice(-12)}`, background: false });
   await report(await runner.result(graphId), stateDir);
 } else if (!process.argv.includes("--live")) {
-  console.log("Usage: node scripts/live-agent-graph.mjs --live\n   or: node scripts/live-agent-graph.mjs --resume <graphId> --state <jobsDir>\nRuns two bounded read-only model calls in a disposable workspace: Codex Sol then OpenCode DeepSeek V4.1 Flash.");
+  console.log("Usage: node scripts/live-agent-graph.mjs --live\n   or: node scripts/live-agent-graph.mjs --resume <graphId> --state <jobsDir>\nRuns two bounded read-only model calls in a disposable workspace: Codex then Pi.");
 } else {
   const directory = await mkdtemp(join(tmpdir(), "harnest-live-graph-"));
   const workspace = join(directory, "workspace");
@@ -45,7 +45,7 @@ if (process.argv.includes("--resume")) {
     execution: { background: false, maxConcurrency: 2, timeoutMs: 180000 },
     nodes: [
       { id: "source", target: "codex", route: { model: "gpt-6.1-terra", thinking: "high" }, metadata: { routing: { modelVersion: "pin" } }, execution: { timeoutMs: 90000 }, context: { requiredResultFields: ["finalText"], requiredText: ["GRAPH_SOURCE_271"] }, task: "Reply with exactly GRAPH_SOURCE_271. Do not use tools." },
-      { id: "verify", target: "opencode", route: { provider: "opencode-go", model: "deepseek-v4.1-flash", harnessVersion: "v2", thinking: "high" }, execution: { timeoutMs: 90000 }, dependsOn: ["source"], context: { requiredResultFields: ["finalText"], requiredText: ["GRAPH_VERIFIED_271"] }, task: "Check context.graph.upstream.source.result.finalText. If it contains GRAPH_SOURCE_271, reply with exactly GRAPH_VERIFIED_271. Otherwise reply MISSING_SOURCE. Do not use tools." },
+      { id: "verify", target: "pi", execution: { timeoutMs: 90000 }, dependsOn: ["source"], context: { requiredResultFields: ["finalText"], requiredText: ["GRAPH_VERIFIED_271"] }, task: "Check context.graph.upstream.source.result.finalText. If it contains GRAPH_SOURCE_271, reply with exactly GRAPH_VERIFIED_271. Otherwise reply MISSING_SOURCE. Do not use tools." },
     ], outputs: ["verify"],
   };
   const initial = await runner.start(graph);
