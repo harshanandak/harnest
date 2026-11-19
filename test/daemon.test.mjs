@@ -4,7 +4,6 @@ import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,7 +12,7 @@ import test from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { startDaemon } from "../src/daemon.mjs";
-import { createDaemonClient, ensureDaemon, stopDaemon } from "../src/daemon-client.mjs";
+import { createDaemonClient, daemonStatus, ensureDaemon, stopDaemon } from "../src/daemon-client.mjs";
 import { readDaemonToken, VERSION } from "../src/daemon-settings.mjs";
 import { createRuntimeServices } from "../src/runtime-services.mjs";
 import { mergeProcessEnv } from "../src/process.mjs";
@@ -182,22 +181,28 @@ async function freePort() {
   return port;
 }
 
-test("closing the daemon drops connections that are mid-request", { timeout: 15_000 }, async (t) => {
-  const { stateDir, directory } = await fixture(t);
+test("daemon control probes open a fresh connection each time (#26)", { timeout: 15_000 }, async (t) => {
+  const { directory, stateDir } = await fixture(t);
+  // A real daemon writes the private token that inspect() reads; closing it keeps the token.
   const daemon = await startDaemon({ port: 0, directory, buildServices: () => createRuntimeServices({ stateDir }) });
-  // A partial request keeps the connection active, so server.close() alone
-  // would wait on it until the request timeout.
-  const socket = connect({ host: "127.0.0.1", port: daemon.port });
-  socket.on("error", () => {}); // the daemon resets this socket on close
-  await once(socket, "connect");
-  socket.write("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n");
-  const closed = once(socket, "close");
-  const outcome = await Promise.race([
-    daemon.close().then(() => "closed"),
-    delay(5_000).then(() => "hung"),
-  ]);
-  assert.equal(outcome, "closed");
-  await closed;
+  await daemon.close();
+  let connections = 0;
+  const stub = createServer((_req, res) => { res.writeHead(404); res.end(); });
+  stub.on("connection", () => { connections++; });
+  await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => { stub.close(resolve); stub.closeAllConnections(); }));
+  const oldState = process.env.HARNEST_STATE_DIR;
+  process.env.HARNEST_STATE_DIR = stateDir;
+  try {
+    for (let i = 0; i < 3; i++) {
+      assert.deepEqual(await daemonStatus({ port: stub.address().port }), { ready: false, version: null });
+    }
+  } finally {
+    if (oldState === undefined) delete process.env.HARNEST_STATE_DIR;
+    else process.env.HARNEST_STATE_DIR = oldState;
+  }
+  // A kept-alive socket would serve all three probes over one connection.
+  assert.equal(connections, 3);
 });
 
 test("concurrent callers converge, retain the token and replace an older daemon only when idle", { timeout: 30_000 }, async (t) => {

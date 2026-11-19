@@ -78,13 +78,7 @@ export async function startDaemon({
         } catch (error) {
           if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
         } finally {
-          // Drop kept-alive client sockets too. Otherwise a client polling over
-          // keep-alive keeps reaching this stopping daemon and never sees the
-          // port released.
-          await new Promise((resolve) => {
-            server.close(resolve);
-            server.closeAllConnections();
-          });
+          await new Promise((resolve) => server.close(resolve));
         }
       }
     })();
