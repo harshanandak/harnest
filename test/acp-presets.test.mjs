@@ -24,7 +24,7 @@ function runRegistry(args, options = {}) {
 
 test("ACP presets have unique registry ids, bounded native launch fields, and unverified status", () => {
   assert.deepEqual(ACP_PRESETS.map(({ id }) => id).sort(), [
-    "auggie", "cline", "devin", "factory-droid", "github-copilot-cli", "goose", "kilo", "kimi", "kiro", "mistral-vibe", "qwen-code",
+    "antigravity", "auggie", "cline", "devin", "factory-droid", "github-copilot-cli", "goose", "kilo", "kimi", "kiro", "mistral-vibe", "qwen-code",
   ]);
   for (const { id, name, command, args, installHint, docsUrl, verified } of ACP_PRESETS) {
     assert.match(id, /^[a-z0-9][a-z0-9-]{0,127}$/);
@@ -36,6 +36,13 @@ test("ACP presets have unique registry ids, bounded native launch fields, and un
     assert.equal(new URL(docsUrl).protocol, "https:");
     assert.equal(verified, false);
   }
+});
+
+test("Antigravity ACP preview shows the documented launch", () => {
+  const preview = addPreset("antigravity");
+  assert.equal(preview.status, 1, preview.stderr);
+  assert.ok(preview.stderr.includes('ACP preset antigravity launch: {"command":"agy","args":["acp"]}'), preview.stderr);
+  assert.match(preview.stderr, /requires explicit --trust/);
 });
 
 test("every ACP preset needs trust to register and write approval to launch", async (t) => {

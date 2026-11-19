@@ -109,6 +109,7 @@ async function setup(args) {
       break;
   }
   if (result) console.log(JSON.stringify(result, null, 2));
+  if (host === "gemini") console.log("Legacy Gemini target. Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the antigravity ACP preset.");
   if (host === "amp") console.log("If Amp requests approval, run: amp mcp approve harnest");
   if (host === "kiro") console.log("In Kiro, run /mcp to check Harnest. For custom agents, enable includeMcpJson to load user-level servers.");
   console.log("Restart or reload the host to use Harnest.");

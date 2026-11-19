@@ -20,6 +20,9 @@ for (let index = 0; index < args.length; index += 2) {
   if (!option || !value || value.startsWith("--")) throw new Error(usage);
   leadOptions[option] = option === "host" ? value : resolve(value);
 }
+if (!leadOptions.host || leadOptions.host === "gemini") {
+  process.stdout.write("Legacy Gemini target. Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the antigravity ACP preset.\n");
+}
 if (!await checkLeadConnections(leadOptions)) process.exitCode = 1;
 if (leadOptions.host) process.exit(process.exitCode ?? 0);
 const daemon = await daemonStatus().catch(() => ({ ready: false, version: null }));

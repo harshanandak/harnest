@@ -116,14 +116,14 @@ Installs the user MCP bridge plus the project's skill, router rule, worker, and 
 </details>
 
 <details>
-<summary><b>Gemini CLI or Amp</b></summary>
+<summary><b>Gemini CLI (legacy) or Amp</b></summary>
 
 ```sh
 bun run setup gemini
 bun run setup amp
 ```
 
-Gemini gets the bridge with `trust: false`; check it with `/mcp list`. If Amp reports `awaiting approval`, run `amp mcp approve harnest`. See [Gemini CLI](docs/users/integrations.md#gemini-cli-as-a-lead-client) and [Amp](docs/users/integrations.md#amp-as-a-lead-client).
+Gemini gets the bridge with `trust: false`. Check it with `/mcp list`. If Amp reports `awaiting approval`, run `amp mcp approve harnest`. See [Gemini CLI](docs/users/integrations.md#gemini-cli-as-a-lead-client) and [Amp](docs/users/integrations.md#amp-as-a-lead-client).
 </details>
 
 <details>
@@ -227,9 +227,12 @@ A **lead client** connects to Harnest through MCP. A **downstream agent** runs t
 | OpenCode | Daemon HTTP via the integration installer | `opencode` requires OpenCode V2. It supports approved write-capable prompt handoffs, optional Taskflow, and server-attached live controls. |
 | Pi | Daemon HTTP via the extension | `pi` supports read and approved write, optional Taskflow, and live steer and reroute. |
 | Cursor | Stdio bridge via the integration installer | `cursor` supports read and approved write, session resume, and optional session transport. UI subagents need their own MCP registration. |
-| Gemini CLI | MCP configuration | `gemini` requires CLI v0.62.0. Read and approved write are available with native-session follow-up. Inherited include directories limit filesystem containment. |
+| Gemini CLI (legacy) | MCP configuration | `gemini` requires CLI v0.62.0. Read and approved write are available with native-session follow-up. Inherited include directories limit filesystem containment. |
 | Amp | MCP configuration | `amp` supports approved write only, with native-session follow-up. Run Harnest on Linux, macOS, or inside WSL. |
-| Registered ACP agent | Depends on the client's MCP support | `acp` supports approved writes with an explicitly trusted local registration. Register with `bun run acp add <preset-id> --trust` or [supply your own command](docs/acp-agents.md#register-manually). The eleven presets are unverified against the real agents. |
+| Antigravity CLI | [Manual MCP configuration](docs/users/integrations.md#antigravity-cli-as-a-lead-client) | `acp` with `route.agent: "antigravity"` launches `agy acp` for approved writes. Harnest has not verified the preset against the real CLI. |
+| Registered ACP agent | Depends on the client's MCP support | `acp` supports approved writes with an explicitly trusted local registration. Register with `bun run acp add <preset-id> --trust` or [supply your own command](docs/acp-agents.md#register-manually). Harnest has not verified the twelve presets against the real agents. |
+
+Gemini CLI now serves only paid Gemini API keys and enterprise Code Assist. Personal Google accounts should use the `antigravity` ACP preset. See [Development and account changes for Gemini CLI](https://github.com/google-gemini/gemini-cli/discussions/27274).
 
 Gemini, Amp, and generic ACP use native-session follow-up and reject session transport and live controls. See [supported agents](docs/users/supported-agents.md) for the full control and platform boundaries.
 
