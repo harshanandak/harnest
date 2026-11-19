@@ -76,7 +76,9 @@ test("the Pi installer is import-safe, replaces stale extension entries, and bac
       "stale registrations of this extension must be replaced, not appended",
     );
     const raw = await readFile(join(root, "scripts", "install-pi-integration.mjs"), "utf8");
-    assert.ok(raw.includes(".bak-harnest-"), "replaced extension and skill files must be backed up");
+    assert.match(raw, /import \{[^}]*\breplaceWithBackup\b[^}]*\} from "\.\/install-files\.mjs"/, "the installer must use the shared backup writer");
+    assert.ok((raw.match(/backupAndWrite\(/g) ?? []).length >= 4,
+      "replaced extension, settings and skill files must go through the backup writer");
   } finally {
     if (saved.HOME === undefined) delete process.env.HOME; else process.env.HOME = saved.HOME;
     if (saved.USERPROFILE === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = saved.USERPROFILE;

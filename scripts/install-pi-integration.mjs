@@ -34,7 +34,6 @@ async function installExtension(piDir) {
 }
 
 /** Drop previous registrations of this extension (moved checkout or drive-case change) before adding the current path. */
-
 export function mergeExtensionList(list, extensionPath) {
   const kept = (Array.isArray(list) ? list : []).filter((entry) => typeof entry !== "string" || !/(?:^|[\\/])harnest\.mjs$/i.test(entry));
   kept.push(extensionPath);
