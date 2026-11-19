@@ -2,3 +2,27 @@ agents/*.md text eol=lf
 codex-agents/*.toml text eol=lf
 opencode-agents/*.md text eol=lf
 scripts/vendor/codex-plugin-validator/* text eol=lf
+
+# Kept in the repo, left out of GitHub release archives (Source code zip/tar.gz).
+# Users install and run Harnest without these; maintainers and CI use them.
+/.github export-ignore
+/.editorconfig export-ignore
+/.gitattributes export-ignore
+/AGENTS.md export-ignore
+/RELEASING.md export-ignore
+/docs/internal export-ignore
+/test export-ignore
+/scripts/fixtures export-ignore
+/scripts/vendor export-ignore
+/scripts/benchmark-*.mjs export-ignore
+/scripts/build-graph-schema.mjs export-ignore
+/scripts/build-workers.mjs export-ignore
+/scripts/demo-*.mjs export-ignore
+/scripts/dynamic-scale.mjs export-ignore
+/scripts/dynamic-runner-scale.mjs export-ignore
+/scripts/edge-mcp.mjs export-ignore
+/scripts/generate-dynamic-schemas.mjs export-ignore
+/scripts/live-*.mjs export-ignore
+/scripts/*-memory*.mjs export-ignore
+/scripts/model-freshness.mjs export-ignore
+/scripts/smoke-*.mjs export-ignore
