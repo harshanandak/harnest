@@ -4,6 +4,9 @@
 
 - `handoff_status`, `handoff_sessions`, and `handoff_trace` return compact receipts with `resultRef` in place of embedded result bodies. Nonempty control histories become `controlCount` in these views. Use `handoff_result` for the full history and result.
 - Status responses use a 16 KiB UTF-8 budget. Result, trace, session, and board pages use 64 KiB. Large terminal receipts and individual trace or board entries can span multiple pages. Follow `page.continuation` before advancing the sequence. Small results and complete entries keep their existing shape. See the [MCP paging contract](docs/users/mcp-usage.md#response-limits-and-continuations).
+- Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
+- Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
+- Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
 
 ## 0.1.0 - 2026-11-19
 

@@ -25,7 +25,7 @@ updates:
       dependencies:
         patterns: ["*"]
     ignore:
-      # OpenCode ships only 0.0.0-beta-* builds. Its 0.0.0 is an empty name-reservation
-      # placeholder that semver ranks above every beta, so never offer it.
+      # OpenCode ships only 0.0.0-<channel>-<build> prereleases, which semver orders by
+      # channel name, not by age: 0.0.0 is an empty placeholder and next-17444 is older
+      # than beta-17570. Dependabot cannot rank them, so this pin is bumped by hand.
       - dependency-name: "@opencode-ai/client"
-        versions: ["0.0.0"]

@@ -19,6 +19,7 @@ import {
 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
+import { resolveWindowsPathCommand } from "./launch-command.mjs";
 import { redactSecrets, terminateProcessTree } from "./process.mjs";
 
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -567,9 +568,15 @@ export function createAcpClientServices({
 
     let child;
     try {
-      child = spawnFn(command, [...args], {
+      const env = terminalEnvironment();
+      // Pass an absolute executable for Windows bare names, including with an injected launcher.
+      const executable = process.platform === "win32" && !/[\\/:]/.test(command)
+        ? resolveWindowsPathCommand(command, terminalCwd, env)
+        : command;
+      if (!executable) throw new Error("terminal command was not found on PATH");
+      child = spawnFn(executable, [...args], {
         cwd: terminalCwd,
-        env: terminalEnvironment(),
+        env,
         windowsHide: true,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
