@@ -28,7 +28,7 @@ cd harnest
 bun install --frozen-lockfile --omit optional
 ```
 
-From the checkout, use the `bun run setup`, `bun run doctor`, `bun run daemon`, `bun run acp`, and `bun run routing:setup` aliases. Use those aliases if you have only a checkout and need to run a printed `harnest setup` command.
+From the checkout, use the `bun run setup`, `bun run doctor`, `bun run daemon`, `bun run acp`, and `bun run routing:setup` aliases. Setup prints a reverse command you can paste from any directory.
 
 ## Add the MCP server
 

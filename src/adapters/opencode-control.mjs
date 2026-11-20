@@ -142,9 +142,9 @@ export class OpenCodeControl {
 
   async waitReady(signal) {
     if (!this.serverUrl) throw new OpenCodeControlError("OpenCode server URL is unavailable", "not-ready");
-    const started = Date.now();
+    const deadline = performance.now() + this.timeoutMs;
     let lastError = null;
-    while (Date.now() - started < this.timeoutMs) {
+    while (true) {
       if (signal?.aborted) throw new OpenCodeControlError("OpenCode server readiness was aborted", "aborted", { aborted: true });
       if (this.serverClosed) {
         const exit = this.serverExit || {};
@@ -157,18 +157,33 @@ export class OpenCodeControl {
           stderr: this.serverStderr || null,
         });
       }
+      if (performance.now() >= deadline) break;
       // OpenCode V2 serves health at /global/health (2.2.1 returns 404 for an
       // authenticated /api/health). Keep /api/health as a fallback.
       for (const path of ["/global/health", "/api/health"]) {
+        const remaining = Math.ceil(deadline - performance.now());
+        if (remaining <= 0 || signal?.aborted || this.serverClosed) break;
+        const probe = new AbortController();
+        const abortProbe = () => probe.abort(signal.reason);
+        signal?.addEventListener("abort", abortProbe, { once: true });
+        const timer = setTimeout(() => {
+          probe.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+        }, remaining);
         try {
-          const response = await this.fetchFn(joinUrl(this.serverUrl, path), { method: "GET", headers: this.authHeaders(), signal });
-          if (responseOk(response)) return response;
+          const response = await this.fetchFn(joinUrl(this.serverUrl, path), {
+            method: "GET", headers: this.authHeaders(), signal: probe.signal,
+          });
+          if (responseOk(response) && !probe.signal.aborted && performance.now() < deadline) return response;
           lastError = new Error(`${path} returned HTTP ${responseStatus(response) ?? "unknown"}`);
         } catch (error) {
           lastError = error;
+        } finally {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abortProbe);
         }
       }
-      await sleep(this.pollMs);
+      const remaining = deadline - performance.now();
+      if (remaining > 0 && !signal?.aborted && !this.serverClosed) await sleep(Math.min(this.pollMs, remaining));
     }
     throw new OpenCodeControlError("OpenCode server did not become ready", "not-ready", {
       cause: lastError?.message || null,

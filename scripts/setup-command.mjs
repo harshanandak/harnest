@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 const checkout = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 /** Format a command for pasting into an interactive shell. @param {string} args @param {string} [path] */
-export function setupCommand(args, path, { platform = process.platform, cli = process.env.HARNEST_SETUP_VIA_CLI === "1" } = {}) {
+export function setupCommand(args, path, { platform = process.platform, cli = process.env.HARNEST_INVOKED_VIA_CLI === "1" } = {}) {
   const command = (quote) => [
     cli ? "harnest" : `bun run --cwd ${quote(checkout)}`,
     "setup",

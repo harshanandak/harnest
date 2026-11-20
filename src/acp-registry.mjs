@@ -1,4 +1,5 @@
 import { readLocalConfig } from "./config.mjs";
+import { isFullyQualified } from "./launch-command.mjs";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FIELDS = new Set(["command", "args", "trusted", "registryId", "version", "protocolVersion"]);
@@ -40,6 +41,13 @@ function validate(agentId, raw) {
   if (unsupported.length) throw error(`ACP agent ${id} registration has unsupported fields: ${unsupported.join(", ")}`);
   if (raw.trusted !== true) throw error(`ACP agent ${id} is not trusted`, "policy");
   const command = text(raw.command, `ACP agent ${id} command`);
+  if (!isFullyQualified(command)) {
+    const addPreset = "acp add <preset-id> --trust";
+    const hint = process.env.HARNEST_INVOKED_VIA_CLI === "1"
+      ? `harnest ${addPreset}`
+      : `bun run ${addPreset} from a checkout or harnest ${addPreset} with the global CLI`;
+    throw error(`ACP agent ${id} command must be an absolute executable path. Set the path in the manual registration or register a preset with ${hint}.`);
+  }
   if (!Array.isArray(raw.args) || raw.args.length > 128) throw error(`ACP agent ${id} args must be an array of at most 128 strings`);
   const args = raw.args.map((value, index) => {
     if (typeof value !== "string" || value.length > 16_384 || value.includes("\0")) {
