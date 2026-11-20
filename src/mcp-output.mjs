@@ -47,6 +47,12 @@ function preview(value, limit = 160) {
   return prefix === value ? value : prefix + "…";
 }
 
+function withoutTasklist(progress) {
+  if (!progress || typeof progress !== "object") return progress;
+  const { tasklist, tasklistTotal, ...rest } = progress;
+  return rest;
+}
+
 function receiptHeader(status) {
   const {
     protocolVersion,
@@ -95,6 +101,9 @@ function receiptHeader(status) {
     workflowRunId: status.workflowRunId,
     recovery: recovery && { ...recoveryState, lookupKey },
     route: status.route,
+    // Last, so a large trace never pushes out recovery or route. The tasklist stays in the
+    // full JSON; live-trace callers need phase, current, recent and lastMeaningfulAt.
+    trace: status.trace && { ...status.trace, progress: withoutTasklist(status.trace.progress) },
   };
   for (const [key, value] of Object.entries(identities)) {
     if (measure("receipt", { ...header, [key]: value }).fits(STATUS_RESPONSE_BYTES - 4096)) {
