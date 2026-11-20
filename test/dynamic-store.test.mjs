@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import fs, { appendFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -99,6 +100,45 @@ test("reads survive a torn write: rename is atomic, temp files are ignored", asy
   assert.deepEqual(await f.store.listRunIds(), [f.runId], "temp files are not runs");
   const raw = await readFile(join(f.root, `${f.runId}.json`), "utf8");
   assert.ok(raw.endsWith("\n"));
+});
+
+test("a live snapshot read survives ENOENT during replacement", async (t) => {
+  const f = await fixture(t);
+  await f.store.transact(f.runId, () => ({ record: f.run({ state: "running" }) }));
+  const runPath = f.store.runPath(f.runId);
+  const replacing = Promise.withResolvers();
+  const allowRename = Promise.withResolvers();
+  const writer = new DynamicStore(f.root, { renameFile: async (source, target) => {
+    replacing.resolve();
+    await allowRename.promise;
+    await rename(source, target);
+  } });
+  const publication = writer.transact(f.runId, (record) => ({ record }));
+  await Promise.race([replacing.promise, publication]);
+
+  const originalRead = fs.readFile;
+  let injected = false;
+  const stub = t.mock.method(fs, "readFile", async (path, ...args) => {
+    if (path === runPath && !injected) {
+      injected = true;
+      allowRename.resolve();
+      throw Object.assign(new Error("injected ENOENT during snapshot replacement"), { code: "ENOENT" });
+    }
+    return originalRead(path, ...args);
+  });
+  syncBuiltinESMExports();
+  let snapshot;
+  try {
+    snapshot = await f.store.readRun(f.runId);
+  } finally {
+    stub.mock.restore();
+    syncBuiltinESMExports();
+    allowRename.resolve();
+    await publication;
+  }
+  assert.equal(injected, true);
+  assert.equal(snapshot?.state, "running");
+  assert.equal(snapshot.revision, 2);
 });
 
 test("invalid run ids and missing runs fail closed", async (t) => {
