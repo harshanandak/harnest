@@ -206,7 +206,11 @@ test("printed setup reversal works from a different directory", async (t) => {
     assert.deepEqual(JSON.parse(viaAlias.stdout).project.preserved, ["agents/cursor-worker.md"]);
     const implicit = await cli(["setup", "remove", "cursor"], { cwd: project });
     assert.deepEqual(JSON.parse(implicit.stdout).project.preserved, ["agents/cursor-worker.md"]);
-    for (const path of [userMcp, projectMcp]) assert.deepEqual(JSON.parse(await readFile(path, "utf8")), unrelated);
+    assert.deepEqual(JSON.parse(await readFile(userMcp, "utf8")), unrelated);
+    // The project already registered harnest before setup; undo restores that entry, not deletes it.
+    assert.deepEqual(JSON.parse(await readFile(projectMcp, "utf8")), {
+      mcpServers: { ...unrelated.mcpServers, harnest: { command: "old-bridge" } },
+    });
     assert.equal(await readFile(router, "utf8"), "original router");
     assert.equal(await readFile(existing, "utf8"), "unrelated agent");
     assert.equal(await readFile(edited, "utf8"), "edited worker");

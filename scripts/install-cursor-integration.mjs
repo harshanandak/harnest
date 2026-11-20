@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, parse, resolve } from "node:path";
 import { setupDaemon } from "./install-daemon.mjs";
-import { bridgeEntry, cursorUserConfig, installHostConfig, installJsonServer, readJsonServer, removeJsonServer } from "./install-host-config.mjs";
+import { isDeepStrictEqual } from "node:util";
+import { bridgeEntry, installHostConfig, installJsonServer, readJsonServer } from "./install-host-config.mjs";
 import { readExisting, replaceWithBackup } from "./install-files.mjs";
 
 // Idempotent Cursor installer.
@@ -171,8 +172,12 @@ export async function installCursorIntegration(projectRoot = root, { home = home
   const mcp = await installHostConfig("cursor", { home });
   const projectPath = resolve(projectRoot, ".cursor", "mcp.json");
   let projectMcp = null;
-  if (projectPath !== resolve(mcp.path) && await readJsonServer(projectPath, "mcpServers") !== undefined) {
+  const existingEntry = projectPath === resolve(mcp.path) ? undefined : await readJsonServer(projectPath, "mcpServers");
+  // Setup only updates a harnest entry the project already has. Keep the entry from the first
+  // setup (a repeat setup must not replace it with harnest's own) so undo can restore it.
+  if (existingEntry !== undefined) {
     const entry = bridgeEntry();
+    if (!project.state.mcp) project.state.mcpBefore = plain(existingEntry);
     project.state.mcp = entry;
     await project.save();
     projectMcp = await installJsonServer(projectPath, "mcpServers", entry, { existingOnly: true });
@@ -207,14 +212,28 @@ export async function removeCursorProject(projectRoot, home = homedir()) {
   }
   let projectMcp = null;
   if (state.mcp) {
-    projectMcp = await removeJsonServer({
-      path: join(cursorDir, "mcp.json"), key: cursorUserConfig(home).key, expectedEntry: state.mcp,
-    });
-    if (projectMcp.status === "entry-changed") preserved.push("mcp.json");
-    else delete state.mcp;
+    const path = join(cursorDir, "mcp.json");
+    const current = await readJsonServer(path, "mcpServers");
+    if (current !== undefined && !isDeepStrictEqual(plain(current), state.mcp)) {
+      // Someone changed the entry after setup: leave it and keep the record for a later undo.
+      projectMcp = { path, backup: null, status: "entry-changed" };
+      preserved.push("mcp.json");
+    } else {
+      // Put back the entry the project had before setup. Setup never creates this entry,
+      // so there is always an original to restore; an entry already gone stays gone.
+      projectMcp = current === undefined || state.mcpBefore === undefined
+        ? { path, backup: null, status: "already-absent" }
+        : { ...await installJsonServer(path, "mcpServers", state.mcpBefore, { existingOnly: true }), status: "restored" };
+      delete state.mcp;
+      delete state.mcpBefore;
+    }
   }
   await save();
   return { path: projectRoot, restored, preserved, mcp: projectMcp };
+}
+
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 export function cursorProject(args) {
