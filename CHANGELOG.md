@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+
+- Dynamic workflow status no longer reports a live run as missing during a snapshot replacement on Windows.
 - Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
 - Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
 - Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
