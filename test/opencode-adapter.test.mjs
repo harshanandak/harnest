@@ -604,6 +604,65 @@ test("attached server readiness uses /global/health, where OpenCode V2 serves he
   await control.stop();
 });
 
+test("a stalled OpenCode health probe stops at the readiness deadline", async (t) => {
+  const timeoutMs = 60;
+  const caller = new AbortController();
+  const watchdog = setTimeout(() => caller.abort(), 1_000);
+  t.after(() => clearTimeout(watchdog));
+  const probes = [];
+  const control = new OpenCodeControl({
+    timeoutMs,
+    fetchFn(_url, { signal }) {
+      const probe = { signal, abortedAt: null };
+      probes.push(probe);
+      return new Promise((_resolve, reject) => {
+        const abort = () => { probe.abortedAt = performance.now(); reject(signal.reason); };
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+      });
+    },
+  });
+  control.serverUrl = SERVER_URL;
+
+  const start = performance.now();
+  await assert.rejects(control.waitReady(caller.signal), (error) => error.details?.kind === "not-ready");
+  const rejectedAt = performance.now();
+  const elapsed = rejectedAt - start;
+  assert.ok(elapsed >= timeoutMs - 10 && elapsed < timeoutMs + 400, `readiness rejected after ${elapsed}ms`);
+  // The deadline must cancel the stalled request itself, not just stop waiting for it.
+  assert.equal(caller.signal.aborted, false, "the caller's watchdog must not be what ended the wait");
+  assert.ok(probes.length > 0, "at least one health probe ran");
+  for (const probe of probes) {
+    assert.ok(probe.signal, "each health probe receives an AbortSignal");
+    assert.ok(probe.abortedAt !== null && probe.abortedAt <= rejectedAt, "each stalled probe is aborted before waitReady rejects");
+  }
+});
+
+test("caller cancellation aborts the in-flight OpenCode readiness probe", { timeout: 5_000 }, async () => {
+  const caller = new AbortController();
+  const reason = new Error("cancel readiness");
+  let probeSignal;
+  let probeAbortReason;
+  const control = new OpenCodeControl({
+    fetchFn(_url, { signal }) {
+      probeSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          probeAbortReason = signal.reason;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    },
+  });
+  control.serverUrl = SERVER_URL;
+
+  const readiness = assert.rejects(control.waitReady(caller.signal), (error) => error.details?.kind === "aborted");
+  assert.equal(probeSignal?.aborted, false, "a probe must be in flight before cancellation");
+  caller.abort(reason);
+  await readiness;
+  assert.equal(probeAbortReason, reason);
+});
+
 test("control rejects cleanly before the managed server is ready", async () => {
   const control = new OpenCodeControl({ serverUrl: SERVER_URL });
   await assert.rejects(control.control({ commandId: "not-ready", kind: "message", delivery: "steer", message: "x" }), (error) => error?.details?.kind === "not-ready");
