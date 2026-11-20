@@ -20,13 +20,15 @@ bun add -g github:harshanandak/harnest#v0.1.1
 harnest --version
 ```
 
-For development or an older release, you can use a checkout.
+To install this release from a checkout:
 
 ```sh
-git clone https://github.com/harshanandak/harnest.git
+git clone --branch v0.1.1 https://github.com/harshanandak/harnest.git
 cd harnest
 bun install --frozen-lockfile --omit optional
 ```
+
+Use another release tag to check out an older version. For development, omit the branch option.
 
 From the checkout, use the `bun run setup`, `bun run doctor`, `bun run daemon`, `bun run acp`, and `bun run routing:setup` aliases. Setup prints a reverse command you can paste from any directory.
 
