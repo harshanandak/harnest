@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import fs, { appendFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import fs, { appendFile, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -108,10 +108,12 @@ test("a live snapshot read survives ENOENT during replacement", async (t) => {
   const runPath = f.store.runPath(f.runId);
   const replacing = Promise.withResolvers();
   const allowRename = Promise.withResolvers();
+  let renamed = false;
   const writer = new DynamicStore(f.root, { renameFile: async (source, target) => {
     replacing.resolve();
     await allowRename.promise;
     await rename(source, target);
+    renamed = true;
   } });
   const publication = writer.transact(f.runId, (record) => ({ record }));
   await Promise.race([replacing.promise, publication]);
@@ -119,7 +121,7 @@ test("a live snapshot read survives ENOENT during replacement", async (t) => {
   const originalRead = fs.readFile;
   let injected = false;
   const stub = t.mock.method(fs, "readFile", async (path, ...args) => {
-    if (path === runPath && !injected) {
+    if (path === runPath && !renamed) {
       injected = true;
       allowRename.resolve();
       throw Object.assign(new Error("injected ENOENT during snapshot replacement"), { code: "ENOENT" });
@@ -139,6 +141,63 @@ test("a live snapshot read survives ENOENT during replacement", async (t) => {
   assert.equal(injected, true);
   assert.equal(snapshot?.state, "running");
   assert.equal(snapshot.revision, 2);
+});
+
+test("an unknown snapshot read leaves a missing or read-only store untouched", async (t) => {
+  const f = await fixture(t);
+  const missingRoot = join(f.root, "missing");
+  const missingStore = new DynamicStore(missingRoot);
+  assert.equal(await missingStore.readRun(f.runId), null);
+  await assert.rejects(readdir(missingRoot), { code: "ENOENT" });
+
+  const denyWrite = async () => { throw Object.assign(new Error("read-only store"), { code: "EACCES" }); };
+  const mkdirStub = t.mock.method(fs, "mkdir", denyWrite);
+  const openStub = t.mock.method(fs, "open", denyWrite);
+  syncBuiltinESMExports();
+  try {
+    assert.equal(await f.store.readRun(f.runId), null);
+    assert.deepEqual(await readdir(f.root), []);
+    assert.equal(mkdirStub.mock.callCount(), 0);
+    assert.equal(openStub.mock.callCount(), 0);
+  } finally {
+    mkdirStub.mock.restore();
+    openStub.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test("a missing snapshot read inside its own transaction returns null", { timeout: 2_000 }, async (t) => {
+  const f = await fixture(t);
+  const outcome = await f.store.transact(f.runId, async () => {
+    assert.equal(await f.store.readRun(f.runId), null);
+    return null;
+  });
+  assert.equal(outcome, null);
+});
+
+test("a brand-new run is missing until its first snapshot is published", async (t) => {
+  const f = await fixture(t);
+  const publishing = Promise.withResolvers();
+  const allowRename = Promise.withResolvers();
+  const writer = new DynamicStore(f.root, { renameFile: async (source, target) => {
+    if (target === f.store.runPath(f.runId)) {
+      publishing.resolve();
+      await allowRename.promise;
+    }
+    await rename(source, target);
+  } });
+  const creation = writer.createRun({
+    runId: f.runId, requestId: "req-1", record: f.run(), specRevision: { revision: 1, spec: {} },
+  });
+  try {
+    await Promise.race([publishing.promise, creation]);
+    assert.equal((await f.store.readSpecs(f.runId)).revisions.length, 1);
+    assert.equal(await f.store.readRun(f.runId), null);
+  } finally {
+    allowRename.resolve();
+    await creation;
+  }
+  assert.equal((await f.store.readRun(f.runId)).revision, 0);
 });
 
 test("invalid run ids and missing runs fail closed", async (t) => {

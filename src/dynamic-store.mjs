@@ -1,10 +1,11 @@
 // Durable store for dynamic workflow runs.
 //
 // Layout beneath the store root:
-//   runs/<runId>.json          compact run record (mutable snapshot)
-//   runs/<runId>.specs.json    immutable spec revisions (append-only)
-//   runs/<runId>.journal.jsonl append-only lifecycle/replay journal
-//   requests/<sha256>.json     requestId -> runId dedup index
+//   <runId>.json          compact run record (mutable snapshot)
+//   <runId>.json.published marker written before the first replacement
+//   <runId>.specs.json    immutable spec revisions (append-only)
+//   <runId>.journal.jsonl append-only lifecycle/replay journal
+//   requests/<sha256>.json requestId -> runId dedup index
 //
 // Writes use temp-file + rename; snapshot writers serialize behind a run
 // lock. This is deliberately an independent implementation rather than a copy
@@ -29,16 +30,24 @@ const retentionLimit = (value) => {
   return value;
 };
 const TRANSIENT = ["EPERM", "EACCES", "EBUSY"];
+const SNAPSHOT_RETRY_MS = 5_000;
 const lockTails = new Map();
 const controlState = (record) => structuredClone(Object.fromEntries(
   ["runId", "revision", "state", "lease", "attempt", "pause", "cancellation", "deadlineAt", "controls"].map((key) => [key, record[key]]),
 ));
 
-async function retry(work, attempts = 30) {
+function isTransient(error) {
+  return process.platform === "win32" && TRANSIENT.includes(error?.code);
+}
+
+async function retry(work, { deadline = Infinity, missing = false } = {}) {
   for (let n = 0; ; n += 1) {
     try { return await work(); } catch (error) {
-      if (!(process.platform === "win32" && TRANSIENT.includes(error?.code)) || n >= attempts) throw error;
-      await wait(Math.min(10 * 2 ** n, 500));
+      if (!(isTransient(error) || (missing && error?.code === "ENOENT")) || n >= 30) throw error;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw error;
+      await wait(Math.min(10 * 2 ** n, 500, remaining));
+      if (performance.now() >= deadline) throw error;
     }
   }
 }
@@ -92,6 +101,14 @@ export class DynamicStore {
     try { await retry(() => this.rename(temp, path)); } finally { await unlink(temp).catch(() => undefined); }
   }
 
+  async #writeSnapshot(runId, path, record, replacing) {
+    if (replacing && !this.controlStates.get(runId)?.hasPublicationMarker) {
+      await retry(() => writeFile(`${path}.published`, "", { mode: 0o600, flag: "wx" }))
+        .catch((error) => { if (error?.code !== "EEXIST") throw error; });
+    }
+    await this.#atomicWrite(path, record);
+  }
+
   #withLock(lockPath, work) {
     const absolute = resolve(lockPath);
     const key = process.platform === "win32" ? absolute.toLowerCase() : absolute;
@@ -109,7 +126,7 @@ export class DynamicStore {
     for (let attempt = 0; attempt < 2000; attempt += 1) {
       try { handle = await open(lockPath, "wx", 0o600); break; } catch (error) {
         const exists = error?.code === "EEXIST";
-        const transient = process.platform === "win32" && TRANSIENT.includes(error?.code);
+        const transient = isTransient(error);
         if (!exists && !transient) throw error;
         if (exists) {
           const info = await stat(lockPath).catch(() => null);
@@ -136,9 +153,21 @@ export class DynamicStore {
     const path = this.runPath(runId);
     const record = await this.#readMaybe(path);
     if (record !== null) return record;
-    // A Windows replacement can briefly hide the path from an unlocked read.
-    // Confirm absence only after the snapshot writer releases the run lock.
-    return this.#withLock(`${path}.lock`, () => this.#readMaybe(path));
+    const deadline = performance.now() + SNAPSHOT_RETRY_MS;
+    // Creation writes the spec and journal before publishing the first snapshot.
+    // The persistent marker is only written once a snapshot already exists.
+    try {
+      await retry(() => stat(`${path}.published`), { deadline });
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    }
+    try {
+      return JSON.parse(await retry(() => readFile(path, "utf8"), { deadline, missing: true }));
+    } catch (error) {
+      if (error?.code !== "ENOENT" && !isTransient(error)) throw error;
+      throw dynamicError("persistence", `snapshot for dynamic run ${runId} is temporarily unavailable; retry the read`);
+    }
   }
 
   async #fileSignature(path) {
@@ -160,7 +189,9 @@ export class DynamicStore {
     const record = await this.readRun(runId);
     if (!record) return null;
     const state = controlState(record);
-    if (signature === await this.#fileSignature(path)) this.#rememberControlState(runId, { signature, state });
+    if (signature === await this.#fileSignature(path)) {
+      this.#rememberControlState(runId, { signature, state, hasPublicationMarker: this.controlStates.get(runId)?.hasPublicationMarker });
+    }
     return structuredClone(state);
   }
 
@@ -218,6 +249,7 @@ export class DynamicStore {
     const path = this.runPath(runId);
     return this.#withLock(`${path}.lock`, () => this.#withLock(`${this.journalPath(runId)}.lock`, async () => {
       let current = await this.#readMaybe(path);
+      const replacing = current !== null;
       const startSequence = Math.max(current?.journalSequence ?? 0, await this.#journalTail(runId));
       let sequence = startSequence;
       const events = [];
@@ -252,8 +284,8 @@ export class DynamicStore {
       if (events.length) await this.#appendJournalUnlocked(runId, events, startSequence);
       if (changed) {
         const state = controlState(current);
-        await this.#atomicWrite(path, current);
-        this.#rememberControlState(runId, { signature: await this.#fileSignature(path), state });
+        await this.#writeSnapshot(runId, path, current, replacing);
+        this.#rememberControlState(runId, { signature: await this.#fileSignature(path), state, hasPublicationMarker: replacing });
       }
       return results;
     }));
@@ -364,7 +396,7 @@ export class DynamicStore {
     if (!Number.isFinite(before)) throw dynamicError("validation", "beforeISO must be a valid ISO timestamp");
     const path = this.runPath(runId);
     return this.#withLock(`${path}.lock`, () => this.#withLock(`${this.journalPath(runId)}.lock`, async () => {
-      const record = await this.#readMaybe(path);
+      const record = await this.readRun(runId);
       if (!record) throw dynamicError("not-found", "dynamic run not found");
       if (!RUN_TERMINAL.has(record.state) || record.lease) {
         throw dynamicError("retention-active", `run ${runId} is ${record.state}${record.lease ? " with a live lease" : ""}; retention refuses active runs`);
@@ -415,7 +447,7 @@ export class DynamicStore {
     retentionLimit(maxJournalBytes);
     const path = this.runPath(runId);
     return this.#withLock(`${path}.lock`, () => this.#withLock(`${this.journalPath(runId)}.lock`, async () => {
-      const record = await this.#readMaybe(path);
+      const record = await this.readRun(runId);
       if (!record) throw dynamicError("not-found", "dynamic run not found");
       if (!RUN_TERMINAL.has(record.state) || record.lease) {
         throw dynamicError("retention-active", `run ${runId} is ${record.state}; restore refuses active runs`);
@@ -507,7 +539,10 @@ export class DynamicStore {
       const journal = await this.appendJournal(runId, [{ type: "created", at: record.createdAt, requestId }], 0);
       const created = { ...record, journalSequence: journal.at(-1).sequence };
       const path = this.runPath(runId);
-      await this.#withLock(`${path}.lock`, () => this.#atomicWrite(path, created));
+      await this.#withLock(`${path}.lock`, async () => {
+        const replacing = (await this.#readMaybe(path)) !== null;
+        await this.#writeSnapshot(runId, path, created, replacing);
+      });
       await this.#atomicWrite(index, { requestId, runId });
       return { created: true, runId, record: created };
     });
