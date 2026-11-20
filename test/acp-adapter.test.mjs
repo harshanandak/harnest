@@ -460,7 +460,7 @@ test("ACP v1 resolves Windows terminal commands before calling the adapter's lau
   process.env.PATH = `;${bin};`;
   try {
     const adapter = new ACPAdapter({
-      registrations: { fake: { command: process.execPath, trusted: true, protocolVersion: 1 } },
+      registrations: { fake: { command: process.execPath, args: [], trusted: true, protocolVersion: 1 } },
       spawn: fake.spawn,
       timeoutMs: 5_000,
     });
