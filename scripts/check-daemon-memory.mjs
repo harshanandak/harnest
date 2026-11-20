@@ -111,16 +111,41 @@ async function clientDriver() {
   for (const peer of clients) peer.close();
 }
 
-async function childProcesses(parentPids) {
+// Windows never updates ParentProcessId and reuses PIDs, so a process that was already running
+// (csrss.exe, wininit.exe) can name a dead parent whose PID the daemon or driver later receives.
+// Such a sample cannot tell real children from stale ones. Record every running process by PID
+// plus creation time before anything is launched; if one of them later shows up as a child, the
+// sample is discarded and taken again with new processes. No row is ever filtered out, so an
+// accepted sample is checked exactly as strictly as before.
+const AMBIGUOUS_PARENT_PID = "AMBIGUOUS_PARENT_PID";
+
+async function runningProcessIdentities() {
+  if (process.platform !== "win32") return new Set();
+  const { stdout } = await exec(windowsSystemCommand("powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command",
+    `Get-CimInstance Win32_Process -Property ProcessId,CreationDate | ` +
+    `ForEach-Object { if ($_.CreationDate) { '{0}:{1}' -f $_.ProcessId, $_.CreationDate.Ticks } }`],
+  { windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  return new Set(stdout.split(/\r?\n/).map((row) => row.trim()).filter(Boolean));
+}
+
+async function childProcesses(parentPids, preexisting = new Set()) {
   if (process.platform === "win32") {
     const filter = parentPids.map((pid) => `ParentProcessId = ${pid}`).join(" OR ");
     const { stdout } = await exec(windowsSystemCommand("powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command",
       `$children = Get-CimInstance Win32_Process -Filter '${filter}' | Select-Object ` +
       `@{n='image';e={$_.Name}}, @{n='pid';e={$_.ProcessId}}, ` +
-      `@{n='parentPid';e={$_.ParentProcessId}}, @{n='rssBytes';e={[uint64]$_.WorkingSetSize}}; ` +
+      `@{n='parentPid';e={$_.ParentProcessId}}, @{n='rssBytes';e={[uint64]$_.WorkingSetSize}}, ` +
+      `@{n='created';e={if ($_.CreationDate) { $_.CreationDate.Ticks.ToString() } else { '' }}}; ` +
       `ConvertTo-Json -InputObject @($children) -Compress`],
     { windowsHide: true });
-    return JSON.parse(stdout);
+    const rows = JSON.parse(stdout);
+    const stale = rows.filter(({ pid, created }) => created && preexisting.has(`${pid}:${created}`));
+    if (stale.length) {
+      throw Object.assign(new Error("A process that was already running names a reused parent PID: " +
+        stale.map(({ image, pid, parentPid }) => `${image} ${pid} (parent ${parentPid})`).join(", ")),
+      { code: AMBIGUOUS_PARENT_PID });
+    }
+    return rows.map((row) => ({ image: row.image, pid: row.pid, parentPid: row.parentPid, rssBytes: row.rssBytes }));
   }
   const { stdout } = await exec(requireNativeCommand("ps"), ["-eo", "pid=,ppid=,rss=,comm="]);
   return stdout.trim().split("\n").map((row) => {
@@ -203,6 +228,7 @@ async function measure(sampleNumber) {
       assert.ok(Buffer.byteLength(receipt.result.finalText, "utf8") > STATUS_RESPONSE_BYTES);
     }
     await fixtureOwner.close();
+    const preexisting = await runningProcessIdentities();
     const workload = async () => {
       daemon = launch(["src/daemon.mjs", "--fixture-port", "0"], env);
       const { port, pid } = await daemonReady(daemon.child, fixture);
@@ -226,7 +252,7 @@ async function measure(sampleNumber) {
       sample.catalogSha256 = catalogs.digest;
       sample.clientCount = catalogs.clients;
       const parentPids = [pid, driver.child.pid];
-      const children = await childProcesses(parentPids);
+      const children = await childProcesses(parentPids, preexisting);
       sample.processes = { daemon: pid, driver: driver.child.pid, children };
       assert.ok(children.every(({ image, parentPid }) => process.platform === "win32"
         && image.toLowerCase() === "conhost.exe" && parentPids.includes(parentPid)),
@@ -262,7 +288,10 @@ async function measure(sampleNumber) {
     await Promise.race([workload(), new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error("Daemon memory measurement exceeded 30 seconds")), 30_000);
     })]);
-  } catch (error) { sample.error = error.message; }
+  } catch (error) {
+    sample.error = error.message;
+    if (error.code === AMBIGUOUS_PARENT_PID) sample.discarded = true;
+  }
   finally {
     clearTimeout(timer);
     await Promise.all([bridge, driver, daemon].filter(Boolean).map((process) => process.shutdown()));
@@ -274,9 +303,17 @@ async function measure(sampleNumber) {
 if (process.argv.includes("--driver")) {
   await clientDriver().catch((error) => process.stderr.write(String(error.stack ?? error) + "\n", () => process.exit(1)));
 } else {
-  const result = { platform: process.platform, release: release(), arch: process.arch, node: process.version, budgets, samples: [] };
+  const result = { platform: process.platform, release: release(), arch: process.arch, node: process.version, budgets, samples: [], discarded: [] };
   for (let run = 1; run <= 3; run++) {
-    const sample = await measure(run);
+    let sample;
+    // Only a reused parent PID discards a sample. After three discards the last one is kept,
+    // with its error, so the run fails instead of passing unmeasured.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      sample = await measure(run);
+      if (!sample.discarded || attempt === 3) break;
+      result.discarded.push(sample);
+      console.log(JSON.stringify(sample));
+    }
     result.samples.push(sample);
     console.log(JSON.stringify(sample));
   }
