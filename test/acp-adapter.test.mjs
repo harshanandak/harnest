@@ -773,7 +773,7 @@ test("a trusted ACP registration still needs an absolute executable path", async
 
   await assert.rejects(adapter.run(request()), (error) => {
     assert.equal(error.details?.kind, "configuration");
-    assert.match(error.message, /acp add .*--trust/);
+    assert.match(error.message, /harnest acp add <preset-id> --trust/);
     return true;
   });
   assert.equal(spawnCount, 0);

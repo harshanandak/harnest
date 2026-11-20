@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { exec, execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { parse } from "jsonc-parser";
 import { startDaemon } from "../src/daemon.mjs";
@@ -12,9 +13,11 @@ import { isPrivateInstallerFile } from "../scripts/install-files.mjs";
 import { installJsonServer } from "../scripts/install-host-config.mjs";
 import { bridgeHostConfig } from "../scripts/setup.mjs";
 import { ACP_PRESETS } from "../src/acp-presets.mjs";
+import { withHarnestOnPath } from "./fixtures/harnest-shell.mjs";
 
 const run = promisify(execFile);
 const runShell = promisify(exec);
+const dispatcher = fileURLToPath(new URL("../scripts/harnest.mjs", import.meta.url));
 const overrides = ["COPILOT_HOME", "QWEN_HOME", "KILO_CONFIG", "XDG_CONFIG_HOME", "CLINE_MCP_SETTINGS_PATH",
   "CLINE_DATA_DIR", "CLINE_DIR", "KIRO_HOME", "KIMI_SHARE_DIR", "GOOSE_PATH_ROOT", "VIBE_HOME"];
 const jsonHosts = {
@@ -43,14 +46,16 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
     stateDir, boardDir: join(fixture, "boards"), graphDir: join(fixture, "graphs"), workflowDir: join(fixture, "workflows"),
     routing: { config: {}, env: {}, policyFile: join(fixture, "routing.json") },
   }) });
-  const env = { ...process.env, HARNEST_STATE_DIR: stateDir, HARNEST_LOGIN_DAEMON_DIR: daemonDir,
-    HARNEST_LOGIN_JOB_DIR: stateDir, HARNEST_DAEMON_FIXTURE_PORT: String(daemon.port) };
+  const env = await withHarnestOnPath(join(fixture, "bin"), {
+    ...process.env, HARNEST_STATE_DIR: stateDir, HARNEST_LOGIN_DAEMON_DIR: daemonDir,
+    HARNEST_LOGIN_JOB_DIR: stateDir, HARNEST_DAEMON_FIXTURE_PORT: String(daemon.port),
+  });
   for (const name of overrides) delete env[name];
   const cliOptions = (home, pathOverrides = {}) => ({
     timeout: 35_000, windowsHide: true,
     env: { ...env, HOME: home, USERPROFILE: home, APPDATA: join(home, "roaming"), ...pathOverrides },
   });
-  const cli = (home, script, ...args) => run(process.execPath, ["scripts/" + script + ".mjs", ...args], cliOptions(home));
+  const cli = (home, command, ...args) => run(process.execPath, [dispatcher, command, ...args], cliOptions(home));
   const bridge = { command: process.execPath, args: [join(process.cwd(), "src", "mcp-bridge.mjs")],
     env: { HARNEST_LOGIN_DAEMON_DIR: daemonDir, HARNEST_LOGIN_JOB_DIR: stateDir } };
   const expected = {
@@ -77,7 +82,8 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
       await writeFile(path, prior);
 
       const setup = await cli(home, "setup", host, "--no-autostart");
-      assert.match(setup.stdout, /Reverse path: node scripts\/install-host-config\.mjs --restore /);
+      assert.match(setup.stdout, new RegExp(`^Reverse path: harnest setup remove ${host}$`, "m"));
+      assert.match(setup.stdout, /Reverse path(?: \(PowerShell\))?: harnest setup --restore /);
       const installed = await readFile(path, "utf8");
       const decoded = comments ? parse(installed) : JSON.parse(installed);
       assert.deepEqual(decoded, { unrelated, [key]: { other, harnest: expected[host] ?? bridge } });
@@ -99,7 +105,7 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
       const doctor = await cli(home, "doctor", "--host", host, "--project", home);
       assert.ok(doctor.stdout.includes(`lead-${host}: ok (stdio bridge, MCP catalog verified) ${path}`), doctor.stdout);
 
-      await cli(home, "install-host-config", "--restore", backup);
+      await cli(home, "setup", "--restore", backup);
       assert.equal(await readFile(path, "utf8"), prior);
     });
   }
@@ -123,16 +129,22 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         const key = { kilo: "mcp", amp: "amp.mcpServers" }[host] ?? "mcpServers";
         const comments = ["qwen-code", "kilo", "auggie", "devin"].includes(host);
         await assert.rejects(readFile(path), { code: "ENOENT" });
-        const { stdout } = await run(process.execPath, ["scripts/setup.mjs", host, ...projectFlags, "--no-autostart"], options);
+        const { stdout } = await run(process.execPath, [dispatcher, "setup", host, ...projectFlags, "--no-autostart"], options);
         const installed = JSON.parse(await readFile(path, "utf8"));
         const entry = expected[host] ?? bridge;
         assert.deepEqual(installed, { [key]: { harnest: entry } });
-        const prefix = "Reverse path: ";
+        const windowsCursor = host === "cursor" && process.platform === "win32";
+        const prefix = windowsCursor ? "Reverse path (cmd.exe): " : "Reverse path: ";
         const outputLines = stdout.split(/\r?\n/);
         const reverseLines = outputLines.filter((line) => line.startsWith(prefix));
-        assert.deepEqual(reverseLines, [`Reverse path: bun run setup remove ${host}`]);
+        let remove = `remove ${host}`;
+        if (host === "cursor") {
+          const canonicalProject = await realpath(project);
+          remove += ` --project ${windowsCursor ? `"${canonicalProject}"` : `'${canonicalProject}'`}`;
+        }
+        assert.deepEqual(reverseLines, [`${prefix}harnest setup ${remove}`]);
         assert.equal(outputLines[outputLines.indexOf(reverseLines[0]) + 1],
-          "Run it from the Harnest repository root, with the same config path environment variables you used for setup.");
+          "Use the same config path environment variables you used for setup.");
 
         const other = { command: "other" };
         installed[key].other = other;
@@ -166,7 +178,7 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
       });
     }
     const { stdout } = await cli(fixture, "setup", "--help");
-    assert.match(stdout, /bun run setup remove <host>/);
+    assert.match(stdout, /harnest setup remove <host>/);
     await assert.rejects(cli(fixture, "setup", "remove", "goose"), /Removal is unsupported for host: goose/);
   });
 
@@ -195,7 +207,7 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
   }
   const setupPresets = ACP_PRESETS.map(({ id }) => id).filter((id) => id !== "antigravity");
   assert.deepEqual([...Object.keys(jsonHosts), "goose", "mistral-vibe"].sort(), setupPresets.sort());
-  await assert.rejects(cli(fixture, "setup", "antigravity", "--no-autostart"), /Usage: bun run setup/);
+  await assert.rejects(cli(fixture, "setup", "antigravity", "--no-autostart"), /Usage: harnest setup/);
 });
 
 test("preset lead config honors user path overrides", () => {

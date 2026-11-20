@@ -2,7 +2,7 @@
 
 Harnest MCP connects an MCP lead client to coding agents through durable jobs and receipts. Start with the shared HTTP daemon or use its stdio bridge. Add a host plugin, skill, command, or visible worker only when you want that host-specific experience.
 
-Install `v0.1.0` from the public `harshanandak/harnest` GitHub repository. The [install guide](getting-started.md#install-from-github) gives the tagged checkout, frozen Bun install, and daemon setup.
+Install the `harnest` CLI from the public GitHub repository, then connect a host. See the [install guide](getting-started.md#install-from-github).
 
 ## Start here
 

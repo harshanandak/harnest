@@ -13,8 +13,8 @@ Install the ACP agent through its own supported distribution path and complete i
 Harnest ships local launch recipes for the [ACP presets in the coverage table](users/supported-agents.md#downstream-coverage). Each recipe has a documented native command and remains unverified with Harnest. Registration works offline.
 
 ```sh
-bun run acp add github-copilot-cli
-bun run acp add github-copilot-cli --trust
+harnest acp add github-copilot-cli
+harnest acp add github-copilot-cli --trust
 ```
 
 The first command prints the preset command and arguments, then exits with a `--trust` requirement without writing the config. Repeat with `--trust` after reviewing the launch. Registration searches only absolute `PATH` entries and saves and prints the resolved executable path. Use `--command <absolute-path>` if the CLI executable is outside `PATH`, including when an installation only puts a shell shim on `PATH`. Supply the path to an executable Harnest can launch directly. If you need different arguments, use manual registration below.
@@ -59,7 +59,7 @@ Repeat `--arg` for multiple arguments. Set `--protocol-version 1` to select the 
 
 Keep machine-specific commands in the ignored local configuration. For a hand-edited registration, set `command` to an absolute executable path. The registration tools resolve and store that path when you pass `--trust`. Harnest launches the stored executable directly without a shell. The optional registry id and version are provenance, not proof that the local executable matches that version.
 
-`bun run doctor` reports configured registration ids, trust flags, and provenance metadata only. It deliberately does not run `initialize`, `login`, `help`, `version`, or another executable health check. Use the native agent's own documentation for installation and authentication checks.
+`harnest doctor` reports configured registration ids, trust flags, and provenance metadata only. It deliberately does not run `initialize`, `login`, `help`, `version`, or another executable health check. Use the native agent's own documentation for installation and authentication checks.
 
 ## Start a handoff
 

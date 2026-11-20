@@ -1,13 +1,13 @@
 # Optional host integrations
 
-Run `bun run setup <host>` from the Harnest checkout. Keep the backup output and restart the host. Setup starts the shared daemon and registers it at login. Pass `--no-autostart` to skip login registration.
+Run `harnest setup <host>`. Keep the backup output and restart the host. Automatic setup starts the shared daemon and registers it at login. Pass `--no-autostart` to skip login registration.
 
 ## Codex
 
 Install the Harnest plugin, user MCP bridge, and native workers:
 
 ```powershell
-bun run setup codex
+harnest setup codex
 ```
 
 The MCP config and native workers both use `CODEX_HOME` when it is set, otherwise `~/.codex`. Restart Codex and invoke the skill as `$handoff`. Its native workers cover the five external named targets plus the generic `acp_worker`. For Codex-to-Codex handoffs, call the MCP tool directly.
@@ -19,7 +19,7 @@ Setup skips identical worker files and prints a backup path for each customized 
 Install the local marketplace and Harnest plugin:
 
 ```powershell
-bun run setup claude
+harnest setup claude
 ```
 
 Restart Claude Code so its bundled MCP configuration, commands, skill, and worker agents reload.
@@ -29,13 +29,13 @@ Restart Claude Code so its bundled MCP configuration, commands, skill, and worke
 Install the MCP entry, plugin, worker agents, handoff skill, and commands:
 
 ```powershell
-bun run setup opencode
+harnest setup opencode
 ```
 
 The installer backs up every changed file and prints a manifest-specific reverse command. Save it. Reversal has this form:
 
 ```powershell
-node scripts/install-opencode-integration.mjs --restore "<printed-manifest-path>"
+harnest setup opencode --restore "<printed-manifest-path>"
 ```
 
 Restart OpenCode after install, update, or restore. Use OpenCode V2. Migrate an existing flat MCP or singular plugin configuration before running the installer. It rejects those layouts before changing files. See the [OpenCode migration guide](https://opencode.ai/docs/migrate-v1/). Use the installed MCP tools directly or the host's worker agents when a visible child session is useful.
@@ -45,27 +45,27 @@ Restart OpenCode after install, update, or restore. Use OpenCode V2. Migrate an 
 Install the native extension, its Pi settings entry, and the handoff skill:
 
 ```powershell
-bun run setup pi
+harnest setup pi
 ```
 
-The installer creates timestamped `.bak-harnest-*` copies of files it replaces. Keep them for manual reversal. Start a new Pi session after installing or updating the integration.
+The installer creates timestamped `.bak-harnest-*` copies of files it replaces. To disconnect, run `harnest setup remove pi` to remove the extension and its settings entry. Start a new Pi session after installing, updating, or removing the integration.
 
 ## Cursor
 
 Install the user-level MCP bridge and the selected project's skill, router rule, worker, commands, and references:
 
 ```powershell
-bun run setup cursor --project "/absolute/path/to/project"
+harnest setup cursor --project "/absolute/path/to/project"
 ```
 
-Omit `--project` to use the Harnest checkout. Setup backs up and updates the user MCP entry and any Harnest registration in the selected project. Restart Cursor. Cursor cloud agents need MCP in their own environment.
+Omit `--project` to use the current directory. Setup prints the absolute project path and requires an explicit `--project` when the current directory is your home directory or a filesystem root. Setup backs up and updates the user MCP entry and any Harnest registration in the selected project. Restart Cursor. Cursor cloud agents need MCP in their own environment.
 
 ## Amp as a lead client
 
 Install the bridge in the user Amp settings:
 
 ```sh
-bun run setup amp
+harnest setup amp
 ```
 
 When Amp reports `awaiting approval`, run:
@@ -82,20 +82,20 @@ Amp can lead through MCP on a supported host. The downstream `amp` target runs o
 Setup prints the backup path for changed configurations. To restore a single configuration file, use:
 
 ```sh
-node scripts/install-host-config.mjs --restore "/absolute/path/to/FILE.bak-harnest-..."
+harnest setup --restore "/absolute/path/to/FILE.bak-harnest-..."
 ```
 
-For OpenCode, use the installer manifest command printed during setup. For Pi, restore the timestamped file backups. Restart the host after restoring and keep backups private.
+On Windows, copy the printed command for PowerShell or cmd.exe. For OpenCode, use the manifest command printed during setup. Restart the host after restoring and keep backups private.
 
 ## Remove an MCP registration
 
-Run `bun run setup remove <host>` to disconnect Harnest from any of the nine automatic ACP presets, Amp, or Cursor's user config. Setup prints this command when it creates the user config. Run it from the Harnest repository root, with the same config path environment variables you used for setup.
+Paste the reverse command printed by setup. A checkout prints a command with the absolute checkout path. Cursor's command includes `--project` to remove the project MCP entry managed by setup and reverse the installed project files. It preserves unrelated files and later edits. Without `--project`, Cursor removal uses the current directory if setup recorded it as a workspace. Run from your home directory to remove just the user MCP entry. Use the same config path environment variables you used for setup.
 
-The command saves a private backup before removing the `harnest` MCP entry. It keeps the file, its other settings, and surrounding comments. Restart the host afterward.
+Claude and Codex removal use the native plugin CLI to uninstall Harnest and remove its local marketplace. Codex also removes its MCP table and matching copies of the bundled workers. Pi removes the auto-loaded extension, unregisters it in settings, and removes matching copies of the bundled skill. MCP config removal saves a private backup and keeps other registrations. For a Cursor project's migrated MCP entry, use the printed backup command. For a manual setup, remove the entry you added. Restart the host afterward.
 
 ## ACP presets as lead clients
 
-For automatic setup, run `bun run setup <host>` using the host ID below. Reload the CLI and run `bun run doctor --host <host>` to check the configured bridge and discover the Harnest tools. Harnest's preset setup commands have CI fixture coverage only.
+For automatic setup, run `harnest setup <host>` using the host ID below. Reload the CLI and run `harnest doctor --host <host>` to check the configured bridge and discover the Harnest tools. Harnest's preset setup commands have CI fixture coverage only.
 
 `~` means the user's home on macOS and Linux and `%USERPROFILE%` on Windows. An override marked **none documented** means the linked CLI documentation specifies a default user path and describes no environment variable for changing it.
 
@@ -114,7 +114,7 @@ For automatic setup, run `bun run setup <host>` using the host ID below. Reload 
 | `devin` | Automatic | `~/.config/devin/mcp_config.json` on macOS and Linux, `%APPDATA%\devin\mcp_config.json` on Windows. Requires Devin v3000.3 or newer. Override none documented. | JSON with comments · `mcpServers` | [Paths and stdio fields](https://docs.devin.ai/cli/extensibility/mcp/configuration#via-config-file), [comment support](https://docs.devin.ai/cli/reference/configuration/config-file#json-with-comments) |
 | `antigravity` | [Manual](#antigravity-cli-as-a-lead-client) | `~/.gemini/config/mcp_config.json` | JSON · `mcpServers` | [MCP path and stdio fields](https://antigravity.google/docs/mcp?tab=cli) |
 
-For Goose and Mistral Vibe, run `bun run setup goose` or `bun run setup mistral-vibe` to print the resolved path and a ready-to-merge snippet with the bridge command, arguments, and state directories. Make a copy of the configuration before editing. Verify Goose with `goose info -v` and Vibe with `/mcp harnest` in a new Vibe session.
+For Goose and Mistral Vibe, run `harnest setup goose` or `harnest setup mistral-vibe` to print the resolved path and a ready-to-merge snippet with the bridge command, arguments, and state directories. Make a copy of the configuration before editing. Verify Goose with `goose info -v` and Vibe with `/mcp harnest` in a new Vibe session.
 
 For Kiro, open `/mcp` to check that Harnest loaded. If a custom agent omits global MCP configuration, set `includeMcpJson` to `true` in that agent's configuration. [Kiro custom agent configuration](https://kiro.dev/docs/cli/v3/agent-config/#includemcpjson-field)
 
@@ -136,7 +136,7 @@ Add a stdio server to `~/.gemini/config/mcp_config.json`. A minimal configuratio
 From the Harnest checkout, print the snippet with the paths for your installation.
 
 ```sh
-bun run setup other
+harnest setup other
 ```
 
 Merge the printed `mcpServers.harnest` entry into your config. If the file does not exist, use the whole printed JSON object. Restart `agy` and run `/mcp` to check the connection. Harnest has not verified this setup against the real CLI. See [Google's MCP configuration docs](https://antigravity.google/docs/mcp?tab=cli).

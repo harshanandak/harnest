@@ -38,6 +38,11 @@ jobs:
       # The vendored plugin validator imports yaml.
       - run: python -m pip install PyYAML==6.0.2
       - run: bun install --frozen-lockfile --omit optional
+      - name: Smoke test the global Harnest CLI
+        env:
+          HARNEST_INSTALL_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          HARNEST_INSTALL_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node .github/scripts/global-cli-smoke.mjs
       - run: bun run check
       - run: bun run smoke:mcp
       - run: bun run smoke:mcp --bridge

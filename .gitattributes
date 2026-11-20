@@ -2,6 +2,7 @@ agents/*.md text eol=lf
 codex-agents/*.toml text eol=lf
 opencode-agents/*.md text eol=lf
 scripts/vendor/codex-plugin-validator/* text eol=lf
+scripts/harnest.mjs text eol=lf
 
 # Kept in the repo, left out of GitHub release archives (Source code zip/tar.gz).
 # Users install and run Harnest without these; maintainers and CI use them.
