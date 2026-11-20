@@ -98,8 +98,16 @@ async function clientDriver() {
 async function childProcesses(parentPids) {
   if (process.platform === "win32") {
     const filter = parentPids.map((pid) => `ParentProcessId = ${pid}`).join(" OR ");
+    const parentFilter = parentPids.map((pid) => `ProcessId = ${pid}`).join(" OR ");
+    // Windows never updates ParentProcessId and reuses PIDs, so a boot-time process such as
+    // csrss.exe can name a dead parent whose PID the daemon or driver now holds. A real child
+    // is always created after its parent, so drop only rows created before their parent.
     const { stdout } = await exec(windowsSystemCommand("powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command",
-      `$children = Get-CimInstance Win32_Process -Filter '${filter}' | Select-Object ` +
+      `$parents = @{}; Get-CimInstance Win32_Process -Filter '${parentFilter}' | ` +
+      `ForEach-Object { $parents[[uint32]$_.ProcessId] = $_.CreationDate }; ` +
+      `$children = Get-CimInstance Win32_Process -Filter '${filter}' | Where-Object { ` +
+      `$started = $parents[[uint32]$_.ParentProcessId]; ` +
+      `-not ($started -and $_.CreationDate -and $_.CreationDate -lt $started) } | Select-Object ` +
       `@{n='image';e={$_.Name}}, @{n='pid';e={$_.ProcessId}}, ` +
       `@{n='parentPid';e={$_.ParentProcessId}}, @{n='rssBytes';e={[uint64]$_.WorkingSetSize}}; ` +
       `ConvertTo-Json -InputObject @($children) -Compress`],
