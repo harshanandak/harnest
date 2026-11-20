@@ -272,7 +272,7 @@ async function measure(sampleNumber) {
 }
 
 if (process.argv.includes("--driver")) {
-  await clientDriver().catch((error) => { console.error(error.stack); process.exit(1); });
+  await clientDriver().catch((error) => process.stderr.write(String(error.stack ?? error) + "\n", () => process.exit(1)));
 } else {
   const result = { platform: process.platform, release: release(), arch: process.arch, node: process.version, budgets, samples: [] };
   for (let run = 1; run <= 3; run++) {

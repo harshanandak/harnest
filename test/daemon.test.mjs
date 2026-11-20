@@ -401,7 +401,7 @@ test("MCP aggregate continuations replay exact compare, review, graph and dynami
   const { home, directory, stateDir } = await fixture(t);
   const evidence = Array.from({ length: 100 }, (_, i) => String(i).padEnd(4000, i % 2 ? "\u754c" : "\\"));
   const result = structuredResult(JSON.stringify({
-    finalText: JSON.stringify({ scores: { correctness: 10 }, findings: ["fixture finding"] }),
+    finalText: `\x60\x60\x60json\n{"scores":{"correctness":10},"findings":["fixture finding"]}\n\x60\x60\x60`,
     evidence,
   }));
   const graphEvidence = evidence.slice(0, 24);
@@ -463,7 +463,7 @@ test("MCP aggregate continuations replay exact compare, review, graph and dynami
         request: { ...request, requestId: reviewId }, reviewers: lanes, rubric: ["correctness"], rounds: 1,
       }, "review")).value;
       assert.equal(reviewed.reviewId, reviewId);
-      assert.equal(reviewed.state, "completed");
+      assert.equal(reviewed.state, "completed", JSON.stringify(review.final));
       assert.equal(review.final.overall, 10);
       assert.ok(review.rounds[0].lanes.every((lane) => lane.result.evidence.length === 100));
       assert.equal(await collect("handoff_review", "review", reviewed), JSON.stringify(review));

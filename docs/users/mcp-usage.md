@@ -145,7 +145,7 @@ For a fixed dependency graph across agents:
 
 1. Call `handoff_graph_validate` with the complete graph.
 2. Call `handoff_graph_start` and retain its `graphId`.
-3. Poll `handoff_graph_status`. Pass the previous `revision` as `afterRevision` and use `waitMs` for change-based waiting.
+3. Poll `handoff_graph_status`. Follow any continuation to read the node states. Pass the previous `revision` as `afterRevision` and use `waitMs` for change-based waiting.
 4. Call `handoff_graph_result` after the graph settles.
 5. Use `handoff_graph_resume` with a stable `commandId` to retry selected unsuccessful nodes. Completed nodes are retained.
 
