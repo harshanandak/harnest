@@ -23,7 +23,9 @@ export function bridgeEntry() {
 
 const codexServerTable = /^[ \t]*\[\s*(?:mcp_servers|"mcp_servers"|'mcp_servers')\s*\.\s*(?:harnest|"harnest"|'harnest')\s*(?:\.\s*(.+?))?\s*\][ \t]*(?:#.*)?$/;
 const codexTokens = /(?<table>^[ \t]*\[{1,2}(?:[^"'[\]\r\n]|"(?:\\.|[^"\\\r\n])*"|'[^'\r\n]*')+\]{1,2}[ \t]*(?:#[^\r\n]*)?$)|"""(?:\\[\s\S]|"(?!"")|[^"\\])*?"{3,5}|'''[\s\S]*?'{3,5}|"(?:\\.|[^"\\\r\n])*"|'[^'\r\n]*'|#[^\r\n]*|(?<open>[[{])|(?<close>[\]}])/gm;
-const harnestTable = (section) => codexServerTable.exec(section.trimStart().split(/\r?\n/, 1)[0]);
+const tableHeader = (section) => section.trimStart().split(/\r?\n/, 1)[0];
+const harnestTable = (section) => codexServerTable.exec(tableHeader(section));
+const createdCodexHeader = "[mcp_servers.harnest] # Harnest created this config file";
 export const codexConfigDir = (home = homedir()) => process.env.CODEX_HOME || join(home, ".codex");
 
 function codexTables(text) {
@@ -44,7 +46,7 @@ function codexTables(text) {
 }
 
 // Replace just the Harnest transport table(s), keeping all other Codex configuration verbatim.
-export function codexConfig(previous, entry) {
+export function codexConfig(previous, entry, created = previous === null) {
   const bom = previous?.startsWith("\uFEFF") ? "\uFEFF" : "";
   const tables = codexTables(previous?.slice(bom.length) ?? "");
   const unmanaged = [];
@@ -68,7 +70,9 @@ export function codexConfig(previous, entry) {
     }
   }
   const remainder = unmanaged.join("").trimEnd();
-  const lines = ["[mcp_servers.harnest]", `command = ${JSON.stringify(entry.command)}`, `args = ${JSON.stringify(entry.args)}`];
+  const header = created || tables.some((section) => tableHeader(section) === createdCodexHeader)
+    ? createdCodexHeader : "[mcp_servers.harnest]";
+  const lines = [header, `command = ${JSON.stringify(entry.command)}`, `args = ${JSON.stringify(entry.args)}`];
   if (entry.env) lines.push(`env = { ${Object.entries(entry.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(", ")} }`);
   return bom + (remainder ? `${remainder}\n\n` : "") + [...lines, ...keptSettings].join("\n") + "\n";
 }
@@ -77,7 +81,7 @@ export function cursorUserConfig(home = homedir()) {
   return { path: join(home, ".cursor", "mcp.json"), key: "mcpServers" };
 }
 
-export async function installHostConfig(host, { home = homedir(), codexHome = codexConfigDir(home) } = {}) {
+export async function installHostConfig(host, { home = homedir(), codexHome = codexConfigDir(home), created } = {}) {
   const entry = bridgeEntry();
   if (host === "cursor") {
     const { path, key } = cursorUserConfig(home);
@@ -86,7 +90,7 @@ export async function installHostConfig(host, { home = homedir(), codexHome = co
   if (host !== "codex") throw new Error("Expected codex or cursor");
   const path = join(codexHome, "config.toml");
   const previous = await readExisting(path);
-  const backup = await replaceWithBackup(path, codexConfig(previous, entry), previous, { sensitive: true });
+  const backup = await replaceWithBackup(path, codexConfig(previous, entry, created), previous, { sensitive: true });
   return { path, backup };
 }
 
@@ -95,9 +99,11 @@ export async function removeCodexConfig() {
   const previous = await readExisting(path);
   if (previous === null) return { path, backup: null, status: "config-missing" };
   const bom = previous.startsWith("\uFEFF") ? "\uFEFF" : "";
-  const next = bom + codexTables(previous.slice(bom.length)).filter((section) => !harnestTable(section)).join("");
+  const tables = codexTables(previous.slice(bom.length));
+  const next = bom + tables.filter((section) => !harnestTable(section)).join("");
   if (next === previous) return { path, backup: null, status: "already-absent" };
-  const backup = await replaceWithBackup(path, next, previous, { sensitive: true });
+  const removeFile = !next.trim() && tables.some((section) => tableHeader(section) === createdCodexHeader);
+  const backup = await replaceWithBackup(path, removeFile ? null : next, previous, { sensitive: true });
   return { path, backup, status: "removed" };
 }
 
@@ -169,7 +175,7 @@ export async function installJsonServer(path, key, entry, { existingOnly = false
   return result;
 }
 
-export async function removeJsonServer({ path, key, format = "json" }) {
+export async function removeJsonServer({ path, key, format = "json", expectedEntry = undefined }) {
   const previous = await readExisting(path);
   if (previous === null) return { path, backup: null, status: "config-missing" };
   const bom = previous.startsWith("\uFEFF") ? "\uFEFF" : "";
@@ -179,6 +185,9 @@ export async function removeJsonServer({ path, key, format = "json" }) {
   if (servers && !["object", "null"].includes(servers.type)) throw new Error(`Invalid MCP configuration: ${path}`);
   const current = propertyValue(servers, "harnest", path);
   if (!current) return { path, backup: null, status: "already-absent" };
+  if (expectedEntry !== undefined && !isDeepStrictEqual(JSON.parse(JSON.stringify(getNodeValue(current))), expectedEntry)) {
+    return { path, backup: null, status: "entry-changed" };
+  }
   const next = removeServerProperty(text, servers, current.parent);
   parseHostJson(next, path, format);
   const backup = await replaceWithBackup(path, bom + next, previous, { sensitive: true });

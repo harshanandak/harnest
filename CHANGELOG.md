@@ -4,6 +4,7 @@
 
 - Install the `harnest` CLI from GitHub with Bun. Run setup, doctor, daemon, ACP registration, and routing setup from any directory.
 - Host setup prints pasteable removal or restore commands, including native plugin removal for Claude and Codex and extension removal for Pi.
+- Checkout setup prints reverse commands that work from any directory. Cursor reversal also disconnects the selected project and reverses the files setup installed there.
 
 ## 0.1.0 - 2026-11-19
 

@@ -7,7 +7,7 @@ import { readDaemonToken } from "../src/daemon-settings.mjs";
 import { setupDaemon } from "./install-daemon.mjs";
 import { httpEntry } from "./install-host-config.mjs";
 import { backupStamp, replaceWithBackup, writeInstallerFile } from "./install-files.mjs";
-import { setupPathCommand } from "./setup-command.mjs";
+import { setupCommand } from "./setup-command.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -204,7 +204,7 @@ export async function installIntegration(configDir, { token, prepareDaemon } = {
       if (!written?.equals(file.bytes)) throw new Error(`Read-back failed: ${file.path}`);
     }
   } catch (error) {
-    throw new Error(`Installation interrupted.\n${setupPathCommand("opencode --restore", manifestPath)}`, { cause: error });
+    throw new Error(`Installation interrupted.\n${setupCommand("opencode --restore", manifestPath)}`, { cause: error });
   }
   return { changed: changes.map(file => file.path), manifest: manifestPath };
 }
@@ -220,6 +220,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const result = await installIntegration(configDir, { prepareDaemon: () => setupDaemon({ noAutostart }) });
     console.log(JSON.stringify(result, null, 2));
     const manifest = result.manifest ?? await latestInstallManifest(configDir);
-    if (manifest) console.log(setupPathCommand("opencode --restore", manifest));
+    if (manifest) console.log(setupCommand("opencode --restore", manifest));
   }
 }

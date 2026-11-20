@@ -29,6 +29,7 @@ if (!command || command === "--help" || command === "-h") {
   console.log(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
 } else if (entrypoint) {
   const script = new URL(entrypoint, import.meta.url);
+  if (command === "setup") process.env.HARNEST_SETUP_VIA_CLI = "1";
   process.argv.splice(1, process.argv.length - 1, fileURLToPath(script), ...args);
   await import(script.href);
 } else {

@@ -5,11 +5,11 @@ import { readDaemonToken } from "../src/daemon-settings.mjs";
 import { setupDaemon } from "./install-daemon.mjs";
 import { bridgeEntry, cursorUserConfig, httpEntry, installJsonServer, removeJsonServer, restoreHostConfig } from "./install-host-config.mjs";
 import { installPluginHost, removePluginHost } from "./install-plugin-host.mjs";
-import { installCursorIntegration } from "./install-cursor-integration.mjs";
+import { defaultCursorProject, installCursorIntegration, removeCursorProject } from "./install-cursor-integration.mjs";
 import { installIntegration, latestInstallManifest, openCodeConfigDir, restoreIntegration } from "./install-opencode-integration.mjs";
 import { installPiIntegration, removePiIntegration } from "./install-pi-integration.mjs";
 import { manualBridgeConfig, manualBridgeHosts, presetBridgeHosts } from "./preset-lead-hosts.mjs";
-import { setupPathCommand } from "./setup-command.mjs";
+import { setupCommand } from "./setup-command.mjs";
 
 const bridgeHosts = ["amp", ...Object.keys(presetBridgeHosts)];
 export const namedHosts = ["claude", "codex", "opencode", "cursor", "pi", ...bridgeHosts, ...manualBridgeHosts];
@@ -30,9 +30,9 @@ export async function installBridgeHost(host, options = {}) {
 
 const setupUsage = "Usage: harnest setup " + [...namedHosts, "other"].join("|") +
   " [--no-autostart] [--project DIR for cursor | --http-config FILE for other]\n" +
-  "       harnest setup remove <host> [--http-config FILE for other]\n" +
+  "       harnest setup remove <host> [--project DIR for cursor | --http-config FILE for other]\n" +
   "       harnest setup --restore BACKUP | harnest setup opencode --restore MANIFEST\n" +
-  "Removal supports claude, codex, pi, cursor (user config), " + bridgeHosts.join(", ") + ", and other with --http-config.\n" +
+  "Removal supports claude, codex, pi, cursor, " + bridgeHosts.join(", ") + ", and other with --http-config.\n" +
   "Manual MCP configuration: " + manualBridgeHosts.join(", ") + ".";
 
 function printResult(result) {
@@ -40,20 +40,23 @@ function printResult(result) {
 }
 
 async function removeHost([target, ...flags]) {
-  const http = target === "other" && flags.length === 2 && flags[0] === "--http-config" && !flags[1].startsWith("--");
-  if (!target || (target === "other" ? !http : flags.length !== 0)) throw new Error(setupUsage);
+  const pathFlag = flags.length === 2 && flags[1] && !flags[1].startsWith("--");
+  const http = target === "other" && pathFlag && flags[0] === "--http-config";
+  const cursor = target === "cursor" && pathFlag && flags[0] === "--project";
+  if (!target || (target === "other" ? !http : flags.length !== 0 && !cursor)) throw new Error(setupUsage);
   if (target === "claude" || target === "codex") return printResult(await removePluginHost(target));
   if (target === "pi") return printResult(await removePiIntegration());
   const config = http ? { path: resolve(flags[1]), key: "mcpServers" }
     : target === "cursor" ? cursorUserConfig() : bridgeHostConfig(target);
   if (!config) throw new Error(`Removal is unsupported for host: ${target}. See harnest setup --help.`);
   const result = await removeJsonServer(config);
+  const project = cursor ? await removeCursorProject(resolve(flags[1])) : undefined;
   const messages = {
     "config-missing": "Host configuration file does not exist.",
     "already-absent": "The Harnest MCP entry is already absent.",
     removed: "Removed the Harnest MCP entry.",
   };
-  printResult({ ...result, message: messages[result.status] });
+  printResult({ ...result, project, message: messages[result.status] });
 }
 
 async function setup(args) {
@@ -82,6 +85,7 @@ async function setup(args) {
     console.log("To reverse a manual setup, remove the harnest entry you added to that file.");
     return;
   }
+  const cursorProject = host === "cursor" ? project ?? await defaultCursorProject() : null;
   const prepareDaemon = () => setupDaemon({ noAutostart: flags.includes("--no-autostart") });
   if (host !== "opencode") await prepareDaemon();
   let result;
@@ -90,34 +94,34 @@ async function setup(args) {
     case "claude":
     case "codex":
       await installPluginHost(host);
-      reverse.push(`Reverse path: harnest setup remove ${host}`);
+      reverse.push(setupCommand(`remove ${host}`));
       break;
     case "opencode": {
       const dir = openCodeConfigDir();
       result = await installIntegration(dir, { prepareDaemon });
       const manifest = result.manifest ?? await latestInstallManifest(dir);
-      if (manifest) reverse.push(setupPathCommand("opencode --restore", manifest));
+      if (manifest) reverse.push(setupCommand("opencode --restore", manifest));
       break;
     }
     case "cursor":
-      result = await installCursorIntegration(project ?? process.cwd());
-      reverse.push(`Reverse path: harnest setup remove ${host}`);
-      if (result.mcp.backup) reverse.push(setupPathCommand("--restore", resolve(result.mcp.backup)));
-      if (result.projectMcp?.backup) reverse.push(setupPathCommand("--restore", resolve(result.projectMcp.backup)));
+      result = await installCursorIntegration(cursorProject);
+      console.log(`Cursor project: ${result.projectPath}`);
+      reverse.push(setupCommand("remove cursor --project", result.projectPath));
+      if (result.mcp.backup) reverse.push(setupCommand("--restore", resolve(result.mcp.backup)));
       break;
     case "pi":
       result = await installPiIntegration();
-      reverse.push(`Reverse path: harnest setup remove ${host}`);
+      reverse.push(setupCommand(`remove ${host}`));
       break;
     case "other":
       result = await installJsonServer(resolve(positional[1]), "mcpServers", { type: "http", ...httpEntry(await readDaemonToken()) });
-      reverse.push(setupPathCommand("remove other --http-config", result.path));
-      if (result.backup) reverse.push(setupPathCommand("--restore", result.backup));
+      reverse.push(setupCommand("remove other --http-config", result.path));
+      if (result.backup) reverse.push(setupCommand("--restore", result.backup));
       break;
     default:
       result = await installBridgeHost(host);
-      reverse.push(`Reverse path: harnest setup remove ${host}`);
-      if (result.backup) reverse.push(setupPathCommand("--restore", resolve(result.backup)));
+      reverse.push(setupCommand(`remove ${host}`));
+      if (result.backup) reverse.push(setupCommand("--restore", resolve(result.backup)));
       break;
   }
   if (result) printResult(result);
@@ -125,7 +129,7 @@ async function setup(args) {
   if (host === "kiro") console.log("In Kiro, run /mcp to check Harnest. For custom agents, enable includeMcpJson to load user-level servers.");
   console.log("Restart or reload the host to use Harnest.");
   for (const line of reverse) console.log(line);
-  if (reverse[0]?.startsWith("Reverse path: harnest setup remove")) {
+  if (host !== "opencode") {
     console.log("Use the same config path environment variables you used for setup.");
   }
 }

@@ -58,7 +58,7 @@ Install the user-level MCP bridge and the selected project's skill, router rule,
 harnest setup cursor --project "/absolute/path/to/project"
 ```
 
-Omit `--project` to use the current directory. Setup backs up and updates the user MCP entry and any Harnest registration in the selected project. Restart Cursor. Cursor cloud agents need MCP in their own environment.
+Omit `--project` to use the current directory. Setup prints the absolute project path and requires an explicit `--project` when the current directory is your home directory or a filesystem root. Setup backs up and updates the user MCP entry and any Harnest registration in the selected project. Restart Cursor. Cursor cloud agents need MCP in their own environment.
 
 ## Amp as a lead client
 
@@ -89,7 +89,7 @@ On Windows, copy the printed command for PowerShell or cmd.exe. For OpenCode, us
 
 ## Remove an MCP registration
 
-Run `harnest setup remove <host>` for Claude, Codex, Pi, any of the nine automatic ACP presets, Amp, or Cursor's user config. For `other --http-config`, use the printed command with the explicit path. Use the same config path environment variables you used for setup.
+Paste the reverse command printed by setup. A checkout prints a command with the absolute checkout path. Cursor's command includes `--project` to remove the project MCP entry managed by setup and reverse the installed project files. It preserves unrelated files and later edits. `harnest setup remove cursor` without `--project` removes the user MCP entry. Use the same config path environment variables you used for setup.
 
 Claude and Codex removal use the native plugin CLI to uninstall Harnest and remove its local marketplace. Codex also removes its MCP table and matching copies of the bundled workers. Pi removes the auto-loaded extension, unregisters it in settings, and removes matching copies of the bundled skill. MCP config removal saves a private backup and keeps other registrations. For a Cursor project's migrated MCP entry, use the printed backup command. For a manual setup, remove the entry you added. Restart the host afterward.
 

@@ -58,20 +58,23 @@ export async function writeInstallerFile(path, content, { sensitive = false } = 
 
 const same = (a, b) => Buffer.isBuffer(a) ? Buffer.isBuffer(b) && a.equals(b) : a === b;
 
-export async function replaceWithBackup(path, next, previous = undefined, { sensitive = false } = {}) {
+export async function replaceWithBackup(path, next, previous = undefined, {
+  sensitive = false, keepBackup = true, beforeReplace = undefined,
+} = {}) {
   const encoding = Buffer.isBuffer(next) || Buffer.isBuffer(previous) ? null : "utf8";
   if (previous === undefined) previous = await readExisting(path, encoding);
   const changed = !same(next, previous);
   if (!changed && (!sensitive || previous === null || await isPrivateInstallerFile(path))) return null;
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const suffix = backupStamp();
-  const backup = changed && previous !== null ? `${path}.bak-harnest-${suffix}` : null;
+  const backup = keepBackup && changed && previous !== null ? `${path}.bak-harnest-${suffix}` : null;
   if (backup) await writeInstallerFile(backup, previous, { sensitive });
   const verifyPrevious = async () => {
     if (!same(await readExisting(path, encoding), previous)) throw new Error(`Configuration changed during install: ${path}`);
   };
   if (next === null) {
     await verifyPrevious();
+    await beforeReplace?.(backup);
     await unlink(path);
     return backup;
   }
@@ -79,6 +82,8 @@ export async function replaceWithBackup(path, next, previous = undefined, { sens
   try {
     await writeInstallerFile(temp, next, { sensitive });
     await verifyPrevious();
+    await beforeReplace?.(backup);
+    if (beforeReplace) await verifyPrevious();
     await rename(temp, path);
     if (!same(await readExisting(path, encoding), next)) throw new Error(`Could not verify configuration: ${path}`);
   } finally {

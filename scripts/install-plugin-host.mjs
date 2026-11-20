@@ -6,7 +6,7 @@ import { harnessLaunch } from "../src/config.mjs";
 import { windowsSystemCommand } from "../src/launch-command.mjs";
 import { runProcess } from "../src/process.mjs";
 import { codexConfigDir, installHostConfig, removeCodexConfig } from "./install-host-config.mjs";
-import { removeInstalledCopy } from "./install-files.mjs";
+import { readExisting, removeInstalledCopy } from "./install-files.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const marketplace = "harnest-local";
@@ -22,10 +22,11 @@ async function pluginCommand(host, ...args) {
 }
 
 export async function installPluginHost(host) {
+  const created = host === "codex" && await readExisting(join(codexConfigDir(), "config.toml")) === null;
   await pluginCommand(host, "marketplace", "add", root);
   await pluginCommand(host, host === "codex" ? "add" : "install", plugin);
   if (host === "codex") {
-    console.log(JSON.stringify(await installHostConfig(host)));
+    console.log(JSON.stringify(await installHostConfig(host, { created })));
     const windows = process.platform === "win32";
     const script = join(root, "scripts", windows ? "install-native-agents.ps1" : "install-native-agents.sh");
     const result = await runProcess(windows ? windowsSystemCommand("powershell.exe") : "bash", windows ? ["-NoProfile", "-File", script] : [script]);

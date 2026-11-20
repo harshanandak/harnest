@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { parse } from "jsonc-parser";
 import { startDaemon } from "../src/daemon.mjs";
@@ -16,6 +17,7 @@ import { withHarnestOnPath } from "./fixtures/harnest-shell.mjs";
 
 const run = promisify(execFile);
 const runShell = promisify(exec);
+const dispatcher = fileURLToPath(new URL("../scripts/harnest.mjs", import.meta.url));
 const overrides = ["COPILOT_HOME", "QWEN_HOME", "KILO_CONFIG", "XDG_CONFIG_HOME", "CLINE_MCP_SETTINGS_PATH",
   "CLINE_DATA_DIR", "CLINE_DIR", "KIRO_HOME", "KIMI_SHARE_DIR", "GOOSE_PATH_ROOT", "VIBE_HOME"];
 const jsonHosts = {
@@ -53,7 +55,7 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
     timeout: 35_000, windowsHide: true,
     env: { ...env, HOME: home, USERPROFILE: home, APPDATA: join(home, "roaming"), ...pathOverrides },
   });
-  const cli = (home, script, ...args) => run(process.execPath, ["scripts/" + script + ".mjs", ...args], cliOptions(home));
+  const cli = (home, command, ...args) => run(process.execPath, [dispatcher, command, ...args], cliOptions(home));
   const bridge = { command: process.execPath, args: [join(process.cwd(), "src", "mcp-bridge.mjs")],
     env: { HARNEST_LOGIN_DAEMON_DIR: daemonDir, HARNEST_LOGIN_JOB_DIR: stateDir } };
   const expected = {
@@ -127,14 +129,17 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         const key = { kilo: "mcp", amp: "amp.mcpServers" }[host] ?? "mcpServers";
         const comments = ["qwen-code", "kilo", "auggie", "devin"].includes(host);
         await assert.rejects(readFile(path), { code: "ENOENT" });
-        const { stdout } = await run(process.execPath, ["scripts/setup.mjs", host, ...projectFlags, "--no-autostart"], options);
+        const { stdout } = await run(process.execPath, [dispatcher, "setup", host, ...projectFlags, "--no-autostart"], options);
         const installed = JSON.parse(await readFile(path, "utf8"));
         const entry = expected[host] ?? bridge;
         assert.deepEqual(installed, { [key]: { harnest: entry } });
-        const prefix = "Reverse path: ";
+        const windowsCursor = host === "cursor" && process.platform === "win32";
+        const prefix = windowsCursor ? "Reverse path (cmd.exe): " : "Reverse path: ";
         const outputLines = stdout.split(/\r?\n/);
         const reverseLines = outputLines.filter((line) => line.startsWith(prefix));
-        assert.deepEqual(reverseLines, [`Reverse path: harnest setup remove ${host}`]);
+        const projectArg = windowsCursor ? `"${project}"` : `'${project}'`;
+        const remove = host === "cursor" ? `remove cursor --project ${projectArg}` : `remove ${host}`;
+        assert.deepEqual(reverseLines, [`${prefix}harnest setup ${remove}`]);
         assert.equal(outputLines[outputLines.indexOf(reverseLines[0]) + 1],
           "Use the same config path environment variables you used for setup.");
 
