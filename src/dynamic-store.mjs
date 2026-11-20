@@ -6,7 +6,7 @@
 //   runs/<runId>.journal.jsonl append-only lifecycle/replay journal
 //   requests/<sha256>.json     requestId -> runId dedup index
 //
-// Writes are temp-file + rename atomic; mutations serialize behind a run
+// Writes use temp-file + rename; snapshot writers serialize behind a run
 // lock. This is deliberately an independent implementation rather than a copy
 // of GraphStore's private transact: GraphStore couples its snapshot to a
 // graph-shaped lease sidecar, and reusing it would require editing graph
@@ -133,7 +133,12 @@ export class DynamicStore {
   }
 
   async readRun(runId) {
-    return this.#readMaybe(this.runPath(runId));
+    const path = this.runPath(runId);
+    const record = await this.#readMaybe(path);
+    if (record !== null) return record;
+    // A Windows replacement can briefly hide the path from an unlocked read.
+    // Confirm absence only after the snapshot writer releases the run lock.
+    return this.#withLock(`${path}.lock`, () => this.#readMaybe(path));
   }
 
   async #fileSignature(path) {
@@ -359,7 +364,7 @@ export class DynamicStore {
     if (!Number.isFinite(before)) throw dynamicError("validation", "beforeISO must be a valid ISO timestamp");
     const path = this.runPath(runId);
     return this.#withLock(`${path}.lock`, () => this.#withLock(`${this.journalPath(runId)}.lock`, async () => {
-      const record = await this.readRun(runId);
+      const record = await this.#readMaybe(path);
       if (!record) throw dynamicError("not-found", "dynamic run not found");
       if (!RUN_TERMINAL.has(record.state) || record.lease) {
         throw dynamicError("retention-active", `run ${runId} is ${record.state}${record.lease ? " with a live lease" : ""}; retention refuses active runs`);
@@ -410,7 +415,7 @@ export class DynamicStore {
     retentionLimit(maxJournalBytes);
     const path = this.runPath(runId);
     return this.#withLock(`${path}.lock`, () => this.#withLock(`${this.journalPath(runId)}.lock`, async () => {
-      const record = await this.readRun(runId);
+      const record = await this.#readMaybe(path);
       if (!record) throw dynamicError("not-found", "dynamic run not found");
       if (!RUN_TERMINAL.has(record.state) || record.lease) {
         throw dynamicError("retention-active", `run ${runId} is ${record.state}; restore refuses active runs`);
@@ -501,7 +506,8 @@ export class DynamicStore {
       await this.#atomicWrite(this.specPath(runId), { runId, revisions: [specRevision] });
       const journal = await this.appendJournal(runId, [{ type: "created", at: record.createdAt, requestId }], 0);
       const created = { ...record, journalSequence: journal.at(-1).sequence };
-      await this.#atomicWrite(this.runPath(runId), created);
+      const path = this.runPath(runId);
+      await this.#withLock(`${path}.lock`, () => this.#atomicWrite(path, created));
       await this.#atomicWrite(index, { requestId, runId });
       return { created: true, runId, record: created };
     });
