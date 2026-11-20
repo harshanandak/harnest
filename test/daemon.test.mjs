@@ -15,8 +15,12 @@ import { startDaemon } from "../src/daemon.mjs";
 import { createDaemonClient, daemonStatus, ensureDaemon, stopDaemon } from "../src/daemon-client.mjs";
 import { readDaemonToken, VERSION } from "../src/daemon-settings.mjs";
 import { createRuntimeServices } from "../src/runtime-services.mjs";
+import { BOARD_MESSAGE_MAX_BYTES } from "../src/board.mjs";
+import { PAGE_RESPONSE_BYTES, STATUS_RESPONSE_BYTES } from "../src/mcp-output.mjs";
+import { structuredResult } from "../src/result.mjs";
 import { mergeProcessEnv } from "../src/process.mjs";
 import { protectWindowsPath } from "../src/windows-acl.mjs";
+import { assertMcpCatalog } from "../scripts/harnest-mcp-catalog.mjs";
 
 const exec = promisify(execFile);
 const root = join(import.meta.dirname, "..");
@@ -59,7 +63,8 @@ function raw(port, path, { method = "GET", headers, body } = {}) {
       const buffers = [];
       try {
         for await (const chunk of res) buffers.push(chunk);
-        resolve({ status: res.statusCode, text: Buffer.concat(buffers).toString("utf8") });
+        const wire = Buffer.concat(buffers);
+        resolve({ status: res.statusCode, text: wire.toString("utf8"), bytes: wire.length });
       } catch (error) { reject(error); }
     });
     req.on("error", reject);
@@ -127,7 +132,7 @@ for (const modern of [false, true]) {
       assert.equal(http.getProtocolEra(), modern ? "modern" : "legacy");
       assert.equal(stdio.getProtocolEra(), http.getProtocolEra());
       const catalog = await stdio.listTools();
-      assert.equal(catalog.tools.length, 38);
+      assertMcpCatalog(catalog);
       assert.deepEqual(await http.listTools(), catalog);
     } finally {
       await Promise.allSettled([http.close(), stdio.close()]);
@@ -135,6 +140,540 @@ for (const modern of [false, true]) {
     }
   });
 }
+
+async function wireClient(port, token, modern) {
+  const version = modern ? "2026-07-28" : "2025-11-25";
+  const clientInfo = { name: "bounded-output-test", version: "1" };
+  const rpc = (method, params, id = 1, budget = Infinity) => raw(port, "/mcp", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`, Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json", "MCP-Protocol-Version": version,
+      ...(modern && { "Mcp-Method": method, ...(params?.name && { "Mcp-Name": params.name }) }),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0", ...(id === null ? {} : { id }), method,
+      params: modern ? { ...params, _meta: {
+        "io.modelcontextprotocol/protocolVersion": version,
+        "io.modelcontextprotocol/clientInfo": clientInfo,
+        "io.modelcontextprotocol/clientCapabilities": {},
+      } } : params,
+    }),
+  }).then((reply) => {
+    const size = reply.bytes;
+    assert.ok(size <= budget, `${method} ${params?.name ?? ""} returned ${size} bytes`);
+    const message = reply.text ? JSON.parse(reply.text) : {};
+    return { result: message.result, error: message.error, size, status: reply.status };
+  });
+  if (modern) assert.ok((await rpc("server/discover")).result);
+  else {
+    assert.equal((await rpc("initialize", { protocolVersion: version, clientInfo, capabilities: {} })).result.protocolVersion, version);
+    assert.equal((await rpc("notifications/initialized", {}, null)).status, 202);
+  }
+  const call = async (name, args, key, budget = name.endsWith("_status") ? STATUS_RESPONSE_BYTES : PAGE_RESPONSE_BYTES) => {
+    const { result, size } = await rpc("tools/call", { name, arguments: args }, 1, budget);
+    assert.ok(result && !result.isError, result?.content?.[0]?.text);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent[key]);
+    return { value: result.structuredContent[key], size };
+  };
+  const rejects = async (name, args, pattern) => {
+    const budget = name.endsWith("_status") ? STATUS_RESPONSE_BYTES : PAGE_RESPONSE_BYTES;
+    const { result } = await rpc("tools/call", { name, arguments: args }, 1, budget);
+    assert.equal(result?.isError, true);
+    assert.match(result.structuredContent.error.message, pattern);
+  };
+  return { rpc, call, rejects };
+}
+
+test("bounded MCP reads preserve durable state and reconstruct oversized payloads in both eras", async (t) => {
+  const { home, directory, stateDir } = await fixture(t);
+  const smallResult = structuredResult("done");
+  const largeResult = structuredResult(JSON.stringify({
+    finalText: "界😀".repeat(21_333) + "x",
+    summary: "界".repeat(16_000),
+    ...Object.fromEntries(["artifacts", "files", "evidence", "tests", "risks"].map((field) => [
+      field, Array.from({ length: 100 }, (_, i) => `${field}-${i}-`.padEnd(4000, i % 2 ? "x" : "\\")),
+    ])),
+  }));
+  assert.equal(largeResult.finalText.length, 64_000);
+  assert.equal(largeResult.summary.length, 16_000);
+  for (const field of ["artifacts", "files", "evidence", "tests", "risks"]) {
+    assert.equal(largeResult[field].length, 100);
+    assert.ok(largeResult[field].every((item) => item.length === 4000));
+  }
+  const services = createRuntimeServices({
+    stateDir, boardDir: join(home, "boards"), routeResolver: async (request) => request,
+    adapterFactory: () => ({ run: async () => ({ sessionId: "bounded-session", result: smallResult }) }),
+  });
+  const { companion } = services;
+  const { jobId } = await companion.start({ requestId: "bounded-fixture", cwd: home, target: "pi", task: "fixture" });
+  await companion.store.appendEvent(jobId, {
+    at: "2026-01-01T00:00:00.000Z", activity: "large trace event",
+    event: { type: "fixture", values: Array.from({ length: 24 }, (_, i) => `${i}${"界😀".repeat(1200)}`.slice(0, 4000)) },
+  });
+  const controls = Array.from({ length: 300 }, (_, i) => ({
+    commandId: `control-${i}`, kind: "message", state: "applied", acknowledgement: "🙂".repeat(500),
+  }));
+  const largeError = {
+    name: "InterruptedExecution", message: "Lease lost while recovering",
+    details: { kind: "interrupted", unsafeResume: true, stderr: "\u0000".repeat(2500), warnings: ["界".repeat(2000)] },
+  };
+  const interruptedRequest = "bounded-partial-" + "界".repeat(240);
+  const interrupted = await companion.start({ requestId: interruptedRequest, cwd: home, target: "pi", task: "fixture" });
+  const cancellation = { state: "unacknowledged", requestedAt: "2026-01-01T00:00:00.000Z", acknowledgedAt: null };
+  await companion.store.transition(interrupted.jobId, (job) => {
+    Object.assign(job.receipt, { state: "partial", result: null, cancellation, error: largeError });
+    job.receipt.recovery.canResume = false;
+    return job;
+  });
+  for (let i = 0; i < 16; i++) {
+    const row = await companion.start({
+      requestId: ("s".repeat(800) + i), cwd: home, target: "codex", task: "session fixture",
+    });
+    await companion.store.transition(row.jobId, (job) => {
+      job.receipt.sessionId = "\u754c".repeat(950);
+      return job;
+    });
+  }
+  const expectedSessions = (await companion.sessions({ target: "codex", limit: 16 })).sessions;
+  const topic = "bounded-board";
+  const message = "😀".repeat(BOARD_MESSAGE_MAX_BYTES / 4);
+  assert.equal(Buffer.byteLength(message), BOARD_MESSAGE_MAX_BYTES);
+  const entries = Array.from({ length: 200 }, (_, i) => ({
+    entryId: `board-${i}`, sequence: i + 1, at: "2026-01-01T00:00:00.000Z", topic, from: "fixture", message,
+  }));
+  const boardPath = companion.boards.path(topic);
+  await mkdir(join(home, "boards"), { recursive: true });
+  await writeFile(boardPath, entries.map((entry) => JSON.stringify(entry) + "\n").join(""));
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => services });
+  try {
+    const token = await readDaemonToken(directory);
+    for (const modern of [false, true]) {
+      await t.test(modern ? "modern" : "legacy", async () => {
+        const { call, rejects } = await wireClient(daemon.port, token, modern);
+        const setResult = (result, history) => companion.store.transition(jobId, (job) => {
+          job.receipt.result = result;
+          job.receipt.controls = history;
+          return job;
+        });
+        await setResult(smallResult, []);
+        assert.deepEqual((await call("handoff_result", { jobId }, "receipt")).value.result, smallResult);
+        await setResult(smallResult, controls);
+        const small = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+        await setResult(largeResult, controls);
+        const large = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+        assert.equal(large.size, small.size);
+        assert.deepEqual(large.value, small.value);
+        assert.equal(large.value.result, undefined);
+        assert.equal(large.value.controlCount, controls.length);
+        assert.deepEqual(large.value.resultRef, { tool: "handoff_result", arguments: { jobId } });
+        const sessions = (await call("handoff_sessions", { target: "pi" }, "sessions")).value.sessions;
+        assert.deepEqual(new Set(sessions.map((session) => session.jobId)), new Set([jobId, interrupted.jobId]));
+        assert.ok(sessions.every((session) => !Object.hasOwn(session, "result")));
+
+        let nextSession = { tool: "handoff_sessions", arguments: { target: "codex", limit: 16 } };
+        const foundSessions = [];
+        let sessionPages = 0;
+        while (nextSession) {
+          const { value } = await call(nextSession.tool, nextSession.arguments, "sessions");
+          foundSessions.push(...value.sessions);
+          assert.ok(value.sessions.length > 0);
+          nextSession = value.page?.continuation;
+          sessionPages++;
+          if (sessionPages === 1) {
+            assert.ok(nextSession);
+            await rejects(nextSession.tool, {
+              ...nextSession.arguments, offset: nextSession.arguments.offset + 1,
+            }, /invalid or stale session cursor/);
+          }
+        }
+        assert.ok(sessionPages > 1);
+        assert.deepEqual(foundSessions.map((row) => row.jobId), expectedSessions.map((row) => row.jobId));
+        assert.ok(foundSessions.every((row) => !Object.hasOwn(row, "result") && row.resultRef));
+
+        const partial = (await call("handoff_status", { jobId: interrupted.jobId }, "receipt", STATUS_RESPONSE_BYTES)).value;
+        assert.equal(partial.state, "partial");
+        assert.equal(partial.requestId, interruptedRequest);
+        assert.equal(partial.recovery.lookupKey, interruptedRequest);
+        assert.equal(partial.error.details.kind, "interrupted");
+        assert.equal(partial.error.details.unsafeResume, true);
+        assert.deepEqual(partial.cancellation, cancellation);
+        assert.equal(partial.recovery.canResume, false);
+        const partialResult = (await call("handoff_result", { jobId: interrupted.jobId }, "receipt")).value;
+        assert.equal(partialResult.state, "partial");
+        assert.equal(partialResult.result, null);
+        assert.deepEqual(partialResult.error, largeError);
+
+        const collectReceipt = async (tool, input, budget, state) => {
+          let next = { tool, arguments: input };
+          const chunks = [];
+          let offset = 0;
+          while (next) {
+            const { value } = await call(next.tool, next.arguments, "receipt", budget);
+            assert.equal(value.jobId, input.jobId);
+            assert.equal(value.state, state);
+            assert.ok(value.page);
+            assert.equal(value.page.offset, offset);
+            assert.ok(value.page.chunk.length);
+            chunks.push(value.page.chunk);
+            offset += Buffer.byteLength(value.page.chunk, "utf8");
+            assert.equal(value.page.originalBytes - offset, value.page.omittedBytes);
+            assert.equal(value.page.omittedCount, Number(value.page.continuation !== null));
+            next = value.page.continuation;
+          }
+          return chunks.join("");
+        };
+        const full = await collectReceipt("handoff_result", { jobId }, PAGE_RESPONSE_BYTES, "completed");
+        assert.deepEqual(Buffer.from(full), Buffer.from(JSON.stringify(await companion.result(jobId))));
+        const firstReceipt = (await call("handoff_result", { jobId }, "receipt")).value;
+        const stale = firstReceipt.page.continuation;
+        await setResult(smallResult, controls);
+        await rejects(stale.tool, stale.arguments, /invalid or stale receipt cursor/);
+        await setResult(largeResult, controls);
+
+        const recoveredStatus = await collectReceipt("handoff_status", { jobId: interrupted.jobId }, STATUS_RESPONSE_BYTES, "partial");
+        const { result, controls: ignored, ...recordedStatus } = await companion.status(interrupted.jobId);
+        assert.deepEqual(Buffer.from(recoveredStatus), Buffer.from(JSON.stringify({
+          ...recordedStatus, controls: [], resultRef: { tool: "handoff_result", arguments: { jobId: interrupted.jobId } },
+        })));
+
+        const collectRecords = async (tool, args, key, field, expected) => {
+          let next = { tool, arguments: args };
+          let count = 0;
+          let itemOffset = 0;
+          let chunks = [];
+          let lastSequence = args.afterSequence ?? 0;
+          while (next) {
+            const { value } = await call(next.tool, next.arguments, key);
+            if (key === "trace") {
+              assert.equal(value.receipt.state, "completed");
+              assert.equal(value.receipt.result, undefined);
+            }
+            for (const entry of value[field]) {
+              assert.deepEqual(entry, expected[count++]);
+              lastSequence = entry.sequence;
+            }
+            const item = value.page?.item;
+            if (item) {
+              assert.equal(item.sequence, expected[count].sequence);
+              assert.equal(item.offset, itemOffset);
+              assert.ok(item.chunk.length);
+              chunks.push(item.chunk);
+              itemOffset += Buffer.byteLength(item.chunk, "utf8");
+              assert.equal(item.originalBytes - itemOffset, item.omittedBytes);
+              if (!item.omittedBytes) {
+                assert.deepEqual(Buffer.from(chunks.join("")), Buffer.from(JSON.stringify(expected[count++])));
+                lastSequence = item.sequence;
+                chunks = [];
+                itemOffset = 0;
+              }
+            }
+            assert.equal(value.nextSequence, lastSequence);
+            if (value.page) assert.ok(value.page.originalBytes >= (item?.originalBytes ?? 2));
+            assert.ok(count <= expected.length);
+            next = value.page?.continuation;
+          }
+          assert.equal(count, expected.length);
+          assert.equal(itemOffset, 0);
+        };
+        const { events } = await companion.store.readTrace(jobId, { afterSequence: 0, limit: 200 });
+        await collectRecords("handoff_trace", { jobId, afterSequence: 0, limit: 200 }, "trace", "events", events);
+        const firstBoard = (await call("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board")).value;
+        assert.equal(firstBoard.page.omittedCount, 200);
+        assert.equal(firstBoard.page.originalBytes, Buffer.byteLength(JSON.stringify(entries), "utf8"));
+        const wrongBoard = firstBoard.page.continuation;
+        await rejects(wrongBoard.tool, {
+          ...wrongBoard.arguments, afterSequence: wrongBoard.arguments.afterSequence + 1,
+        }, /invalid or stale item cursor/);
+        await collectRecords("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board", "entries", entries);
+        const postTopic = `bounded-post-${modern ? "modern" : "legacy"}`;
+        const post = (await call("handoff_post", { topic: postTopic, message, from: "fixture" }, "post")).value;
+        assert.equal(post.message, undefined);
+        const stored = (await companion.boards.read({ topic: postTopic })).entries;
+        assert.equal(stored[0].message, message);
+        await collectRecords(post.page.continuation.tool, post.page.continuation.arguments, "board", "entries", stored);
+      });
+    }
+  } finally { await daemon.close(); }
+});
+
+test("MCP aggregate continuations replay exact compare, review, graph and dynamic results", async (t) => {
+  const { home, directory, stateDir } = await fixture(t);
+  const evidence = Array.from({ length: 100 }, (_, i) => String(i).padEnd(4000, i % 2 ? "\u754c" : "\\"));
+  const result = structuredResult(JSON.stringify({
+    finalText: `\x60\x60\x60json\n{"scores":{"correctness":10},"findings":["fixture finding"]}\n\x60\x60\x60`,
+    evidence,
+  }));
+  const graphEvidence = evidence.slice(0, 24);
+  // Diagnostics sit after the large output, beyond the first chunk, so the header must carry them.
+  const dynamicResult = {
+    runId: "dynamic-fixture", state: "completed", output: evidence.slice(0, 10),
+    error: { kind: "timeout", message: "step deadline ".repeat(400) },
+    errors: Array.from({ length: 12 }, (_, i) => ({ kind: "step", message: `step ${i} failed` })),
+  };
+  const services = createRuntimeServices({
+    stateDir, routeResolver: async (request) => request, detachBackground: false,
+    adapterFactory: () => ({
+      run: async (request) => ({
+        result: request.context?.graph ? { ...result, evidence: graphEvidence } : result,
+      }),
+    }),
+    dynamic: { result: async () => dynamicResult },
+  });
+  const { companion, graphs } = services;
+  let comparison, review;
+  const compare = companion.compare.bind(companion);
+  const reviewWork = companion.review.bind(companion);
+  companion.compare = async (input) => { comparison = await compare(input); return comparison; };
+  companion.review = async (input) => { review = await reviewWork(input); return review; };
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => services });
+  try {
+    const token = await readDaemonToken(directory);
+    const lanes = ["one", "two"].map((name) => ({ name, route: { model: name } }));
+    const request = { cwd: home, target: "pi", task: "review fixture" };
+    for (const modern of [false, true]) {
+      const { call, rejects } = await wireClient(daemon.port, token, modern);
+      const collect = async (tool, key, first) => {
+        const chunks = [];
+        let page = first.page;
+        assert.ok(page?.continuation);
+        let offset = 0;
+        while (page) {
+          assert.equal(page.offset, offset);
+          assert.ok(page.chunk.length);
+          chunks.push(page.chunk);
+          offset += Buffer.byteLength(page.chunk);
+          assert.equal(page.originalBytes - offset, page.omittedBytes);
+          if (!page.continuation) break;
+          const next = page.continuation;
+          assert.equal(next.tool, "handoff_page");
+          const { value } = await call(next.tool, next.arguments, "response");
+          assert.equal(value.tool, tool);
+          assert.equal(value.key, key);
+          page = value.page;
+        }
+        return chunks.join("");
+      };
+      const comparisonId = "compare-" + modern;
+      const compared = (await call("handoff_compare", {
+        request: { ...request, requestId: comparisonId }, candidates: lanes,
+      }, "comparison")).value;
+      assert.equal(compared.comparisonId, comparisonId);
+      assert.equal(compared.state, "completed");
+      assert.ok(comparison.lanes.every((lane) => lane.receipt.result.evidence.length === 100));
+      assert.equal(await collect("handoff_compare", "comparison", compared), JSON.stringify(comparison));
+      assert.deepEqual(compared.lanes.map(({ name, jobId, state }) => ({ name, jobId, state })),
+        comparison.lanes.map((lane) => ({ name: lane.name, jobId: lane.receipt.jobId, state: lane.receipt.state })));
+
+      const reviewId = "review-" + modern;
+      const reviewed = (await call("handoff_review", {
+        request: { ...request, requestId: reviewId }, reviewers: lanes, rubric: ["correctness"], rounds: 1,
+      }, "review")).value;
+      assert.equal(reviewed.reviewId, reviewId);
+      assert.equal(reviewed.state, "completed", JSON.stringify(review.final));
+      assert.equal(review.final.overall, 10);
+      assert.ok(review.rounds[0].lanes.every((lane) => lane.result.evidence.length === 100));
+      assert.equal(await collect("handoff_review", "review", reviewed), JSON.stringify(review));
+      assert.deepEqual(reviewed.lanes.map(({ jobId }) => jobId), review.rounds.at(-1).lanes.map(({ jobId }) => jobId));
+      assert.ok(reviewed.lanes.every(({ jobId }) => typeof jobId === "string" && jobId.length));
+
+      const graph = {
+        requestId: "graph-" + modern, cwd: home, execution: { background: false },
+        nodes: [{ id: "output", target: "pi", task: "output" }], outputs: ["output"],
+      };
+      const { value: started } = await call("handoff_graph_start", { graph }, "graph");
+      const { graphId } = started;
+      const graphResult = (await call("handoff_graph_result", { graphId }, "graph")).value;
+      assert.equal(graphResult.graphId, graphId);
+      assert.equal(graphResult.state, "completed");
+      const expectedGraph = await graphs.result(graphId);
+      assert.deepEqual(expectedGraph.outputs.output.evidence, graphEvidence);
+      assert.equal(await collect("handoff_graph_result", "graph", graphResult), JSON.stringify(expectedGraph));
+
+      const dynamicPage = (await call("handoff_dynamic_result", { runId: dynamicResult.runId }, "workflow")).value;
+      assert.equal(await collect("handoff_dynamic_result", "workflow", dynamicPage), JSON.stringify(dynamicResult));
+      assert.equal(dynamicPage.error.kind, "timeout");
+      assert.ok(dynamicPage.error.message.length <= 1025 && dynamicPage.error.message.endsWith("\u2026"));
+      assert.equal(dynamicPage.errors.length, 10);
+      assert.equal(dynamicPage.errorCount, 12);
+      const { cursor } = dynamicPage.page.continuation.arguments;
+      const [snapshot, , checksum] = cursor.split(".");
+      await rejects("handoff_page", { cursor: [snapshot, "1", checksum].join(".") },
+        /invalid or expired response cursor.*handoff_result using its jobId.*Do not rerun handoff_review or handoff_compare/s);
+    }
+  } finally { await daemon.close(); }
+});
+
+test("MCP cancellation compacts an active receipt with hundreds of controls", async (t) => {
+  const { home, directory, stateDir } = await fixture(t);
+  let entered;
+  const services = createRuntimeServices({
+    stateDir, routeResolver: async (request) => request, detachBackground: false,
+    adapterFactory: () => ({
+      run(_request, { signal }) {
+        entered();
+        return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      },
+    }),
+  });
+  const { companion } = services;
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => services });
+  try {
+    const token = await readDaemonToken(directory);
+    for (const modern of [false, true]) {
+      const { call } = await wireClient(daemon.port, token, modern);
+      const running = new Promise((resolve) => { entered = resolve; });
+      const requestId = "active-cancel-" + modern;
+      const { value: receipt } = await call("handoff_workflow", {
+        request: { requestId, task: "wait for cancellation", cwd: home, target: "pi", execution: { background: true } },
+      }, "receipt");
+      await running;
+      const { jobId } = receipt;
+      const history = Array.from({ length: 300 }, (_, i) => ({
+        commandId: "control-" + i, kind: "message", state: "applied", acknowledgement: "\u754c".repeat(500),
+      }));
+      const error = { name: "FixtureError", message: "last diagnostic", details: { kind: "fixture" } };
+      const stored = await companion.store.transition(jobId, (job) => {
+        assert.equal(job.receipt.state, "running");
+        Object.assign(job.receipt, { controls: history, error });
+        return job;
+      });
+      const owner = companion.running.get(jobId).promise;
+      const { value: cancelled } = await call("handoff_cancel", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+      assert.equal(cancelled.state, "running");
+      assert.equal(cancelled.cancellation.state, "requested");
+      assert.equal(cancelled.jobId, jobId);
+      assert.equal(cancelled.requestId, requestId);
+      assert.equal(cancelled.contextDigest, receipt.contextDigest);
+      assert.deepEqual(cancelled.error, error);
+      assert.deepEqual(cancelled.recovery, stored.receipt.recovery);
+      assert.equal(cancelled.controls, undefined);
+      assert.equal(cancelled.controlCount, history.length);
+      assert.deepEqual(cancelled.resultRef, { tool: "handoff_result", arguments: { jobId } });
+      assert.equal((await owner).state, "cancelled");
+    }
+  } finally { await daemon.close(); }
+});
+
+test("every tool in the MCP catalog crosses the wire budget boundary", async (t) => {
+  const { home, directory } = await fixture(t);
+  const bulk = "large catalog fixture " + "\u754c".repeat(PAGE_RESPONSE_BYTES);
+  const payload = { output: bulk };
+  let failing = false;
+  const endpoint = (value) => async () => {
+    if (failing) throw new Error(bulk);
+    return value;
+  };
+  const service = new Proxy({}, { get: () => endpoint(payload) });
+  const receipt = { jobId: "job", state: "completed", result: payload, diagnostic: bulk };
+  const entry = { sequence: 1, topic: "fixture", message: bulk };
+  const sequence = { nextSequence: 1, hasMore: false };
+  const daemon = await startDaemon({
+    port: 0, directory, buildServices: () => ({
+      companion: {
+        start: endpoint(receipt), statusReference: endpoint(receipt), resultReference: endpoint(receipt),
+        cancel: endpoint(receipt), resume: endpoint(receipt), sessions: endpoint({ sessions: [receipt] }),
+        traceReference: endpoint({ receipt, events: [{ sequence: 1, event: bulk }], ...sequence }),
+        postToBoard: endpoint(entry), readBoard: endpoint({ topic: entry.topic, entries: [entry], ...sequence }),
+        compare: endpoint(payload), review: endpoint(payload), fleet: endpoint(payload),
+        message: endpoint(payload), reroute: endpoint(payload), routeResolver: { diagnostics: endpoint(payload) },
+      },
+      graphs: service, dynamic: service, workflowRegistry: service, routingSettings: service,
+      close: async () => {},
+    }),
+  });
+  try {
+    const token = await readDaemonToken(directory);
+    const job = { jobId: "job" };
+    const graph = { graphId: "graph" };
+    const run = { runId: "run" };
+    const saved = { name: "saved", cwd: home };
+    const request = { requestId: "fixture", target: "pi", task: "fixture", cwd: home };
+    const graphSpec = { requestId: "fixture", cwd: home, nodes: [{ id: "step", task: "fixture", target: "pi" }] };
+    const workflow = { requestId: "fixture", cwd: home, source: "return null;" };
+    const lanes = ["first", "second"].map((name) => ({ name, route: { model: name } }));
+    const revision = "a".repeat(64);
+    const args = {
+      handoff_cancel: job,
+      handoff_compare: { request, candidates: lanes },
+      handoff_dynamic_control: { ...run, commandId: "command", action: "pause" },
+      handoff_dynamic_delete: { ...saved, expectedRevision: revision },
+      handoff_dynamic_get: saved,
+      handoff_dynamic_history: {},
+      handoff_dynamic_inspect: { ...run, invocationId: "invocation" },
+      handoff_dynamic_invoke: { ...saved, requestId: "fixture", revision },
+      handoff_dynamic_list: {},
+      handoff_dynamic_result: run,
+      handoff_dynamic_resume: { ...run, commandId: "command" },
+      handoff_dynamic_revisions: saved,
+      handoff_dynamic_save: { ...saved, source: workflow.source },
+      handoff_dynamic_start: { workflow },
+      handoff_dynamic_status: run,
+      handoff_dynamic_validate: { workflow },
+      handoff_fleet: {},
+      handoff_graph_cancel: graph,
+      handoff_graph_result: graph,
+      handoff_graph_resume: { ...graph, commandId: "command" },
+      handoff_graph_start: { graph: graphSpec },
+      handoff_graph_status: graph,
+      handoff_graph_validate: { graph: graphSpec },
+      handoff_host_info: {},
+      handoff_message: { ...job, commandId: "command", message: "fixture" },
+      handoff_page: { cursor: "1".repeat(36) + ".1." + revision },
+      handoff_post: { topic: "fixture", from: "fixture", message: "fixture" },
+      handoff_read: { topic: "fixture" },
+      handoff_reroute: { ...job, commandId: "command", route: { provider: "fixture", model: "fixture" } },
+      handoff_result: job,
+      handoff_resume: job,
+      handoff_review: { request, reviewers: lanes },
+      handoff_routing_configure: { action: "set", expectedRevision: "missing" },
+      handoff_routing_get: {},
+      handoff_routing_preview: { request: { task: "fixture" } },
+      handoff_sessions: {},
+      handoff_status: job,
+      handoff_trace: job,
+      handoff_workflow: { request },
+    };
+    for (const modern of [false, true]) {
+      const { rpc, call, rejects } = await wireClient(daemon.port, token, modern);
+      const names = assertMcpCatalog((await rpc("tools/list")).result);
+      assert.deepEqual(Object.keys(args).sort(), names);
+      const keyFor = (name) => {
+        if (name.startsWith("handoff_dynamic_")) return "workflow";
+        if (name.startsWith("handoff_graph_")) return "graph";
+        if (name.startsWith("handoff_routing_")) return "routing";
+        return ({
+          handoff_compare: "comparison", handoff_cancel: "receipt", handoff_read: "board",
+          handoff_result: "receipt", handoff_resume: "receipt", handoff_status: "receipt",
+          handoff_workflow: "receipt", handoff_host_info: "host", handoff_page: "response",
+          handoff_message: "control", handoff_reroute: "control",
+        })[name] ?? name.slice("handoff_".length);
+      };
+      failing = false;
+      for (const name of names) {
+        let input = args[name];
+        if (name === "handoff_page") {
+          const first = (await call("handoff_compare", args.handoff_compare, "comparison")).value;
+          input = first.page.continuation.arguments;
+        }
+        const { value } = await call(name, input, keyFor(name));
+        if (name === "handoff_sessions") {
+          assert.equal(value.sessions[0].resultRef.arguments.jobId, receipt.jobId);
+        } else {
+          assert.ok(value.page, `expected an oversized fixture page from ${name}`);
+        }
+      }
+      failing = true;
+      for (const name of names) {
+        const message = name === "handoff_page" ? /invalid or expired response cursor/ : /^large catalog fixture /;
+        await rejects(name, args[name], message);
+      }
+      await rejects("handoff_dynamic_status", Object.fromEntries(
+        Array.from({ length: 1_000 }, (_, i) => ["unrecognized-argument-" + i, true]),
+      ), /^Input validation error:/);
+    }
+  } finally { await daemon.close(); }
+});
 
 test("an accepted foreground handoff completes after its HTTP client disconnects", async (t) => {
   const { stateDir, home, directory } = await fixture(t);
@@ -256,7 +795,7 @@ test("the running stdio bridge rediscovers tools after the fixture daemon stops"
       command: process.execPath, args: [join(root, "src", "mcp-bridge.mjs")], cwd: home, env: fixtureEnv, stderr: "pipe",
     }));
     const catalog = await client.listTools();
-    assert.equal(catalog.tools.length, 38);
+    assertMcpCatalog(catalog);
     await daemon.close();
     assert.deepEqual(await client.listTools(), catalog);
     assert.notEqual(await nonce(), firstDaemon, "bridge must start a replacement without restarting the MCP client");

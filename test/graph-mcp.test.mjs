@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { PAGE_RESPONSE_BYTES, STATUS_RESPONSE_BYTES } from "../src/mcp-output.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 async function connect(directory, modern) {
@@ -14,9 +15,27 @@ async function connect(directory, modern) {
   return client;
 }
 async function call(client, name, args, error = false) {
-  const result = await client.callTool({ name, arguments: args });
-  assert.equal(Boolean(result.isError), error, result.content?.[0]?.text);
-  return JSON.parse(result.content[0].text);
+  const budget = name === "handoff_graph_status" ? STATUS_RESPONSE_BYTES : PAGE_RESPONSE_BYTES;
+  const request = async (tool, input) => {
+    const result = await client.callTool({ name: tool, arguments: input });
+    assert.equal(Boolean(result.isError), error, result.content?.[0]?.text);
+    assert.ok(Buffer.byteLength(JSON.stringify(result)) <= budget);
+    return JSON.parse(result.content[0].text);
+  };
+  const result = await request(name, args);
+  if (result.page?.continuation?.tool !== "handoff_page") return result;
+  let page = result.page;
+  const chunks = [page.chunk];
+  while (page.continuation) {
+    const { tool, arguments: next } = page.continuation;
+    assert.equal(tool, "handoff_page");
+    const continued = await request(tool, next);
+    assert.equal(continued.tool, name);
+    assert.equal(continued.key, "graph");
+    chunks.push(continued.page.chunk);
+    page = continued.page;
+  }
+  return JSON.parse(chunks.join(""));
 }
 
 for (const modern of [false, true]) {

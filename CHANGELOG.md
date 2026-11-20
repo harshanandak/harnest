@@ -7,6 +7,8 @@
 - Install the `harnest` CLI from GitHub with Bun. Run setup, doctor, daemon, ACP registration, and routing setup from any directory.
 - Host setup prints pasteable removal or restore commands, including native plugin removal for Claude and Codex and extension removal for Pi.
 - Checkout setup prints reverse commands that work from any directory. Cursor reversal also disconnects the selected project and reverses the files setup installed there.
+- MCP tool results share a serialized UTF-8 budget in both protocol eras. Status uses 16 KiB and other results use 64 KiB. Status, session lists, trace headers, and oversized active receipts expose recovery fields and replace long control histories with `controlCount`.
+- Follow `page.continuation` to reconstruct large receipts, trace and board entries, and session lists. Oversized compare, review, graph, and other tool results use `handoff_page` to read the original response without repeating the operation. Pi preserves these pages in tool output. See the [MCP paging contract](docs/users/mcp-usage.md#response-limits-and-continuations).
 
 ### Fixed
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { pathToFileURL } from "node:url";
 import { createRuntimeServices } from "./runtime-services.mjs";
 import { runtimeInfo } from "./runtime-info.mjs";
 import { readLocalConfig } from "./config.mjs";
-import { HARNESS_VERSIONS } from "./protocol.mjs";
+import { HARNESS_VERSIONS, TERMINAL_STATES } from "./protocol.mjs";
+import {
+  activeReceiptResponse, boardResponse, createResponseBoundary, dataResponse,
+  postResponse, resultResponse, sessionsResponse, statusResponse, traceResponse,
+} from "./mcp-output.mjs";
 import { metadataInputSchema, nativeExecutionInputFields, policyInputSchema, registerGraphTools, routeInputSchema } from "./graph-tools.mjs";
 import { registerDynamicTools } from "./dynamic-tools.mjs";
 import { registerRoutingTools } from "./routing-tools.mjs";
@@ -35,14 +39,16 @@ export function createServer(options = {}) {
 }
 
 export function createServerFactory({ companion, graphs, dynamic, workflowRegistry, routingSettings }, { cacheSchemas = false } = {}) {
-  const tools = [];
+  const tools = new Map();
+  const { bound, read } = createResponseBoundary();
   const server = {
     registerTool(name, configuration, handler) {
+      const schema = configuration.inputSchema;
       if (!cacheSchemas) {
-        tools.push([name, configuration, handler]);
+        tools.set(name, { configuration, schema, handler });
         return;
       }
-      const standard = configuration.inputSchema["~standard"];
+      const standard = schema["~standard"];
       const cached = new Map();
       // The SDK converts schemas at registration and at every tools/list.
       const input = (options) => {
@@ -50,7 +56,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
         return cached.get(options.target);
       };
       const inputSchema = { "~standard": { ...standard, jsonSchema: { ...standard.jsonSchema, input } } };
-      tools.push([name, { ...configuration, inputSchema }, handler]);
+      tools.set(name, { configuration: { ...configuration, inputSchema }, schema, handler });
     },
   };
   const requestSchema = z.object({
@@ -85,19 +91,16 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
   }).refine((value) => Boolean(value.jobId || value.requestId), {
     message: "jobId or requestId is required",
   });
+  const receiptPageSchema = referenceSchema.safeExtend({
+    cursor: z.string().regex(/^[a-f0-9]{64}\.[1-9]\d{0,14}$/).optional(),
+  });
+  const itemOffset = z.number().int().min(1).optional().describe("Byte offset from page.continuation when an item spans pages.");
 
-  const response = (receipt) => ({
-    content: [{ type: "text", text: JSON.stringify(receipt, null, 2) }],
-    structuredContent: { receipt },
-  });
-  const controlResponse = (control) => ({
-    content: [{ type: "text", text: JSON.stringify(control, null, 2) }],
-    structuredContent: { control },
-  });
-  const dataResponse = (key, value) => ({
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-    structuredContent: { [key]: value },
-  });
+  const itemCursor = z.string().regex(/^[a-f0-9]{64}$/).optional();
+  const response = (receipt) => TERMINAL_STATES.has(receipt.state)
+    ? resultResponse(receipt)
+    : activeReceiptResponse(receipt);
+  const controlResponse = (control) => dataResponse("control", control);
   const failure = (error) => {
     const details = error?.details && typeof error.details === "object" ? error.details : null;
     const kind = typeof details?.kind === "string" && details.kind
@@ -118,6 +121,15 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     settings: routingSettings,
     dataResponse, failure,
   });
+
+  server.registerTool("handoff_page", {
+    title: "Continue an oversized tool response",
+    description: "Read the next JSON chunk from an oversized tool response without re-running the original tool. Pass the cursor from page.continuation exactly as returned.",
+    inputSchema: z.object({
+      cursor: z.string().regex(/^[a-f0-9-]{36}\.[1-9]\d{0,14}\.[a-f0-9]{64}$/),
+    }).strict(),
+    annotations: { readOnlyHint: true, destructiveHint: false },
+  }, ({ cursor }) => read(cursor));
 
   server.registerTool(
     "handoff_workflow",
@@ -226,7 +238,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     },
     async (input) => {
       try {
-        return dataResponse("post", await companion.postToBoard(input));
+        return postResponse(await companion.postToBoard(input));
       } catch (error) {
         return failure(error);
       }
@@ -237,18 +249,21 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     "handoff_read",
     {
       title: "Read a peer board",
-      description: "Read new messages from a shared topic. Poll with afterSequence=the previous nextSequence; only new entries enter context.",
+      description: "Read new messages from a shared topic. Follow page.continuation if present, otherwise poll with the previous nextSequence as afterSequence.",
       inputSchema: z.object({
         topic: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/),
         afterSequence: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(200).optional(),
+        itemOffset,
+        itemCursor,
       }),
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async (input) => {
       try {
-        const { afterSequence, limit, ...reference } = input;
-        return dataResponse("board", await companion.readBoard(reference, { afterSequence, limit }));
+        const { afterSequence, limit, itemOffset, itemCursor, ...reference } = input;
+        const options = { afterSequence, limit };
+        return boardResponse(await companion.readBoard(reference, options), { ...options, itemOffset, itemCursor });
       } catch (error) {
         return failure(error);
       }
@@ -256,13 +271,15 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
   );
 
   for (const [name, title, description, operation, inputSchema] of [
-    ["handoff_status", "Get handoff status", "Poll compact state for a handoff job by jobId or requestId; terminal states precede handoff_result.", (input) => companion.statusReference(input), referenceSchema],
-    ["handoff_result", "Get terminal handoff result", "Terminal receipt for a settled job; verify requestId, context digest, route, session identity, and final text.", (input) => companion.resultReference(input), referenceSchema],
+    ["handoff_status", "Get handoff status", "Poll compact state by jobId or requestId. Follow resultRef when terminal and page.continuation if the status itself spans pages.",
+      async ({ cursor, ...reference }) => statusResponse(await companion.statusReference(reference), cursor), receiptPageSchema],
+    ["handoff_result", "Get terminal handoff result", "Terminal receipt for a settled job. When page is present, follow page.continuation and concatenate its JSON chunks to recover the full receipt.",
+      async ({ cursor, ...reference }) => resultResponse(await companion.resultReference(reference), cursor), receiptPageSchema],
     [
       "handoff_cancel",
       "Cancel a running handoff",
       "Cancel a queued or running handoff. Cross-process cancellation records a request; poll until the owner acknowledges adapter settlement. Unacknowledged cancellation becomes partial, not cancelled.",
-      ({ jobId }) => companion.cancel(jobId),
+      async ({ jobId }) => response(await companion.cancel(jobId)),
       z.object({ jobId: z.string().trim().min(1) }),
     ],
   ]) {
@@ -279,7 +296,7 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
       },
       async (input) => {
         try {
-          return response(await operation(input));
+          return await operation(input);
         } catch (error) {
           return failure(error);
         }
@@ -313,16 +330,19 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     "handoff_trace",
     {
       title: "Read handoff transcript events",
-      description: "Read a bounded, redacted tail or only events after a known sequence. Poll with afterSequence=the previous nextSequence every 1-2s for live semantic progress without replaying the full trace. The native child-agent transcript (Claude/Codex/OpenCode worker thread) is the canonical live view; this trace is the durable, pollable mirror for hosts without one (Pi, Cursor IDE) and for recovery after the lead context dies.",
+      description: "Read a bounded, redacted tail or events after a known sequence. Follow page.continuation if present, otherwise poll with afterSequence=the previous nextSequence every 1-2s for live progress. The native child-agent transcript is the canonical live view; this trace is the durable mirror for hosts without one and for recovery.",
       inputSchema: referenceSchema.safeExtend({
         afterSequence: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(200).optional(),
+        itemOffset,
+        itemCursor,
       }),
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    async ({ afterSequence, limit, ...reference }) => {
+    async ({ afterSequence, limit, itemOffset, itemCursor, ...reference }) => {
       try {
-        return dataResponse("trace", await companion.traceReference(reference, { afterSequence, limit }));
+        const options = { afterSequence, limit };
+        return traceResponse(await companion.traceReference(reference, options), { ...options, itemOffset, itemCursor });
       } catch (error) {
         return failure(error);
       }
@@ -333,9 +353,11 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     "handoff_sessions",
     {
       title: "List handoff sessions",
-      description: "List recent durable handoff receipts, including downstream session/workflow IDs and semantic progress.",
+      description: "List compact handoff receipts with downstream identities and progress. Follow page.continuation when the requested list spans pages.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).optional(),
+        offset: z.number().int().min(0).optional(),
+        cursor: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         state: z.enum(["queued", "running", "completed", "failed", "cancelled", "partial"]).optional(),
         target: z.enum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"]).optional(),
       }),
@@ -343,7 +365,8 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     },
     async (input) => {
       try {
-        return dataResponse("sessions", await companion.sessions(input));
+        const { sessions } = await companion.sessions(input);
+        return sessionsResponse(sessions, input);
       } catch (error) {
         return failure(error);
       }
@@ -518,10 +541,32 @@ export function createServerFactory({ companion, graphs, dynamic, workflowRegist
     const protocol = new McpServer(
       { name: "harnest", version: "0.1.0" },
       {
-        instructions: "One harness owns each handoff. For mixed-harness dependency graphs, validate then start with handoff_graph_validate/handoff_graph_start, retain graphId, poll graph status and inspect individual child traces. Preserve completed nodes when resuming unsuccessful graphs. For one handoff use requestId+cwd+context+route+policy, start background, poll handoff_trace with afterSequence, return handoff_result verbatim. Never merge or deploy unless policy grants it. Call handoff_host_info when unsure of the launch path.",
+        instructions: "One harness owns each handoff. For mixed-harness dependency graphs, validate then start with handoff_graph_validate/handoff_graph_start, retain graphId, poll graph status and inspect individual child traces. Preserve completed nodes when resuming unsuccessful graphs. For one handoff use requestId+cwd+context+route+policy, start background, poll handoff_trace with afterSequence, then retrieve handoff_result. Follow page.continuation verbatim and assemble JSON chunks before returning a paged receipt. Never merge or deploy unless policy grants it. Call handoff_host_info when unsure of the launch path.",
       },
     );
-    for (const definition of tools) protocol.registerTool(...definition);
+    for (const [name, { configuration, handler }] of tools) {
+      protocol.registerTool(name, configuration, handler);
+    }
+
+    // Use the SDK's catalog and negotiated wire projection. One dispatch
+    // boundary covers successful results and validation/operation failures.
+    const project = (result) => protocol.server.projectCallToolResult(result, undefined);
+    protocol.server.setRequestHandler("tools/call", async ({ params }, context) => {
+      const tool = tools.get(params.name);
+      if (!tool) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Tool not found");
+      let result;
+      try {
+        const input = tool.schema.safeParse(params.arguments ?? {});
+        result = input.success
+          ? await tool.handler(input.data, context)
+          : failure(Object.assign(new Error("Input validation error: " + z.prettifyError(input.error)), {
+              details: { kind: "validation" },
+            }));
+        return await bound(params.name, result, project);
+      } catch (error) {
+        return bound(params.name, failure(error), project);
+      }
+    });
     return protocol;
   };
 }

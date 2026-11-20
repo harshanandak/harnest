@@ -152,7 +152,9 @@ test("an over-budget foreground MCP request converts to a durable background rec
     { timeoutMs: 60_000, label: "converted job terminal" },
   );
   assert.equal(settled.state, "completed");
-  assert.equal(settled.result.finalText, "WORKER_CANARY");
+  assert.equal(settled.result, undefined);
+  const result = await call(fixture.client, settled.resultRef.tool, settled.resultRef.arguments);
+  assert.equal(result.result.finalText, "WORKER_CANARY");
   assert.equal(settled.sessionId, "worker-session");
   assert.equal(settled.execution?.foregroundConverted, true, "the durable receipt keeps the conversion flag");
   assert.equal(await readFile(join(directory, "in-process-runs.jsonl"), "utf8").catch(() => ""), "", "the MCP server must not run a converted job");
@@ -254,6 +256,8 @@ test("an MCP background job survives client/server exit and completes for a fres
     { timeoutMs: 60_000, label: "survived job terminal" },
   );
   assert.equal(settled.state, "completed");
-  assert.equal(settled.result.finalText, "WORKER_CANARY");
+  assert.equal(settled.result, undefined);
+  const result = await call(second.client, settled.resultRef.tool, settled.resultRef.arguments);
+  assert.equal(result.result.finalText, "WORKER_CANARY");
   assert.equal(settled.sessionId, "worker-session");
 });

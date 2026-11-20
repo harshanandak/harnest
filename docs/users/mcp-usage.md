@@ -32,14 +32,27 @@ Call `handoff_workflow` with a `request` object. `requestId`, `target`, `task`, 
 Use the returned `jobId` in the lifecycle tools:
 
 1. Call `handoff_status` with `{ "jobId": "..." }` for compact state.
-2. Call `handoff_trace` with the job ID and `afterSequence` set to the previous response's `nextSequence` for new progress only.
-3. Call `handoff_result` after the job settles and retain the terminal receipt.
+2. Call `handoff_trace` with the job ID. Follow `page.continuation` when present, then use the last `nextSequence` as `afterSequence` when polling for new progress.
+3. Call `handoff_result` after the job settles. Assemble all pages before retaining the terminal receipt.
 4. Use `handoff_cancel` to request cancellation. Continue polling until the downstream owner acknowledges settlement.
 5. Use `handoff_resume` for a failed or partial read-only handoff after reviewing its trace.
 
 Ask for file and line evidence in the task or acceptance criteria. Add receipt arrays such as `evidence` to `requiredResultFields` only when the selected adapter is configured to populate them; prose in the agent's final text does not create a structured receipt array.
 
 A foreground timeout above the safe MCP wait is converted to a background job. Prefer `background: true` for work that can take more than one tool turn.
+
+## Response limits and continuations
+
+MCP status tool responses use a 16 KiB UTF-8 budget. Other tool responses use 64 KiB. The limits include both the JSON text and structured content sent in both protocol eras, with room reserved for the protocol envelope. A response that fits keeps its existing shape.
+
+Status, session lists, and trace receipt headers expose job state, identity, cancellation, recovery, and errors. These views omit `result` and replace nonempty `controls` with `controlCount`. Oversized active workflow, resume, and cancel receipts use the same compact view. Follow `resultRef` after the job settles. A row with `projection.continuation` links to status for full metadata. The header always carries the job ID, and any identity too large to fit inline is available in the assembled JSON.
+
+- **Receipt pages.** Read an oversized receipt by following `page.continuation` and joining its `page.chunk` strings in order before parsing the JSON. A changed receipt invalidates its cursor. Start over without a cursor.
+- **Trace and board pages.** For a full history, start with `afterSequence: 0`. Omitting it starts from a recent window, so earlier entries may exist. Follow `page.continuation` with all supplied arguments. When `page.item` is present, join its chunks and parse the item once `omittedBytes` reaches zero. Resume polling with `afterSequence: nextSequence` after the continuation ends. An oversized `handoff_post` echo links to its entry with `handoff_read`.
+- **Session lists.** Follow `page.continuation` for the rest of the requested list. If the remaining rows change order or membership, the cursor expires. Start a new list without a cursor.
+- **Other oversized results.** This includes compare and review aggregates, graph data, and JavaScript workflow data. Join the initial `page.chunk` with the chunks returned at `structuredContent.response.page.chunk` by `handoff_page`. The continuation reads the original snapshot without repeating the operation. Snapshots belong to the current server and can expire when newer oversized responses displace them or the server restarts. For a rereadable operation, start a fresh read if that happens.
+
+`originalBytes` counts UTF-8 bytes in the JSON before paging. On trace, board, and session lists it measures the requested window's array. `omittedCount` counts items from that window whose delivery is incomplete. For JSON fragments, `offset` and `omittedBytes` count bytes within the JSON being assembled. A null continuation marks the final chunk. Trace paging recovers the redacted API entries.
 
 ## Native execution controls
 
@@ -132,7 +145,7 @@ For a fixed dependency graph across agents:
 
 1. Call `handoff_graph_validate` with the complete graph.
 2. Call `handoff_graph_start` and retain its `graphId`.
-3. Poll `handoff_graph_status`. Pass the previous `revision` as `afterRevision` and use `waitMs` for change-based waiting.
+3. Poll `handoff_graph_status`. Follow any continuation to read the node states. Pass the previous `revision` as `afterRevision` and use `waitMs` for change-based waiting.
 4. Call `handoff_graph_result` after the graph settles.
 5. Use `handoff_graph_resume` with a stable `commandId` to retry selected unsuccessful nodes. Completed nodes are retained.
 

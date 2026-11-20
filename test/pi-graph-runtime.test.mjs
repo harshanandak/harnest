@@ -11,12 +11,17 @@ const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).t
 test("Pi executes the installed graph tools with real schemas, persistence and selective recovery", { timeout: 60000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "harnest-pi-graph-"));
   const launches = [];
+  let resumeAttempts = 0;
   const daemonDirectory = join(directory, "daemon");
   const daemon = await startDaemon({ port: 0, directory: daemonDirectory,
     buildServices: () => createRuntimeServices({
       stateDir: join(directory, "jobs"), routeResolver: async r => r,
       adapterFactory: target => ({ async run(r) {
-        const nodeId = r.context.graph.nodeId;
+        const nodeId = r.context?.graph?.nodeId;
+        if (!nodeId) {
+          if (r.requestId === "pi-resume" && resumeAttempts++ === 0) throw new Error("retry fixture");
+          return { sessionId: "pi-receipt", result: { finalText: "\u754c".repeat(64_000) } };
+        }
         launches.push({ nodeId, target, upstream: Object.keys(r.context.graph.upstream) });
         if (nodeId === "retry" && launches.filter(n => n.nodeId === nodeId).length === 1) throw new Error("fixture failure");
         return { sessionId: "pi-fixture-" + nodeId, result: { finalText: nodeId + " DONE" } };
@@ -83,6 +88,24 @@ test("Pi executes the installed graph tools with real schemas, persistence and s
     assert.equal(graphSchema.properties.outputs.items.pattern, idPattern);
     assert.equal(tools.get("handoff_graph_resume").parameters.properties.nodeIds.items.pattern, idPattern);
     await assert.rejects(invoke("handoff_graph_validate", { graph: { ...graph, nodes: [] } }), /nodes/);
+
+    const request = {
+      requestId: "pi-foreground", task: "paged output", target: "pi", cwd: directory,
+      execution: { background: false, timeoutMs: 30_000 },
+    };
+    const foreground = await invoke("handoff_workflow", { request });
+    assert.equal(foreground.state, "completed");
+    assert.ok(Buffer.byteLength(foreground.page.chunk) > 20_000);
+    const failed = await invoke("handoff_workflow", { request: { ...request, requestId: "pi-resume" } });
+    assert.equal(failed.state, "failed");
+    const resumed = await invoke("handoff_resume", { jobId: failed.jobId, background: false });
+    assert.equal(resumed.state, "completed");
+    assert.ok(Buffer.byteLength(resumed.page.chunk) > 20_000);
+    for (const page of [foreground.page, resumed.page]) {
+      assert.equal(page.continuation.tool, "handoff_result");
+      const next = await invoke(page.continuation.tool, page.continuation.arguments);
+      assert.equal(next.page.offset, Buffer.byteLength(page.chunk));
+    }
   } finally {
     await daemon.close();
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });

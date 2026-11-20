@@ -12,6 +12,7 @@ import { promisify } from "node:util";
 import { createDaemonClient } from "../src/daemon-client.mjs";
 import { readDaemonToken } from "../src/daemon-settings.mjs";
 import { requireNativeCommand, windowsSystemCommand } from "../src/launch-command.mjs";
+import { STATUS_RESPONSE_BYTES } from "../src/mcp-output.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const exec = promisify(execFile);
@@ -21,13 +22,14 @@ const MiB = 1024 * 1024;
 const protocol = { legacy: "2025-11-25", modern: "2026-07-28" };
 const budgets = { aggregate: 320, daemon: 200, driver: 120, bridge: 80 };
 const clientInfo = { name: "harnest-memory-ci", version: "1" };
-const requestId = "memory-status-fixture";
+const requestIds = Array.from({ length: 3 }, (_, i) => `memory-status-fixture-${i}`);
+const pollRounds = 4;
 const toolNames = [
   "cancel", "compare", "dynamic_control", "dynamic_delete", "dynamic_get", "dynamic_history",
   "dynamic_inspect", "dynamic_invoke", "dynamic_list", "dynamic_result", "dynamic_resume",
   "dynamic_revisions", "dynamic_save", "dynamic_start", "dynamic_status", "dynamic_validate",
   "fleet", "graph_cancel", "graph_result", "graph_resume", "graph_start", "graph_status",
-  "graph_validate", "host_info", "message", "post", "read", "reroute", "result", "resume",
+  "graph_validate", "host_info", "message", "page", "post", "read", "reroute", "result", "resume",
   "review", "routing_configure", "routing_get", "routing_preview", "sessions", "status", "trace", "workflow",
 ].map((name) => `handoff_${name}`);
 
@@ -40,11 +42,12 @@ function client(send, era) {
     "io.modelcontextprotocol/clientInfo": clientInfo,
     "io.modelcontextprotocol/clientCapabilities": {},
   };
-  const rpc = async (method, params) => {
+  const rpc = async (method, params, checkReply) => {
     const reply = await send({
       jsonrpc: "2.0", id: ++id, method, ...((params || modern) && { params: { ...params, ...(modern && { _meta: meta }) } }),
     }, version);
     assert.ok(reply?.result && !reply.error && !reply.result.isError, `${era} ${method} failed`);
+    checkReply?.(reply);
     return reply.result;
   };
   return {
@@ -61,9 +64,19 @@ function client(send, era) {
       for (const tool of tools) assert.equal(tool.inputSchema.type, "object", tool.name);
       return createHash("sha256").update(JSON.stringify(sorted)).digest("hex");
     },
-    async status() {
-      const result = await rpc("tools/call", { name: "handoff_status", arguments: { requestId } });
-      assert.equal(result.structuredContent.receipt.state, "completed");
+    async status(index = 0) {
+      const requestId = requestIds[index % requestIds.length];
+      let size;
+      const result = await rpc("tools/call", { name: "handoff_status", arguments: { requestId } }, (reply) => {
+        size = Buffer.byteLength(JSON.stringify(reply), "utf8");
+        assert.ok(size <= STATUS_RESPONSE_BYTES, `${era} status returned ${size} bytes`);
+      });
+      const { receipt } = result.structuredContent;
+      assert.equal(receipt.state, "completed");
+      assert.equal(receipt.requestId, requestId);
+      assert.equal(receipt.result, undefined);
+      assert.equal(receipt.resultRef.tool, "handoff_result");
+      return size;
     },
   };
 }
@@ -83,14 +96,17 @@ async function clientDriver() {
   clients[1].close();
   clients[0] = make(0);
   clients[1] = make(1);
-  await Promise.all(clients.map(async (peer, i) => {
-    for (let round = 0; round < 4; round++) {
-      await peer.status();
+  const sizes = await Promise.all(clients.map(async (peer, i) => {
+    const polls = [];
+    for (let round = 0; round < pollRounds; round++) {
+      polls.push(await peer.status(i + round));
       await verify(peer, i);
       await delay(30);
     }
+    return polls;
   }));
-  process.send({ kind: "catalogs", digest: { legacy: expected[0], modern: expected[1] }, clients: clients.length });
+  process.send({ kind: "catalogs", digest: { legacy: expected[0], modern: expected[1] }, clients: clients.length,
+    completedJobs: requestIds.length, statusPolls: sizes.flat().length, maxStatusBytes: Math.max(...sizes.flat()) });
   await new Promise((resolve) => process.once("disconnect", resolve));
   for (const peer of clients) peer.close();
 }
@@ -117,7 +133,7 @@ function launch(args, env, pipes = false) {
   const child = spawn(process.execPath, ["--import", probe, ...args], {
     // A hidden Windows console can still create a conhost.exe child.
     detached: process.platform === "win32",
-    cwd: root, env, windowsHide: true, stdio: [pipes ? "pipe" : "ignore", pipes ? "pipe" : "ignore", "ignore", "ipc"],
+    cwd: root, env, windowsHide: true, stdio: [pipes ? "pipe" : "ignore", pipes ? "pipe" : "ignore", args.includes("--driver") ? "inherit" : "ignore", "ipc"],
   });
   const closed = once(child, "exit");
   return {
@@ -176,11 +192,16 @@ async function measure(sampleNumber) {
   let daemon, driver, bridge, timer, stop;
   try {
     const { Companion } = await import("../src/companion.mjs");
+    const result = { finalText: "界".repeat(64_000), summary: "界".repeat(16_000) };
     const fixtureOwner = new Companion({
       stateDir, routeResolver: async (request) => request,
-      adapterFactory: () => ({ run: async () => ({ sessionId: "memory-fixture", result: { finalText: "fixture completed" } }) }),
+      adapterFactory: () => ({ run: async () => ({ sessionId: "memory-fixture", result }) }),
     });
-    assert.equal((await fixtureOwner.start({ requestId, cwd: fixture, target: "pi", task: "fixture" })).state, "completed");
+    for (const requestId of requestIds) {
+      const receipt = await fixtureOwner.start({ requestId, cwd: fixture, target: "pi", task: "fixture" });
+      assert.equal(receipt.state, "completed");
+      assert.ok(Buffer.byteLength(receipt.result.finalText, "utf8") > STATUS_RESPONSE_BYTES);
+    }
     await fixtureOwner.close();
     const workload = async () => {
       daemon = launch(["src/daemon.mjs", "--fixture-port", "0"], env);
@@ -196,6 +217,10 @@ async function measure(sampleNumber) {
       ]);
       assert.equal(catalogs.kind, "catalogs");
       assert.equal(catalogs.clients, 10);
+      assert.equal(catalogs.completedJobs, requestIds.length);
+      assert.equal(catalogs.statusPolls, catalogs.clients * pollRounds);
+      sample.statusPolling = { completedJobs: catalogs.completedJobs, polls: catalogs.statusPolls,
+        maxResponseBytes: catalogs.maxStatusBytes, budgetBytes: STATUS_RESPONSE_BYTES };
       sample.protocols = protocol;
       sample.toolCount = toolNames.length;
       sample.catalogSha256 = catalogs.digest;
@@ -247,7 +272,7 @@ async function measure(sampleNumber) {
 }
 
 if (process.argv.includes("--driver")) {
-  await clientDriver().catch(() => { process.exit(1); });
+  await clientDriver().catch((error) => process.stderr.write(String(error.stack ?? error) + "\n", () => process.exit(1)));
 } else {
   const result = { platform: process.platform, release: release(), arch: process.arch, node: process.version, budgets, samples: [] };
   for (let run = 1; run <= 3; run++) {
