@@ -46,7 +46,7 @@ You need **Git**, **Bun**, and **Node.js 22 or newer**. Install and log in to ea
 **1. Install from GitHub.** Make sure Bun's global bin directory is on your `PATH`.
 
 ```sh
-bun add -g github:harshanandak/harnest
+bun add -g github:harshanandak/harnest#v0.1.0
 harnest --version
 ```
 
@@ -70,7 +70,7 @@ Paste this prompt into the coding agent you want to use as the lead. It installs
 Install and set up Harnest (https://github.com/harshanandak/harnest) on this machine so you can hand off work to other coding agents.
 
 1. Check that git, bun, and Node.js 22 or newer are installed. If any is missing, stop and tell me what to install.
-2. Install Harnest with `bun add -g github:harshanandak/harnest`. Run `harnest --version` to check the global command is on PATH.
+2. Install Harnest with `bun add -g github:harshanandak/harnest#v0.1.0`. Run `harnest --version` to check the global command is on PATH.
 3. Run `harnest setup --help` and find the host name that matches you. Setup writes your host configuration and starts a local background daemon. Ask me for permission first, and stop if I say no. Then ask whether the daemon should also start at login, and add --no-autostart if I say no. Run `harnest setup <host>`. If you are Cursor, also ask me for the absolute path of the project I use you in and add `--project "<that path>"`.
    Some hosts (for example goose, mistral-vibe, and `other`) are set up by hand: setup only prints configuration for me to add. In that case, show me the printed instructions, do not edit the configuration yourself, skip step 4, and tell me setup is not finished until I add it.
 4. Run `harnest doctor --host <host>`. Fix what you can and report anything still failing.
@@ -294,7 +294,7 @@ Call `handoff_routing_preview` to see the chosen route before dispatch.
 <details>
 <summary><b>Update or roll back</b></summary>
 
-Run `bun add -g github:harshanandak/harnest` again in the same Bun global prefix. The bridge and login item use paths within that prefix. Rerun `harnest setup <host>` to refresh files copied into the host, then restart it. Wait for active work to finish before stopping and restarting the daemon to load the new version. To roll back Harnest, reinstall a previous CLI-enabled revision with `bun add -g github:harshanandak/harnest#<revision>`. For a configuration rollback, use the [host restore instructions](docs/users/integrations.md#restore-a-host-configuration).
+Run `bun add -g github:harshanandak/harnest#<new-tag>` with the newest release tag in the same Bun global prefix. The bridge and login item use paths within that prefix. Rerun `harnest setup <host>` to refresh files copied into the host, then restart it. Wait for active work to finish before stopping and restarting the daemon to load the new version. To roll back Harnest, reinstall a previous CLI-enabled revision with `bun add -g github:harshanandak/harnest#<revision>`. For a configuration rollback, use the [host restore instructions](docs/users/integrations.md#restore-a-host-configuration).
 </details>
 
 <details>

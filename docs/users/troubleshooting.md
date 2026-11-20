@@ -18,7 +18,7 @@ Run `harnest doctor` for a broad machine profile, but interpret its individual c
 
 ## The server appears stale after an update
 
-For a global installation, run `bun add -g github:harshanandak/harnest` again. For a checkout, refresh dependencies with `bun install --frozen-lockfile --omit optional` after updating.
+For a global installation, run `bun add -g github:harshanandak/harnest#<release-tag>` again with the newest release tag. For a checkout, refresh dependencies with `bun install --frozen-lockfile --omit optional` after updating.
 
 Call `handoff_host_info` and inspect `runtime.root`, `loadedFingerprint`, `diskFingerprint`, and `sourceStatus`. Let active jobs settle, then reload the MCP connection or restart the host. Editing files does not replace modules already loaded in a running server process.
 
