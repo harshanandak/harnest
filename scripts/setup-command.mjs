@@ -1,6 +1,7 @@
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const checkout = fileURLToPath(new URL("..", import.meta.url)).replace(/[/\\]$/, "");
+const checkout = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 /** Format a command for pasting into an interactive shell. @param {string} args @param {string} [path] */
 export function setupCommand(args, path, { platform = process.platform, cli = process.env.HARNEST_SETUP_VIA_CLI === "1" } = {}) {
@@ -16,6 +17,6 @@ export function setupCommand(args, path, { platform = process.platform, cli = pr
   // Percent expansion and optional delayed expansion also affect quoted cmd.exe arguments.
   const cmd = [cli ? "" : checkout, path ?? ""].some((value) => /[%^&!]/.test(value))
     ? "Use the PowerShell reverse path. cmd.exe can reinterpret characters in this path."
-    : `Reverse path (cmd.exe): ${command((value) => `"${value}"`)}`;
+    : `Reverse path (cmd.exe): ${command((value) => `"${value.replace(/\\+$/, "$&$&")}"`)}`;
   return `Reverse path (PowerShell): ${powershell}\n${cmd}`;
 }

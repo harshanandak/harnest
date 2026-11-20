@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { exec, execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
 import test from "node:test";
@@ -56,6 +56,7 @@ test("dispatcher reports failures with a nonzero exit code", async () => {
 test("cmd.exe reverse commands quote spaces and omit paths with shell metacharacters", () => {
   const format = (path) => setupCommand("--restore", path, { platform: "win32", cli: true });
   assert.ok(format("C:\\host configs\\backup").includes('Reverse path (cmd.exe): harnest setup --restore "C:\\host configs\\backup"'));
+  assert.ok(format("C:\\").includes('Reverse path (cmd.exe): harnest setup --restore "C:\\\\"'));
   for (const character of ["%TEMP%", "^", "&", "!"]) {
     const path = `C:\\host configs\\${character}\\backup`;
     const output = format(path);
@@ -162,6 +163,8 @@ test("printed setup reversal works from a different directory", async (t) => {
 
   await t.test("Cursor reversal from a different directory includes both scopes after a repeat setup", async () => {
     const project = await realpath(await mkdtemp(join(home, "cursor workspace ")));
+    const alias = join(home, "cursor workspace link");
+    await symlink(project, alias, windows ? "junction" : "dir");
     const cursorDir = join(project, ".cursor");
     const userMcp = join(home, ".cursor", "mcp.json");
     const projectMcp = join(cursorDir, "mcp.json");
@@ -184,10 +187,11 @@ test("printed setup reversal works from a different directory", async (t) => {
 
     const args = ["setup", "cursor", "--no-autostart"];
     const label = windows ? "Reverse path (cmd.exe)" : "Reverse path";
-    const first = await cli(args, { cwd: project });
+    const first = await cli([...args, "--project", alias]);
     assert.ok(first.stdout.includes(`Cursor project: ${project}`));
     assert.match(first.stdout, /"projectMcp":\s*\{/);
-    const repeated = await cli([...args, "--project", project]);
+    const repeated = await cli(args, { cwd: project });
+    assert.ok(repeated.stdout.includes(`Cursor project: ${project}`));
     assert.match(repeated.stdout, /"projectMcp":\s*\{[^}]*"backup": null/);
     const reverse = command(repeated.stdout, label);
     assert.equal(reverse, command(first.stdout, label));
@@ -198,7 +202,8 @@ test("printed setup reversal works from a different directory", async (t) => {
     await writeFile(edited, "edited worker");
     const removal = await shell(reverse, options);
     assert.deepEqual(JSON.parse(removal.stdout).project.preserved, ["agents/cursor-worker.md"]);
-    await shell(reverse, options);
+    const viaAlias = await cli(["setup", "remove", "cursor", "--project", alias]);
+    assert.deepEqual(JSON.parse(viaAlias.stdout).project.preserved, ["agents/cursor-worker.md"]);
     for (const path of [userMcp, projectMcp]) assert.deepEqual(JSON.parse(await readFile(path, "utf8")), unrelated);
     assert.equal(await readFile(router, "utf8"), "original router");
     assert.equal(await readFile(existing, "utf8"), "unrelated agent");

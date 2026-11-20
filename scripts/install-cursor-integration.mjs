@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, parse, resolve } from "node:path";
@@ -21,12 +21,17 @@ import { readExisting, replaceWithBackup } from "./install-files.mjs";
 // an alwaysApply playbook would tax every prompt for an occasional workflow.
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
+async function canonicalPath(path, { create = false } = {}) {
+  try { return await realpath(path); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+  if (!create) return resolve(path);
+  await mkdir(path, { recursive: true });
+  return realpath(path);
+}
+
 export async function defaultCursorProject() {
   const project = await realpath(process.cwd());
-  const home = await realpath(homedir()).catch((error) => {
-    if (error.code === "ENOENT") return resolve(homedir());
-    throw error;
-  });
+  const home = await canonicalPath(homedir());
   if (project === home || project === parse(project).root) {
     throw new Error("Cursor setup cannot use your home directory or a filesystem root by default. Pass --project DIR or run from your project.");
   }
@@ -158,7 +163,7 @@ async function installDocs(projectRoot, { state, save }) {
 
 /** @param {string} [projectRoot] repository root containing `.cursor/` */
 export async function installCursorIntegration(projectRoot = root, { home = homedir() } = {}) {
-  projectRoot = resolve(projectRoot);
+  projectRoot = await canonicalPath(projectRoot, { create: true });
   const project = await cursorProjectState(projectRoot, home);
   const docs = await installDocs(projectRoot, project);
   const mcp = await installHostConfig("cursor", { home });
@@ -174,6 +179,7 @@ export async function installCursorIntegration(projectRoot = root, { home = home
 }
 
 export async function removeCursorProject(projectRoot, home = homedir()) {
+  projectRoot = await canonicalPath(projectRoot);
   const { state, save } = await cursorProjectState(projectRoot, home);
   const cursorDir = join(projectRoot, ".cursor");
   const restored = [];
