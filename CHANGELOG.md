@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
 - MCP tool results share a serialized UTF-8 budget in both protocol eras. Status uses 16 KiB and other results use 64 KiB. Status, session lists, trace headers, and oversized active receipts expose recovery fields and replace long control histories with `controlCount`.
 - Follow `page.continuation` to reconstruct large receipts, trace and board entries, and session lists. Oversized compare, review, graph, and other tool results use `handoff_page` to read the original response without repeating the operation. Pi preserves these pages in tool output. See the [MCP paging contract](docs/users/mcp-usage.md#response-limits-and-continuations).
+
+### Fixed
+
+- Dynamic workflow status no longer reports a live run as missing during a snapshot replacement on Windows.
 - Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
 - Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
 - Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
