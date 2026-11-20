@@ -33,7 +33,8 @@ const env = {
 };
 const options = { cwd: fixture, env, encoding: "utf8", windowsHide: true };
 const run = (file, args, cwd = fixture) => execFileSync(file, args, { ...options, cwd });
-const cli = (...args) => run(join(bin, windows ? "harnest.exe" : "harnest"), args);
+const installedCli = join(bin, windows ? "harnest.exe" : "harnest");
+const cli = (...args) => run(installedCli, args);
 
 async function checkInstall(source) {
   for (const asset of [
@@ -72,7 +73,8 @@ function checkSetupAndRemove(bridge) {
   mkdirSync(join(env.XDG_CONFIG_HOME, "amp"));
   writeFileSync(path, JSON.stringify(previous) + "\n");
   try {
-    const setup = cli("setup", "amp", "--no-autostart");
+    // Windows locks the detached daemon's working directory until shutdown completes.
+    const setup = run(installedCli, ["setup", "amp", "--no-autostart"], repo);
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8"))["amp.mcpServers"].harnest, bridge);
     const reverse = setup.match(/^Reverse path: (harnest setup remove amp)\r?$/m)?.[1];
     assert.ok(reverse, "Missing the global Amp reverse command");
