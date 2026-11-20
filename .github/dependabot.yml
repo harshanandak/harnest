@@ -1,13 +1,16 @@
 # Monthly, grouped version updates so a quiet repo gets at most one PR per ecosystem.
 # Security updates still arrive as soon as an alert opens.
+# Cooldowns skip versions until they have been public for a while, so a hijacked
+# release is usually caught and pulled before it reaches this repo.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    # Actions has no per-semver cooldown, so every Actions update waits 30 days.
     cooldown:
-      default-days: 7
+      default-days: 30
     groups:
       actions:
         patterns: ["*"]
@@ -17,6 +20,12 @@ updates:
       interval: monthly
     cooldown:
       default-days: 7
+      semver-major-days: 30
     groups:
       dependencies:
         patterns: ["*"]
+    ignore:
+      # OpenCode ships only 0.0.0-beta-* builds. Its 0.0.0 is an empty name-reservation
+      # placeholder that semver ranks above every beta, so never offer it.
+      - dependency-name: "@opencode-ai/client"
+        versions: ["0.0.0"]
