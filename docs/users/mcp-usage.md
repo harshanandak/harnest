@@ -32,14 +32,26 @@ Call `handoff_workflow` with a `request` object. `requestId`, `target`, `task`, 
 Use the returned `jobId` in the lifecycle tools:
 
 1. Call `handoff_status` with `{ "jobId": "..." }` for compact state.
-2. Call `handoff_trace` with the job ID and `afterSequence` set to the previous response's `nextSequence` for new progress only.
-3. Call `handoff_result` after the job settles and retain the terminal receipt.
+2. Call `handoff_trace` with the job ID. Follow `page.continuation` when present, then use the last `nextSequence` as `afterSequence` when polling for new progress.
+3. Call `handoff_result` after the job settles. Assemble all pages before retaining the terminal receipt.
 4. Use `handoff_cancel` to request cancellation. Continue polling until the downstream owner acknowledges settlement.
 5. Use `handoff_resume` for a failed or partial read-only handoff after reviewing its trace.
 
 Ask for file and line evidence in the task or acceptance criteria. Add receipt arrays such as `evidence` to `requiredResultFields` only when the selected adapter is configured to populate them; prose in the agent's final text does not create a structured receipt array.
 
 A foreground timeout above the safe MCP wait is converted to a background job. Prefer `background: true` for work that can take more than one tool turn.
+
+## Response limits and continuations
+
+`handoff_status` has a 16 KiB UTF-8 response budget. Result, trace, session, and board pages have a 64 KiB budget. The budget includes the JSON and its MCP text copy, with room reserved for protocol framing.
+
+Status, session lists, and the receipt on each trace page expose job state, identity, cancellation, recovery, and errors. These views omit `result` and replace nonempty `controls` with `controlCount`. Use `resultRef.tool` with `resultRef.arguments` once the job settles. A compact row with `projection.continuation` links to status for its full metadata. An unusually large status itself can span multiple pages.
+
+- **Receipt pages.** A normal `handoff_result` returns the original receipt. A large result or status puts `page` alongside the displayed receipt fields. Call the named tool with `page.continuation.arguments`, including its opaque `cursor`. Join the `page.chunk` strings in order and parse the JSON once `continuation` is null. The displayed state is the durable state throughout pagination. If the receipt changes and invalidates the cursor, start again without a cursor.
+- **Trace and board pages.** For a full history, start with `afterSequence: 0`. Omitting it starts from a recent window, so earlier entries may exist. When a page has `page.continuation`, call that tool with its arguments as supplied. If `page.item` is present, join its `chunk` strings for that sequence and parse the complete item once `omittedBytes` is zero. `nextSequence` advances past the item when its last fragment is returned. Once the continuation is exhausted, resume polling with `afterSequence: nextSequence`. An oversized `handoff_post` echo returns the posted entry's identity and a `handoff_read` continuation.
+- **Session lists.** Follow the continuation to read the rest of the requested list. The offset tracks positions in the current recently updated list, so a new or updated job can move rows between calls.
+
+`originalBytes` counts UTF-8 bytes of the compact JSON before paging. On trace, board, and session lists it measures the requested window's array. `omittedCount` counts items from that window whose delivery is still incomplete. For receipt and item fragments, `offset` and `omittedBytes` are byte counts within the JSON being assembled. A null continuation means the page sequence is complete. Trace paging recovers the items as exposed by the redacted trace API.
 
 ## Native execution controls
 

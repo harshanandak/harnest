@@ -15,6 +15,9 @@ import { startDaemon } from "../src/daemon.mjs";
 import { createDaemonClient, daemonStatus, ensureDaemon, stopDaemon } from "../src/daemon-client.mjs";
 import { readDaemonToken, VERSION } from "../src/daemon-settings.mjs";
 import { createRuntimeServices } from "../src/runtime-services.mjs";
+import { BOARD_MESSAGE_MAX_BYTES } from "../src/board.mjs";
+import { PAGE_RESPONSE_BYTES, STATUS_RESPONSE_BYTES } from "../src/mcp-output.mjs";
+import { structuredResult } from "../src/result.mjs";
 import { mergeProcessEnv } from "../src/process.mjs";
 import { protectWindowsPath } from "../src/windows-acl.mjs";
 
@@ -59,7 +62,8 @@ function raw(port, path, { method = "GET", headers, body } = {}) {
       const buffers = [];
       try {
         for await (const chunk of res) buffers.push(chunk);
-        resolve({ status: res.statusCode, text: Buffer.concat(buffers).toString("utf8") });
+        const wire = Buffer.concat(buffers);
+        resolve({ status: res.statusCode, text: wire.toString("utf8"), bytes: wire.length });
       } catch (error) { reject(error); }
     });
     req.on("error", reject);
@@ -135,6 +139,209 @@ for (const modern of [false, true]) {
     }
   });
 }
+
+test("bounded MCP reads preserve durable state and reconstruct oversized payloads in both eras", async (t) => {
+  const { home, directory, stateDir } = await fixture(t);
+  const smallResult = structuredResult("done");
+  const largeResult = structuredResult(JSON.stringify({
+    finalText: "界😀".repeat(21_333) + "x",
+    summary: "界".repeat(16_000),
+    ...Object.fromEntries(["artifacts", "files", "evidence", "tests", "risks"].map((field) => [
+      field, Array.from({ length: 100 }, (_, i) => `${field}-${i}-`.padEnd(4000, i % 2 ? "x" : "\\")),
+    ])),
+  }));
+  assert.equal(largeResult.finalText.length, 64_000);
+  assert.equal(largeResult.summary.length, 16_000);
+  for (const field of ["artifacts", "files", "evidence", "tests", "risks"]) {
+    assert.equal(largeResult[field].length, 100);
+    assert.ok(largeResult[field].every((item) => item.length === 4000));
+  }
+  const services = createRuntimeServices({
+    stateDir, boardDir: join(home, "boards"), routeResolver: async (request) => request,
+    adapterFactory: () => ({ run: async () => ({ sessionId: "bounded-session", result: smallResult }) }),
+  });
+  const { companion } = services;
+  const { jobId } = await companion.start({ requestId: "bounded-fixture", cwd: home, target: "pi", task: "fixture" });
+  await companion.store.appendEvent(jobId, {
+    at: "2026-01-01T00:00:00.000Z", activity: "large trace event",
+    event: { type: "fixture", values: Array.from({ length: 24 }, (_, i) => `${i}${"界😀".repeat(1200)}`.slice(0, 4000)) },
+  });
+  const controls = Array.from({ length: 300 }, (_, i) => ({
+    commandId: `control-${i}`, kind: "message", state: "applied", acknowledgement: "🙂".repeat(500),
+  }));
+  await companion.store.transition(jobId, (job) => {
+    job.receipt.controls = controls;
+    return job;
+  });
+  const largeError = {
+    name: "InterruptedExecution", message: "Lease lost while recovering",
+    details: { kind: "interrupted", unsafeResume: true, stderr: "\u0000".repeat(2500), warnings: ["界".repeat(2000)] },
+  };
+  const interrupted = await companion.start({ requestId: "bounded-partial", cwd: home, target: "pi", task: "fixture" });
+  const cancellation = { state: "unacknowledged", requestedAt: "2026-01-01T00:00:00.000Z", acknowledgedAt: null };
+  await companion.store.transition(interrupted.jobId, (job) => {
+    Object.assign(job.receipt, { state: "partial", result: null, cancellation, error: largeError });
+    job.receipt.recovery.canResume = false;
+    return job;
+  });
+  const topic = "bounded-board";
+  const message = "😀".repeat(BOARD_MESSAGE_MAX_BYTES / 4);
+  assert.equal(Buffer.byteLength(message), BOARD_MESSAGE_MAX_BYTES);
+  const entries = Array.from({ length: 200 }, (_, i) => ({
+    entryId: `board-${i}`, sequence: i + 1, at: "2026-01-01T00:00:00.000Z", topic, from: "fixture", message,
+  }));
+  const boardPath = companion.boards.path(topic);
+  await mkdir(join(home, "boards"), { recursive: true });
+  await writeFile(boardPath, entries.map((entry) => JSON.stringify(entry) + "\n").join(""));
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => services });
+  try {
+    const token = await readDaemonToken(directory);
+    for (const modern of [false, true]) {
+      await t.test(modern ? "modern" : "legacy", async () => {
+        const version = modern ? "2026-07-28" : "2025-11-25";
+        const clientInfo = { name: "bounded-output-test", version: "1" };
+        const rpc = (method, params, id = 1, budget = Infinity) => raw(daemon.port, "/mcp", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`, Accept: "application/json, text/event-stream",
+            "Content-Type": "application/json", "MCP-Protocol-Version": version,
+            ...(modern && { "Mcp-Method": method, ...(params?.name && { "Mcp-Name": params.name }) }),
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0", ...(id === null ? {} : { id }), method,
+            params: modern ? { ...params, _meta: {
+              "io.modelcontextprotocol/protocolVersion": version,
+              "io.modelcontextprotocol/clientInfo": clientInfo,
+              "io.modelcontextprotocol/clientCapabilities": {},
+            } } : params,
+          }),
+        }).then((reply) => {
+          const size = reply.bytes;
+          assert.ok(size <= budget, `${method} ${params?.name ?? ""} returned ${size} bytes`);
+          return { result: reply.text ? JSON.parse(reply.text).result : undefined, size, status: reply.status };
+        });
+        if (modern) assert.ok((await rpc("server/discover")).result);
+        else {
+          assert.equal((await rpc("initialize", { protocolVersion: version, clientInfo, capabilities: {} })).result.protocolVersion, version);
+          assert.equal((await rpc("notifications/initialized", {}, null)).status, 202);
+        }
+        const call = async (name, args, key, budget = PAGE_RESPONSE_BYTES) => {
+          const { result, size } = await rpc("tools/call", { name, arguments: args }, 1, budget);
+          assert.ok(result && !result.isError, result?.content?.[0]?.text);
+          assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent[key]);
+          return { value: result.structuredContent[key], size };
+        };
+        const setResult = (result) => companion.store.transition(jobId, (job) => {
+          job.receipt.result = result;
+          return job;
+        });
+        await setResult(smallResult);
+        const small = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+        assert.deepEqual((await call("handoff_result", { jobId }, "receipt")).value.result, smallResult);
+        await setResult(largeResult);
+        const large = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+        assert.equal(large.size, small.size);
+        assert.deepEqual(large.value, small.value);
+        assert.equal(large.value.result, undefined);
+        assert.equal(large.value.controlCount, controls.length);
+        assert.deepEqual(large.value.resultRef, { tool: "handoff_result", arguments: { jobId } });
+        const sessions = (await call("handoff_sessions", {}, "sessions")).value.sessions;
+        assert.deepEqual(new Set(sessions.map((session) => session.jobId)), new Set([jobId, interrupted.jobId]));
+        assert.ok(sessions.every((session) => !Object.hasOwn(session, "result")));
+
+        const partial = (await call("handoff_status", { jobId: interrupted.jobId }, "receipt", STATUS_RESPONSE_BYTES)).value;
+        assert.equal(partial.state, "partial");
+        assert.equal(partial.error.details.kind, "interrupted");
+        assert.equal(partial.error.details.unsafeResume, true);
+        assert.deepEqual(partial.cancellation, cancellation);
+        assert.equal(partial.recovery.canResume, false);
+        const partialResult = (await call("handoff_result", { jobId: interrupted.jobId }, "receipt")).value;
+        assert.equal(partialResult.state, "partial");
+        assert.equal(partialResult.result, null);
+        assert.deepEqual(partialResult.error, largeError);
+
+        const collectReceipt = async (tool, input, budget, state) => {
+          let next = { tool, arguments: input };
+          const chunks = [];
+          let offset = 0;
+          while (next) {
+            const { value } = await call(next.tool, next.arguments, "receipt", budget);
+            assert.equal(value.jobId, input.jobId);
+            assert.equal(value.state, state);
+            assert.ok(value.page);
+            assert.equal(value.page.offset, offset);
+            assert.ok(value.page.chunk.length);
+            chunks.push(value.page.chunk);
+            offset += Buffer.byteLength(value.page.chunk, "utf8");
+            assert.equal(value.page.originalBytes - offset, value.page.omittedBytes);
+            assert.equal(value.page.omittedCount, Number(value.page.continuation !== null));
+            next = value.page.continuation;
+          }
+          return chunks.join("");
+        };
+        const full = await collectReceipt("handoff_result", { jobId }, PAGE_RESPONSE_BYTES, "completed");
+        assert.deepEqual(Buffer.from(full), Buffer.from(JSON.stringify(await companion.result(jobId))));
+        const recoveredStatus = await collectReceipt("handoff_status", { jobId: interrupted.jobId }, STATUS_RESPONSE_BYTES, "partial");
+        const { result, controls: ignored, ...recordedStatus } = await companion.status(interrupted.jobId);
+        assert.deepEqual(Buffer.from(recoveredStatus), Buffer.from(JSON.stringify({
+          ...recordedStatus, controls: [], resultRef: { tool: "handoff_result", arguments: { jobId: interrupted.jobId } },
+        })));
+
+        const collectRecords = async (tool, args, key, field, expected) => {
+          let next = { tool, arguments: args };
+          let count = 0;
+          let itemOffset = 0;
+          let chunks = [];
+          let lastSequence = args.afterSequence ?? 0;
+          while (next) {
+            const { value } = await call(next.tool, next.arguments, key);
+            if (key === "trace") {
+              assert.equal(value.receipt.state, "completed");
+              assert.equal(value.receipt.result, undefined);
+            }
+            for (const entry of value[field]) {
+              assert.deepEqual(entry, expected[count++]);
+              lastSequence = entry.sequence;
+            }
+            const item = value.page?.item;
+            if (item) {
+              assert.equal(item.sequence, expected[count].sequence);
+              assert.equal(item.offset, itemOffset);
+              assert.ok(item.chunk.length);
+              chunks.push(item.chunk);
+              itemOffset += Buffer.byteLength(item.chunk, "utf8");
+              assert.equal(item.originalBytes - itemOffset, item.omittedBytes);
+              if (!item.omittedBytes) {
+                assert.deepEqual(Buffer.from(chunks.join("")), Buffer.from(JSON.stringify(expected[count++])));
+                lastSequence = item.sequence;
+                chunks = [];
+                itemOffset = 0;
+              }
+            }
+            assert.equal(value.nextSequence, lastSequence);
+            if (value.page) assert.ok(value.page.originalBytes >= (item?.originalBytes ?? 2));
+            assert.ok(count <= expected.length);
+            next = value.page?.continuation;
+          }
+          assert.equal(count, expected.length);
+          assert.equal(itemOffset, 0);
+        };
+        const { events } = await companion.store.readTrace(jobId, { afterSequence: 0, limit: 200 });
+        await collectRecords("handoff_trace", { jobId, afterSequence: 0, limit: 200 }, "trace", "events", events);
+        const firstBoard = (await call("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board")).value;
+        assert.equal(firstBoard.page.omittedCount, 200);
+        assert.equal(firstBoard.page.originalBytes, Buffer.byteLength(JSON.stringify(entries), "utf8"));
+        if (!modern) await collectRecords("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board", "entries", entries);
+        const postTopic = `bounded-post-${modern ? "modern" : "legacy"}`;
+        const post = (await call("handoff_post", { topic: postTopic, message, from: "fixture" }, "post")).value;
+        assert.equal(post.message, undefined);
+        const stored = (await companion.boards.read({ topic: postTopic })).entries;
+        assert.equal(stored[0].message, message);
+        await collectRecords(post.page.continuation.tool, post.page.continuation.arguments, "board", "entries", stored);
+      });
+    }
+  } finally { await daemon.close(); }
+});
 
 test("an accepted foreground handoff completes after its HTTP client disconnects", async (t) => {
   const { stateDir, home, directory } = await fixture(t);

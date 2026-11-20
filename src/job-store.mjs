@@ -742,7 +742,8 @@ export class JobStore {
 
   async listReceipts(options = {}) {
     const limit = Math.max(1, Math.min(100, Number(options.limit) || 20));
-    return (await this.listAllReceipts(options)).slice(0, limit);
+    const offset = options.offset ?? 0;
+    return (await this.listAllReceipts(options)).slice(offset, offset + limit);
   }
 
   async listAllReceipts(options = {}) {
