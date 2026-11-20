@@ -29,7 +29,7 @@ const toolNames = [
   "dynamic_inspect", "dynamic_invoke", "dynamic_list", "dynamic_result", "dynamic_resume",
   "dynamic_revisions", "dynamic_save", "dynamic_start", "dynamic_status", "dynamic_validate",
   "fleet", "graph_cancel", "graph_result", "graph_resume", "graph_start", "graph_status",
-  "graph_validate", "host_info", "message", "post", "read", "reroute", "result", "resume",
+  "graph_validate", "host_info", "message", "page", "post", "read", "reroute", "result", "resume",
   "review", "routing_configure", "routing_get", "routing_preview", "sessions", "status", "trace", "workflow",
 ].map((name) => `handoff_${name}`);
 
@@ -133,7 +133,7 @@ function launch(args, env, pipes = false) {
   const child = spawn(process.execPath, ["--import", probe, ...args], {
     // A hidden Windows console can still create a conhost.exe child.
     detached: process.platform === "win32",
-    cwd: root, env, windowsHide: true, stdio: [pipes ? "pipe" : "ignore", pipes ? "pipe" : "ignore", "ignore", "ipc"],
+    cwd: root, env, windowsHide: true, stdio: [pipes ? "pipe" : "ignore", pipes ? "pipe" : "ignore", args.includes("--driver") ? "inherit" : "ignore", "ipc"],
   });
   const closed = once(child, "exit");
   return {
@@ -272,7 +272,7 @@ async function measure(sampleNumber) {
 }
 
 if (process.argv.includes("--driver")) {
-  await clientDriver().catch(() => { process.exit(1); });
+  await clientDriver().catch((error) => { console.error(error.stack); process.exit(1); });
 } else {
   const result = { platform: process.platform, release: release(), arch: process.arch, node: process.version, budgets, samples: [] };
   for (let run = 1; run <= 3; run++) {

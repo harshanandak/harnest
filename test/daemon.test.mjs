@@ -543,16 +543,29 @@ test("MCP cancellation compacts an active receipt with hundreds of controls", as
 
 test("every tool in the MCP catalog crosses the wire budget boundary", async (t) => {
   const { home, directory } = await fixture(t);
-  const fail = async () => { throw new Error("large catalog fixture " + "\u754c".repeat(PAGE_RESPONSE_BYTES)); };
-  const throwingService = new Proxy({}, { get: () => fail });
+  const bulk = "large catalog fixture " + "\u754c".repeat(PAGE_RESPONSE_BYTES);
+  const payload = { output: bulk };
+  let failing = false;
+  const endpoint = (value) => async () => {
+    if (failing) throw new Error(bulk);
+    return value;
+  };
+  const service = new Proxy({}, { get: () => endpoint(payload) });
+  const receipt = { jobId: "job", state: "completed", result: payload, diagnostic: bulk };
+  const entry = { sequence: 1, topic: "fixture", message: bulk };
+  const sequence = { nextSequence: 1, hasMore: false };
   const daemon = await startDaemon({
     port: 0, directory, buildServices: () => ({
-      companion: { ...Object.fromEntries([
-        "start", "compare", "review", "statusReference", "resultReference", "cancel", "resume",
-        "traceReference", "sessions", "fleet", "message", "reroute", "postToBoard", "readBoard",
-      ].map((key) => [key, fail])), routeResolver: { diagnostics: fail } },
-      graphs: throwingService, dynamic: throwingService, workflowRegistry: throwingService,
-      routingSettings: throwingService, close: async () => {},
+      companion: {
+        start: endpoint(receipt), statusReference: endpoint(receipt), resultReference: endpoint(receipt),
+        cancel: endpoint(receipt), resume: endpoint(receipt), sessions: endpoint({ sessions: [receipt] }),
+        traceReference: endpoint({ receipt, events: [{ sequence: 1, event: bulk }], ...sequence }),
+        postToBoard: endpoint(entry), readBoard: endpoint({ topic: entry.topic, entries: [entry], ...sequence }),
+        compare: endpoint(payload), review: endpoint(payload), fleet: endpoint(payload),
+        message: endpoint(payload), reroute: endpoint(payload), routeResolver: { diagnostics: endpoint(payload) },
+      },
+      graphs: service, dynamic: service, workflowRegistry: service, routingSettings: service,
+      close: async () => {},
     }),
   });
   try {
@@ -608,12 +621,36 @@ test("every tool in the MCP catalog crosses the wire budget boundary", async (t)
       handoff_workflow: { request },
     };
     for (const modern of [false, true]) {
-      const { rpc, rejects } = await wireClient(daemon.port, token, modern);
+      const { rpc, call, rejects } = await wireClient(daemon.port, token, modern);
       const names = assertMcpCatalog((await rpc("tools/list")).result);
       assert.deepEqual(Object.keys(args).sort(), names);
+      const keyFor = (name) => {
+        if (name.startsWith("handoff_dynamic_")) return "workflow";
+        if (name.startsWith("handoff_graph_")) return "graph";
+        if (name.startsWith("handoff_routing_")) return "routing";
+        return ({
+          handoff_compare: "comparison", handoff_cancel: "receipt", handoff_read: "board",
+          handoff_result: "receipt", handoff_resume: "receipt", handoff_status: "receipt",
+          handoff_workflow: "receipt", handoff_host_info: "host", handoff_page: "response",
+          handoff_message: "control", handoff_reroute: "control",
+        })[name] ?? name.slice("handoff_".length);
+      };
+      failing = false;
       for (const name of names) {
-        // This read only accepts cursors emitted by the server. Its successful
-        // paging path is exercised by all four aggregate reconstruction cases.
+        let input = args[name];
+        if (name === "handoff_page") {
+          const first = (await call("handoff_compare", args.handoff_compare, "comparison")).value;
+          input = first.page.continuation.arguments;
+        }
+        const { value } = await call(name, input, keyFor(name));
+        if (name === "handoff_sessions") {
+          assert.equal(value.sessions[0].resultRef.arguments.jobId, receipt.jobId);
+        } else {
+          assert.ok(value.page, `expected an oversized fixture page from ${name}`);
+        }
+      }
+      failing = true;
+      for (const name of names) {
         const message = name === "handoff_page" ? /invalid or expired response cursor/ : /^large catalog fixture /;
         await rejects(name, args[name], message);
       }
