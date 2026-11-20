@@ -78,9 +78,9 @@ ACP model, mode, and config choices vary by agent. Use the IDs and values the na
 
 `trusted: true` consents to that executable loading its native configuration. It does not create a read-only boundary or sandbox, and it does not establish that native hooks, plugins, or MCP servers are inert. Unsupported route controls, policy controls, negotiated capabilities, and callbacks fail explicitly.
 
-Install and authenticate the CLI first. Run `bun run acp add <preset-id>` to inspect the executable and arguments, then repeat with `--trust` to save the local registration. Use the preset ID in `route.agent` and provide explicit write approval on each handoff.
+Install and authenticate the CLI first. Run `harnest acp add <preset-id>` to inspect the executable and arguments, then repeat with `--trust` to save the local registration. Use the preset ID in `route.agent` and provide explicit write approval on each handoff.
 
-For Antigravity CLI, run `bun run acp add antigravity` to preview `agy acp`. On Windows, the installer puts `agy.exe` in `%LOCALAPPDATA%\agy\bin` by default. Add that directory to `PATH` if Harnest cannot find `agy`. See [Google's Antigravity install guide](https://antigravity.google/docs/cli/tutorial/).
+For Antigravity CLI, run `harnest acp add antigravity` to preview `agy acp`. On Windows, the installer puts `agy.exe` in `%LOCALAPPDATA%\agy\bin` by default. Add that directory to `PATH` if Harnest cannot find `agy`. See [Google's Antigravity install guide](https://antigravity.google/docs/cli/tutorial/).
 
 See [Registered ACP agents](../acp-agents.md) for registration and protocol details.
 

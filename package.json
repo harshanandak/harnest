@@ -8,10 +8,40 @@
   "engines": {
     "node": ">=22"
   },
+  "bin": {
+    "harnest": "scripts/harnest.mjs"
+  },
+  "files": [
+    ".agents/plugins",
+    ".claude-plugin",
+    ".codex-plugin",
+    ".cursor",
+    ".mcp.json",
+    "agents",
+    "codex-agents",
+    "commands",
+    "docs",
+    "examples",
+    "hooks",
+    "mcp.json",
+    "monitors",
+    "opencode-agents",
+    "opencode-commands",
+    "opencode-plugin",
+    "pi-extension",
+    "plugin.json",
+    "schemas",
+    "scripts",
+    "skills",
+    "src",
+    "harnest.config.example.json",
+    "harnest.routing.example.mjs"
+  ],
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "acp": "node scripts/acp-registry.mjs",
     "daemon": "node scripts/daemon.mjs",
+    "routing:setup": "node scripts/setup-routing.mjs",
     "test": "node --test --test-concurrency=1",
     "test:bun": "bun test",
     "test:bun:watch": "bun test --watch",

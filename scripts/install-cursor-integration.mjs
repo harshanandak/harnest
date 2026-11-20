@@ -1,8 +1,11 @@
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { setupDaemon } from "./install-daemon.mjs";
-import { bridgeEntry, installHostConfig, installJsonServer } from "./install-host-config.mjs";
+import { isDeepStrictEqual } from "node:util";
+import { bridgeEntry, installHostConfig, installJsonServer, readJsonServer } from "./install-host-config.mjs";
 import { readExisting, replaceWithBackup } from "./install-files.mjs";
 
 // Idempotent Cursor installer.
@@ -19,9 +22,21 @@ import { readExisting, replaceWithBackup } from "./install-files.mjs";
 // an alwaysApply playbook would tax every prompt for an occasional workflow.
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
-function cursorPaths(projectRoot) {
-  const cursorDir = join(projectRoot, ".cursor");
-  return { cursorDir };
+async function canonicalPath(path, { create = false } = {}) {
+  try { return await realpath(path); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+  if (!create) return resolve(path);
+  await mkdir(path, { recursive: true });
+  return realpath(path);
+}
+
+async function defaultCursorProject(home, required = true) {
+  const project = await realpath(process.cwd());
+  if (project === await canonicalPath(home) || project === parse(project).root) {
+    if (!required) return null;
+    throw new Error("Cursor setup cannot use your home directory or a filesystem root by default. Pass --project DIR or run from your project.");
+  }
+  return project;
 }
 
 const ROUTER_RULE = `---
@@ -95,47 +110,130 @@ route.agent plus explicit write approval; registry trust permits native configur
 imports and does not establish read-only containment.
 `;
 
-async function installDocs(projectRoot = root) {
-  const { cursorDir } = cursorPaths(projectRoot);
-  const installed = [];
-  const writeExact = async (path, content, label) => {
-    const previous = await readExisting(path);
-    if (previous === content) return `${label} already current`;
-    await replaceWithBackup(path, content, previous);
-    return `installed ${label}`;
+const digest = (bytes) => bytes === null ? null : createHash("sha256").update(bytes).digest("hex");
+const managedFile = /^(?:skills\/handoff\/(?:SKILL\.md|agents\/openai\.yaml|references\/[a-z0-9][a-z0-9.-]*)|rules\/harnest-router\.mdc|agents\/cursor-worker\.md|commands\/workflows\.md)$/i;
+
+async function cursorProjectState(projectRoot, home) {
+  const path = join(home, ".cursor", "harnest-projects", digest(projectRoot) + ".json");
+  let raw = await readExisting(path);
+  const state = raw === null ? { files: {} } : JSON.parse(raw);
+  const save = async () => {
+    const next = Object.keys(state.files).length || state.mcp ? JSON.stringify(state) + "\n" : null;
+    await replaceWithBackup(path, next, raw, { keepBackup: false });
+    raw = next;
   };
-  const skillDir = join(cursorDir, "skills", "handoff");
-  await mkdir(skillDir, { recursive: true });
-  await replaceWithBackup(join(skillDir, "SKILL.md"), await readFile(join(root, "skills", "handoff", "SKILL.md"), "utf8"));
-  installed.push("skills/handoff/SKILL.md");
-  const skillMetadata = "agents/openai.yaml";
-  await replaceWithBackup(join(skillDir, skillMetadata), await readFile(join(root, "skills", "handoff", skillMetadata), "utf8"));
-  installed.push("skills/handoff/" + skillMetadata);
-  const refsDir = join(skillDir, "references");
-  await mkdir(refsDir, { recursive: true });
-  for (const name of await readdir(join(root, "skills", "handoff", "references"))) {
-    await replaceWithBackup(join(refsDir, name), await readFile(join(root, "skills", "handoff", "references", name), "utf8"));
-    installed.push(`skills/handoff/references/${name}`);
+  return { state, save };
+}
+
+async function installDocs(projectRoot, { state, save }) {
+  const cursorDir = join(projectRoot, ".cursor");
+  const installed = [];
+  const writeExact = async (relative, content) => {
+    const path = join(cursorDir, relative);
+    const previous = await readExisting(path, null);
+    if (previous?.equals(content)) return `${relative} already current`;
+    const before = digest(previous);
+    const after = digest(content);
+    // Record ownership before publishing the file so an interrupted setup can still be reversed.
+    await replaceWithBackup(path, content, previous, {
+      beforeReplace: async (backup) => {
+        const record = state.files[relative];
+        state.files[relative] = record?.installed.includes(before)
+          ? { ...record, installed: [...new Set([...record.installed, after])] }
+          : { backup, before, installed: [after] };
+        await save();
+      },
+    });
+    return `installed ${relative}`;
+  };
+  const skill = "skills/handoff/";
+  const refs = await readdir(join(root, skill, "references"));
+  for (const name of ["SKILL.md", "agents/openai.yaml", ...refs.map((name) => "references/" + name)]) {
+    installed.push(await writeExact(skill + name, await readFile(join(root, skill, name))));
   }
-  installed.push(await writeExact(join(cursorDir, "rules", "harnest-router.mdc"), ROUTER_RULE, "rules/harnest-router.mdc"));
-  installed.push(await writeExact(join(cursorDir, "agents", "cursor-worker.md"), CURSOR_WORKER, "agents/cursor-worker.md"));
+  installed.push(await writeExact("rules/harnest-router.mdc", Buffer.from(ROUTER_RULE)));
+  installed.push(await writeExact("agents/cursor-worker.md", Buffer.from(CURSOR_WORKER)));
   const workflowsSource = await readFile(join(root, ".cursor", "commands", "workflows.md"), "utf8");
   const workflows = resolve(projectRoot) === root ? workflowsSource : workflowsSource.replace(
     /node scripts\/(workflow-monitor|graph-view)\.mjs/g,
     (_command, name) => `node "${join(root, "scripts", `${name}.mjs`).replaceAll("\\", "/")}"`,
   );
-  installed.push(await writeExact(join(cursorDir, "commands", "workflows.md"), workflows, "commands/workflows.md"));
+  installed.push(await writeExact("commands/workflows.md", Buffer.from(workflows)));
   return installed;
 }
 
-/** @param {string} [projectRoot] repository root containing `.cursor/` */
-export async function installCursorIntegration(projectRoot = root, options) {
-  const docs = await installDocs(projectRoot);
-  const mcp = await installHostConfig("cursor", options);
+/** @param {string|null} [projectRoot] project directory, or null to use the current directory */
+export async function installCursorIntegration(projectRoot = root, { home = homedir(), prepareDaemon = undefined } = {}) {
+  const cwd = projectRoot === null ? await defaultCursorProject(home) : null;
+  await prepareDaemon?.();
+  projectRoot = cwd ?? await canonicalPath(projectRoot, { create: true });
+  const project = await cursorProjectState(projectRoot, home);
+  const docs = await installDocs(projectRoot, project);
+  const mcp = await installHostConfig("cursor", { home });
   const projectPath = resolve(projectRoot, ".cursor", "mcp.json");
-  const projectMcp = projectPath === resolve(mcp.path) ? null
-    : await installJsonServer(projectPath, "mcpServers", bridgeEntry(), { existingOnly: true });
-  return { docs, mcp, projectMcp };
+  let projectMcp = null;
+  const existingEntry = projectPath === resolve(mcp.path) ? undefined : await readJsonServer(projectPath, "mcpServers");
+  // Setup only updates a harnest entry the project already has. Keep the entry from the first
+  // setup (a repeat setup must not replace it with harnest's own) so undo can restore it.
+  if (existingEntry !== undefined) {
+    const entry = bridgeEntry();
+    if (!project.state.mcp) project.state.mcpBefore = plain(existingEntry);
+    project.state.mcp = entry;
+    await project.save();
+    projectMcp = await installJsonServer(projectPath, "mcpServers", entry, { existingOnly: true });
+  }
+  return { projectPath: projectRoot, docs, mcp, projectMcp };
+}
+
+export async function removeCursorProject(projectRoot, home = homedir()) {
+  projectRoot = projectRoot ? await canonicalPath(projectRoot) : await defaultCursorProject(home, false);
+  if (!projectRoot) return;
+  const { state, save } = await cursorProjectState(projectRoot, home);
+  if (!Object.keys(state.files).length && !state.mcp) return;
+  const cursorDir = join(projectRoot, ".cursor");
+  const restored = [];
+  const preserved = [];
+  for (const [relative, record] of Object.entries(state.files)) {
+    if (!managedFile.test(relative)) throw new Error(`Invalid Cursor install record: ${relative}`);
+    const path = join(cursorDir, relative);
+    const current = await readExisting(path, null);
+    const hash = digest(current);
+    if (hash !== record.before && !record.installed.includes(hash)) {
+      preserved.push(relative);
+      continue;
+    }
+    if (hash !== record.before) {
+      const original = record.backup === null ? null : await readFile(record.backup);
+      if (digest(original) !== record.before) throw new Error(`Cursor backup changed: ${record.backup}`);
+      await replaceWithBackup(path, original, current);
+      restored.push(relative);
+    }
+    delete state.files[relative];
+  }
+  let projectMcp = null;
+  if (state.mcp) {
+    const path = join(cursorDir, "mcp.json");
+    const current = await readJsonServer(path, "mcpServers");
+    if (current !== undefined && !isDeepStrictEqual(plain(current), state.mcp)) {
+      // Someone changed the entry after setup: leave it and keep the record for a later undo.
+      projectMcp = { path, backup: null, status: "entry-changed" };
+      preserved.push("mcp.json");
+    } else {
+      // Put back the entry the project had before setup. Setup never creates this entry,
+      // so there is always an original to restore; an entry already gone stays gone.
+      projectMcp = current === undefined || state.mcpBefore === undefined
+        ? { path, backup: null, status: "already-absent" }
+        : { ...await installJsonServer(path, "mcpServers", state.mcpBefore, { existingOnly: true }), status: "restored" };
+      delete state.mcp;
+      delete state.mcpBefore;
+    }
+  }
+  await save();
+  return { path: projectRoot, restored, preserved, mcp: projectMcp };
+}
+
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 export function cursorProject(args) {

@@ -2,7 +2,7 @@
 
 ## The MCP client shows no Harnest tools
 
-1. Run `bun run daemon status` to verify readiness. For stdio clients, check that the command uses Node and the absolute path to `src/mcp-bridge.mjs`.
+1. Run `harnest daemon status` to verify readiness. For stdio clients, check that the command uses Node and the absolute path to `src/mcp-bridge.mjs`.
 2. Confirm Node.js is version 22 or newer.
 3. Run `bun run smoke:mcp` from the Harnest checkout.
 4. Restart or reload the MCP client after changing its configuration.
@@ -14,11 +14,11 @@ If the smoke passes but the client still shows no tools, inspect that client's M
 
 Install and authenticate that target's CLI through its native instructions. Make sure the executable is on the MCP server process's `PATH`. A lead client's own login is not forwarded to another downstream harness.
 
-Run `bun run doctor` for a broad machine profile, but interpret its individual checks. It can report optional hosts, workers, or registrations that a direct MCP installation does not use. For generic ACP, doctor reports registration metadata only; it does not run, initialize, authenticate, or version-probe the registered executable.
+Run `harnest doctor` for a broad machine profile, but interpret its individual checks. It can report optional hosts, workers, or registrations that a direct MCP installation does not use. For generic ACP, doctor reports registration metadata only; it does not run, initialize, authenticate, or version-probe the registered executable.
 
 ## The server appears stale after an update
 
-After updating the checkout, refresh dependencies with `bun install --frozen-lockfile --omit optional`.
+For a global installation, run `bun add -g github:harshanandak/harnest` again. For a checkout, refresh dependencies with `bun install --frozen-lockfile --omit optional` after updating.
 
 Call `handoff_host_info` and inspect `runtime.root`, `loadedFingerprint`, `diskFingerprint`, and `sourceStatus`. Let active jobs settle, then reload the MCP connection or restart the host. Editing files does not replace modules already loaded in a running server process.
 
