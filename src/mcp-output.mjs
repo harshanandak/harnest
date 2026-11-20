@@ -54,7 +54,8 @@ function receiptHeader(status) {
     controlCount,
   } = status;
   const details = error?.details;
-  return {
+  const { lookupKey, ...recoveryState } = recovery ?? {};
+  const header = {
     protocolVersion,
     jobId,
     contextDigest,
@@ -63,15 +64,7 @@ function receiptHeader(status) {
     cancellation,
     resultRef,
     controlCount,
-    requestId: preview(status.requestId),
-    sessionId: preview(status.sessionId),
-    workflowRunId: preview(status.workflowRunId),
-    route:
-      status.route &&
-      Object.fromEntries(
-        ["provider", "model", "agent", "variant"].map((key) => [key, preview(status.route[key])]),
-      ),
-    recovery: recovery && { ...recovery, lookupKey: preview(recovery.lookupKey) },
+    recovery: recovery && recoveryState,
     error: error && {
       name: preview(error.name),
       message: preview(error.message, 320),
@@ -87,6 +80,21 @@ function receiptHeader(status) {
       },
     },
   };
+  // Consumers persist the outer fields as lookup keys. An identity that
+  // cannot fit here remains available in the full JSON via the continuation.
+  const identities = {
+    requestId: status.requestId,
+    sessionId: status.sessionId,
+    workflowRunId: status.workflowRunId,
+    recovery: recovery && { ...recoveryState, lookupKey },
+    route: status.route,
+  };
+  for (const [key, value] of Object.entries(identities)) {
+    if (measure("receipt", { ...header, [key]: value }).fits(STATUS_RESPONSE_BYTES - 4096)) {
+      header[key] = value;
+    }
+  }
+  return header;
 }
 
 // Search on the serialized MCP size and never split a UTF-8 code point.
@@ -196,6 +204,7 @@ function recordsPage(key, records, build) {
     best = { response: candidate.response, count, originalBytes };
     usedBytes += (lengths[count] ?? 0) + 1;
   }
+  if (!best) throw validation("response metadata exceeds the page budget");
   return best;
 }
 
@@ -204,7 +213,7 @@ function sequenceResponse(key, tool, identity, field, source, options) {
   const records = source[field];
   const first = records[0];
   const start = afterSequence ?? (first ? first.sequence - 1 : 0);
-  const next = (sequence, offset) =>
+  const next = (sequence, offset = undefined) =>
     reference(tool, {
       ...identity,
       afterSequence: sequence,
@@ -225,7 +234,7 @@ function sequenceResponse(key, tool, identity, field, source, options) {
         : {}),
     };
   });
-  if (itemOffset === undefined && (best?.count || !first)) return best.response;
+  if (itemOffset === undefined && (best.count || !first)) return best.response;
   if (!first || (itemOffset !== undefined && (afterSequence == null || first.sequence !== start + 1))) {
     throw validation("the item for this page is no longer available");
   }

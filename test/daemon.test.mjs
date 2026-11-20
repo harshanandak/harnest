@@ -169,15 +169,12 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
   const controls = Array.from({ length: 300 }, (_, i) => ({
     commandId: `control-${i}`, kind: "message", state: "applied", acknowledgement: "🙂".repeat(500),
   }));
-  await companion.store.transition(jobId, (job) => {
-    job.receipt.controls = controls;
-    return job;
-  });
   const largeError = {
     name: "InterruptedExecution", message: "Lease lost while recovering",
     details: { kind: "interrupted", unsafeResume: true, stderr: "\u0000".repeat(2500), warnings: ["界".repeat(2000)] },
   };
-  const interrupted = await companion.start({ requestId: "bounded-partial", cwd: home, target: "pi", task: "fixture" });
+  const interruptedRequest = "bounded-partial-" + "界".repeat(240);
+  const interrupted = await companion.start({ requestId: interruptedRequest, cwd: home, target: "pi", task: "fixture" });
   const cancellation = { state: "unacknowledged", requestedAt: "2026-01-01T00:00:00.000Z", acknowledgedAt: null };
   await companion.store.transition(interrupted.jobId, (job) => {
     Object.assign(job.receipt, { state: "partial", result: null, cancellation, error: largeError });
@@ -231,14 +228,16 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
           assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent[key]);
           return { value: result.structuredContent[key], size };
         };
-        const setResult = (result) => companion.store.transition(jobId, (job) => {
+        const setResult = (result, history) => companion.store.transition(jobId, (job) => {
           job.receipt.result = result;
+          job.receipt.controls = history;
           return job;
         });
-        await setResult(smallResult);
-        const small = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+        await setResult(smallResult, []);
         assert.deepEqual((await call("handoff_result", { jobId }, "receipt")).value.result, smallResult);
-        await setResult(largeResult);
+        await setResult(smallResult, controls);
+        const small = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+        await setResult(largeResult, controls);
         const large = await call("handoff_status", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
         assert.equal(large.size, small.size);
         assert.deepEqual(large.value, small.value);
@@ -251,6 +250,8 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
 
         const partial = (await call("handoff_status", { jobId: interrupted.jobId }, "receipt", STATUS_RESPONSE_BYTES)).value;
         assert.equal(partial.state, "partial");
+        assert.equal(partial.requestId, interruptedRequest);
+        assert.equal(partial.recovery.lookupKey, interruptedRequest);
         assert.equal(partial.error.details.kind, "interrupted");
         assert.equal(partial.error.details.unsafeResume, true);
         assert.deepEqual(partial.cancellation, cancellation);

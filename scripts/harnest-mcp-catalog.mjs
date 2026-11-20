@@ -5,7 +5,9 @@ export function assertMcpCatalog(listed) {
   const traceSchema = listed.tools.find((tool) => tool.name === "handoff_trace").inputSchema;
   assert.equal(traceSchema.type, "object");
   assert.equal(traceSchema.allOf, undefined, "closed disjoint allOf objects make every trace argument impossible in strict hosts");
-  assert.deepEqual(Object.keys(traceSchema.properties).sort(), ["afterSequence", "jobId", "limit", "requestId"]);
+  assert.deepEqual(Object.keys(traceSchema.properties).sort(), ["afterSequence", "itemOffset", "jobId", "limit", "requestId"]);
+  assert.equal(traceSchema.properties.itemOffset.minimum, 1);
+  assert.ok(!traceSchema.required?.includes("itemOffset"));
   const workflowSchema = listed.tools.find((tool) => tool.name === "handoff_workflow").inputSchema.properties.request;
   assert.equal(workflowSchema.properties.route.additionalProperties, false);
   assert.ok(workflowSchema.properties.route.properties.thinking);
