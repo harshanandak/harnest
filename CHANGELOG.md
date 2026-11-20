@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-11-20
+
+Install with `bun add -g github:harshanandak/harnest#v0.1.1`, or check out tag `v0.1.1`. The [install guide](docs/users/getting-started.md#install-from-github) covers both.
+
 ### Added
 
 - Install the `harnest` CLI from GitHub with Bun. Run setup, doctor, daemon, ACP registration, and routing setup from any directory.

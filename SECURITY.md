@@ -8,7 +8,7 @@ Approved ACP v1 agents can request terminal commands. Harnest launches them dire
 
 The per-user daemon binds to `127.0.0.1` and requires a local bearer credential. It stores the credential in a private `token` file in its daemon directory. Host MCP settings and installer backups can also contain the credential. Protect these files with operating-system permissions. Code running as the same user can access them. See [daemon architecture and token locations](docs/architecture.md#shared-daemon).
 
-Requests, task context, traces, receipts, and downstream output may be stored as plaintext in the local state directory. Keep secrets out of handoffs and protect the state directory. See [release limits](docs/users/limits.md) for the v0.1.0 verification boundary.
+Requests, task context, traces, receipts, and downstream output may be stored as plaintext in the local state directory. Keep secrets out of handoffs and protect the state directory. See [release limits](docs/users/limits.md) for the v0.1.1 verification boundary.
 
 Report vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/harshanandak/harnest/security/advisories/new). Use the [issue tracker](https://github.com/harshanandak/harnest/issues) for general installation and usage problems. Remove credentials, private source, transcripts, and machine-specific paths before reporting routine issues.
 

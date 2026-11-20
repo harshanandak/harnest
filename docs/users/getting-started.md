@@ -16,7 +16,7 @@ Harnest does not accept a downstream provider key in a handoff request and does 
 Install Harnest directly from GitHub and ensure Bun's global bin directory is on your `PATH`.
 
 ```sh
-bun add -g github:harshanandak/harnest
+bun add -g github:harshanandak/harnest#v0.1.1
 harnest --version
 ```
 

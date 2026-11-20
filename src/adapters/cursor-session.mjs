@@ -1317,7 +1317,7 @@ export class CursorSessionAdapter {
       const initializeResult = await transport.request("initialize", {
         protocolVersion: CURSOR_SESSION_PROTOCOL_VERSION,
         clientCapabilities: {},
-        clientInfo: { name: "harnest", title: "Harnest", version: "0.1.0" },
+        clientInfo: { name: "harnest", title: "Harnest", version: "0.1.1" },
       }, { timeoutMs: this.startupTimeoutMs, signal });
       const capabilities = negotiateCapabilities(initializeResult);
       this.capabilities = capabilities;

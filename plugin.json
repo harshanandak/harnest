@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "harnest",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Harnest MCP coordinates durable handoffs across OpenCode, Pi, Cursor, Claude Code, Codex, Amp, and trusted registered ACP agents.",
   "author": {
     "name": "Harsha Nanda"
