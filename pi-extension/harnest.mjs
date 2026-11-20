@@ -276,7 +276,10 @@ const ReceiptPageSchema = Type.Object({
   ...ReferenceSchema.properties,
   cursor: Type.Optional(Type.String({ description: "Cursor from page.continuation." })),
 });
-const ItemOffset = Type.Optional(Type.Integer({ minimum: 1, description: "Byte offset from page.continuation." }));
+const ItemPageFields = {
+  itemOffset: Type.Optional(Type.Integer({ minimum: 1, description: "Byte offset from page.continuation." })),
+  itemCursor: Type.Optional(Type.String({ description: "Item cursor from page.continuation." })),
+};
 
 const NODE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 
@@ -343,11 +346,12 @@ function prepareArguments(args) {
 
 async function streamBackgroundTrace(call, jobId, requestId, signal, onUpdate) {
   if (!onUpdate) return;
-  let afterSequence = 0;
+  const reference = jobId ? { jobId } : { requestId };
+  let args = { ...reference, afterSequence: 0, limit: 50 };
   for (let i = 0; i < 40; i += 1) {
     checkAborted(signal);
-    const page = await call("handoff_trace", { ...(jobId ? { jobId } : { requestId }), afterSequence, limit: 50 }, "trace");
-    afterSequence = page.nextSequence ?? afterSequence;
+    const page = await call("handoff_trace", args, "trace");
+    args = page.page?.continuation?.arguments ?? { ...reference, afterSequence: page.nextSequence, limit: 50 };
     const progress = page.receipt?.trace?.progress;
     const summary = progress
       ? `${progress.phase || "?"} — ${(progress.current || "").slice(0, 160)}`
@@ -374,9 +378,21 @@ export default function harnestExtension(pi) {
     return result;
   };
   const sessionList = (args) => call("handoff_sessions", args, "sessions");
+  const readWorkflowView = async (tool, args) => {
+    const result = await call(tool, args, "workflow");
+    if (!result.page) return result;
+    let page = result.page;
+    const chunks = [page.chunk];
+    while (page.continuation) {
+      const next = page.continuation;
+      ({ page } = await call(next.tool, next.arguments, "response"));
+      chunks.push(page.chunk);
+    }
+    return JSON.parse(chunks.join(""));
+  };
   const workflowView = {
-    history: (args) => call("handoff_dynamic_history", args, "workflow"),
-    status: (args) => call("handoff_dynamic_status", args, "workflow"),
+    history: (args) => readWorkflowView("handoff_dynamic_history", args),
+    status: (args) => readWorkflowView("handoff_dynamic_status", args),
   };
   // Live-view state. Everything starts on an explicit command (or a graph start)
   // and is torn down in session_shutdown, so no timer outlives its session.
@@ -518,7 +534,7 @@ export default function harnestExtension(pi) {
             try { void startView(ctx, { graphId: result.graphId }); } catch { /* the widget is decorative */ }
           }
           return result;
-        });
+        }, true);
       },
     });
   }
@@ -542,7 +558,7 @@ export default function harnestExtension(pi) {
             if (result.runId) pi.appendEntry("harnest-dynamic", { runId: result.runId, requestId: result.requestId, state: result.state, at: Date.now() });
             if (result.invocations && ctx?.hasUI) ctx.ui.setWidget("harnest-dynamic", renderDynamicView({ run: result, readOnly: true }, { width: 90, height: 15 }).split("\n"));
             return result;
-          });
+          }, true);
         },
       });
       remoteToolNames.add(tool.name);
@@ -807,9 +823,20 @@ export default function harnestExtension(pi) {
         return guard(async () => ({
           ...live,
           note: "handoff still running after the progress stream window; keep polling handoff_status/handoff_trace",
-        }));
+        }), true);
       }
-      return guard(async () => receipt);
+      return guard(async () => receipt, true);
+    },
+  });
+
+  pi.registerTool({
+    name: "handoff_page",
+    label: "Continue a tool response",
+    description: "Read the next JSON chunk of an oversized MCP response using the cursor from page.continuation.",
+    parameters: Type.Object({ cursor: Type.String() }),
+    async execute(_id, params, signal) {
+      checkAborted(signal);
+      return guard(() => call("handoff_page", params, "response"), true);
     },
   });
 
@@ -833,7 +860,7 @@ export default function harnestExtension(pi) {
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      return guard(() => call("handoff_compare", params, "comparison"));
+      return guard(() => call("handoff_compare", params, "comparison"), true);
     },
   });
 
@@ -881,12 +908,12 @@ export default function harnestExtension(pi) {
       requestId: Type.Optional(Type.String({ minLength: 1 })),
       afterSequence: Type.Optional(Type.Number({ minimum: 0 })),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
-      itemOffset: ItemOffset,
+      ...ItemPageFields,
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      const { afterSequence, limit, itemOffset, ...reference } = params;
-      return guard(() => call("handoff_trace", { ...referenceOf(reference), afterSequence, limit, itemOffset }, "trace"), true);
+      const { afterSequence, limit, itemOffset, itemCursor, ...reference } = params;
+      return guard(() => call("handoff_trace", { ...referenceOf(reference), afterSequence, limit, itemOffset, itemCursor }, "trace"), true);
     },
   });
 
@@ -901,6 +928,7 @@ export default function harnestExtension(pi) {
     parameters: Type.Object({
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })),
       offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      cursor: Type.Optional(Type.String({ description: "Cursor from page.continuation." })),
       state: Type.Optional(StringEnum(["queued", "running", "completed", "failed", "cancelled", "partial"])),
       target: Type.Optional(StringEnum(["opencode", "pi", "cursor", "claude", "codex", "amp", "acp"])),
     }),
@@ -928,7 +956,7 @@ export default function harnestExtension(pi) {
     async execute(_id, params, signal) {
       checkAborted(signal);
       const { jobId, ...rest } = params;
-      return guard(() => call("handoff_message", { jobId, ...rest }, "control"));
+      return guard(() => call("handoff_message", { jobId, ...rest }, "control"), true);
     },
   });
 
@@ -950,7 +978,7 @@ export default function harnestExtension(pi) {
     async execute(_id, params, signal) {
       checkAborted(signal);
       const { jobId, ...rest } = params;
-      return guard(() => call("handoff_reroute", { jobId, ...rest }, "control"));
+      return guard(() => call("handoff_reroute", { jobId, ...rest }, "control"), true);
     },
   });
 
@@ -965,7 +993,7 @@ export default function harnestExtension(pi) {
     parameters: Type.Object({ jobId: Type.String({ minLength: 1 }) }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      return guard(() => call("handoff_cancel", { jobId: params.jobId }, "receipt"));
+      return guard(() => call("handoff_cancel", { jobId: params.jobId }, "receipt"), true);
     },
   });
 
@@ -983,7 +1011,7 @@ export default function harnestExtension(pi) {
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      return guard(() => call("handoff_resume", params, "receipt"));
+      return guard(() => call("handoff_resume", params, "receipt"), true);
     },
   });
 
@@ -1016,7 +1044,7 @@ export default function harnestExtension(pi) {
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      return guard(() => call("handoff_review", params, "review"));
+      return guard(() => call("handoff_review", params, "review"), true);
     },
   });
 
@@ -1051,12 +1079,12 @@ export default function harnestExtension(pi) {
       topic: Type.String({ minLength: 1, maxLength: 64 }),
       afterSequence: Type.Optional(Type.Number({ minimum: 0 })),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
-      itemOffset: ItemOffset,
+      ...ItemPageFields,
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      const { afterSequence, limit, itemOffset, ...reference } = params;
-      return guard(() => call("handoff_read", { ...reference, afterSequence, limit, itemOffset }, "board"), true);
+      const { afterSequence, limit, itemOffset, itemCursor, ...reference } = params;
+      return guard(() => call("handoff_read", { ...reference, afterSequence, limit, itemOffset, itemCursor }, "board"), true);
     },
   });
 
@@ -1076,7 +1104,7 @@ export default function harnestExtension(pi) {
     }),
     async execute(_id, params, signal) {
       checkAborted(signal);
-      return guard(async () => ({ fleet: await call("handoff_fleet", params, "fleet") }));
+      return guard(async () => ({ fleet: await call("handoff_fleet", params, "fleet") }), true);
     },
   });
 

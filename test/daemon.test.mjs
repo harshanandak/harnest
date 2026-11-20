@@ -20,6 +20,7 @@ import { PAGE_RESPONSE_BYTES, STATUS_RESPONSE_BYTES } from "../src/mcp-output.mj
 import { structuredResult } from "../src/result.mjs";
 import { mergeProcessEnv } from "../src/process.mjs";
 import { protectWindowsPath } from "../src/windows-acl.mjs";
+import { assertMcpCatalog } from "../scripts/harnest-mcp-catalog.mjs";
 
 const exec = promisify(execFile);
 const root = join(import.meta.dirname, "..");
@@ -131,13 +132,57 @@ for (const modern of [false, true]) {
       assert.equal(http.getProtocolEra(), modern ? "modern" : "legacy");
       assert.equal(stdio.getProtocolEra(), http.getProtocolEra());
       const catalog = await stdio.listTools();
-      assert.equal(catalog.tools.length, 38);
+      assertMcpCatalog(catalog);
       assert.deepEqual(await http.listTools(), catalog);
     } finally {
       await Promise.allSettled([http.close(), stdio.close()]);
       await daemon.close();
     }
   });
+}
+
+async function wireClient(port, token, modern) {
+  const version = modern ? "2026-07-28" : "2025-11-25";
+  const clientInfo = { name: "bounded-output-test", version: "1" };
+  const rpc = (method, params, id = 1, budget = Infinity) => raw(port, "/mcp", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`, Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json", "MCP-Protocol-Version": version,
+      ...(modern && { "Mcp-Method": method, ...(params?.name && { "Mcp-Name": params.name }) }),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0", ...(id === null ? {} : { id }), method,
+      params: modern ? { ...params, _meta: {
+        "io.modelcontextprotocol/protocolVersion": version,
+        "io.modelcontextprotocol/clientInfo": clientInfo,
+        "io.modelcontextprotocol/clientCapabilities": {},
+      } } : params,
+    }),
+  }).then((reply) => {
+    const size = reply.bytes;
+    assert.ok(size <= budget, `${method} ${params?.name ?? ""} returned ${size} bytes`);
+    const message = reply.text ? JSON.parse(reply.text) : {};
+    return { result: message.result, error: message.error, size, status: reply.status };
+  });
+  if (modern) assert.ok((await rpc("server/discover")).result);
+  else {
+    assert.equal((await rpc("initialize", { protocolVersion: version, clientInfo, capabilities: {} })).result.protocolVersion, version);
+    assert.equal((await rpc("notifications/initialized", {}, null)).status, 202);
+  }
+  const call = async (name, args, key, budget = name.endsWith("_status") ? STATUS_RESPONSE_BYTES : PAGE_RESPONSE_BYTES) => {
+    const { result, size } = await rpc("tools/call", { name, arguments: args }, 1, budget);
+    assert.ok(result && !result.isError, result?.content?.[0]?.text);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent[key]);
+    return { value: result.structuredContent[key], size };
+  };
+  const rejects = async (name, args, pattern) => {
+    const budget = name.endsWith("_status") ? STATUS_RESPONSE_BYTES : PAGE_RESPONSE_BYTES;
+    const { result } = await rpc("tools/call", { name, arguments: args }, 1, budget);
+    assert.equal(result?.isError, true);
+    assert.match(result.structuredContent.error.message, pattern);
+  };
+  return { rpc, call, rejects };
 }
 
 test("bounded MCP reads preserve durable state and reconstruct oversized payloads in both eras", async (t) => {
@@ -181,6 +226,16 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
     job.receipt.recovery.canResume = false;
     return job;
   });
+  for (let i = 0; i < 16; i++) {
+    const row = await companion.start({
+      requestId: ("s".repeat(800) + i), cwd: home, target: "codex", task: "session fixture",
+    });
+    await companion.store.transition(row.jobId, (job) => {
+      job.receipt.sessionId = "\u754c".repeat(950);
+      return job;
+    });
+  }
+  const expectedSessions = (await companion.sessions({ target: "codex", limit: 16 })).sessions;
   const topic = "bounded-board";
   const message = "😀".repeat(BOARD_MESSAGE_MAX_BYTES / 4);
   assert.equal(Buffer.byteLength(message), BOARD_MESSAGE_MAX_BYTES);
@@ -195,39 +250,7 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
     const token = await readDaemonToken(directory);
     for (const modern of [false, true]) {
       await t.test(modern ? "modern" : "legacy", async () => {
-        const version = modern ? "2026-07-28" : "2025-11-25";
-        const clientInfo = { name: "bounded-output-test", version: "1" };
-        const rpc = (method, params, id = 1, budget = Infinity) => raw(daemon.port, "/mcp", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`, Accept: "application/json, text/event-stream",
-            "Content-Type": "application/json", "MCP-Protocol-Version": version,
-            ...(modern && { "Mcp-Method": method, ...(params?.name && { "Mcp-Name": params.name }) }),
-          },
-          body: JSON.stringify({
-            jsonrpc: "2.0", ...(id === null ? {} : { id }), method,
-            params: modern ? { ...params, _meta: {
-              "io.modelcontextprotocol/protocolVersion": version,
-              "io.modelcontextprotocol/clientInfo": clientInfo,
-              "io.modelcontextprotocol/clientCapabilities": {},
-            } } : params,
-          }),
-        }).then((reply) => {
-          const size = reply.bytes;
-          assert.ok(size <= budget, `${method} ${params?.name ?? ""} returned ${size} bytes`);
-          return { result: reply.text ? JSON.parse(reply.text).result : undefined, size, status: reply.status };
-        });
-        if (modern) assert.ok((await rpc("server/discover")).result);
-        else {
-          assert.equal((await rpc("initialize", { protocolVersion: version, clientInfo, capabilities: {} })).result.protocolVersion, version);
-          assert.equal((await rpc("notifications/initialized", {}, null)).status, 202);
-        }
-        const call = async (name, args, key, budget = PAGE_RESPONSE_BYTES) => {
-          const { result, size } = await rpc("tools/call", { name, arguments: args }, 1, budget);
-          assert.ok(result && !result.isError, result?.content?.[0]?.text);
-          assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent[key]);
-          return { value: result.structuredContent[key], size };
-        };
+        const { call, rejects } = await wireClient(daemon.port, token, modern);
         const setResult = (result, history) => companion.store.transition(jobId, (job) => {
           job.receipt.result = result;
           job.receipt.controls = history;
@@ -244,9 +267,29 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
         assert.equal(large.value.result, undefined);
         assert.equal(large.value.controlCount, controls.length);
         assert.deepEqual(large.value.resultRef, { tool: "handoff_result", arguments: { jobId } });
-        const sessions = (await call("handoff_sessions", {}, "sessions")).value.sessions;
+        const sessions = (await call("handoff_sessions", { target: "pi" }, "sessions")).value.sessions;
         assert.deepEqual(new Set(sessions.map((session) => session.jobId)), new Set([jobId, interrupted.jobId]));
         assert.ok(sessions.every((session) => !Object.hasOwn(session, "result")));
+
+        let nextSession = { tool: "handoff_sessions", arguments: { target: "codex", limit: 16 } };
+        const foundSessions = [];
+        let sessionPages = 0;
+        while (nextSession) {
+          const { value } = await call(nextSession.tool, nextSession.arguments, "sessions");
+          foundSessions.push(...value.sessions);
+          assert.ok(value.sessions.length > 0);
+          nextSession = value.page?.continuation;
+          sessionPages++;
+          if (sessionPages === 1) {
+            assert.ok(nextSession);
+            await rejects(nextSession.tool, {
+              ...nextSession.arguments, offset: nextSession.arguments.offset + 1,
+            }, /invalid or stale session cursor/);
+          }
+        }
+        assert.ok(sessionPages > 1);
+        assert.deepEqual(foundSessions.map((row) => row.jobId), expectedSessions.map((row) => row.jobId));
+        assert.ok(foundSessions.every((row) => !Object.hasOwn(row, "result") && row.resultRef));
 
         const partial = (await call("handoff_status", { jobId: interrupted.jobId }, "receipt", STATUS_RESPONSE_BYTES)).value;
         assert.equal(partial.state, "partial");
@@ -282,6 +325,12 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
         };
         const full = await collectReceipt("handoff_result", { jobId }, PAGE_RESPONSE_BYTES, "completed");
         assert.deepEqual(Buffer.from(full), Buffer.from(JSON.stringify(await companion.result(jobId))));
+        const firstReceipt = (await call("handoff_result", { jobId }, "receipt")).value;
+        const stale = firstReceipt.page.continuation;
+        await setResult(smallResult, controls);
+        await rejects(stale.tool, stale.arguments, /invalid or stale receipt cursor/);
+        await setResult(largeResult, controls);
+
         const recoveredStatus = await collectReceipt("handoff_status", { jobId: interrupted.jobId }, STATUS_RESPONSE_BYTES, "partial");
         const { result, controls: ignored, ...recordedStatus } = await companion.status(interrupted.jobId);
         assert.deepEqual(Buffer.from(recoveredStatus), Buffer.from(JSON.stringify({
@@ -332,7 +381,11 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
         const firstBoard = (await call("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board")).value;
         assert.equal(firstBoard.page.omittedCount, 200);
         assert.equal(firstBoard.page.originalBytes, Buffer.byteLength(JSON.stringify(entries), "utf8"));
-        if (!modern) await collectRecords("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board", "entries", entries);
+        const wrongBoard = firstBoard.page.continuation;
+        await rejects(wrongBoard.tool, {
+          ...wrongBoard.arguments, afterSequence: wrongBoard.arguments.afterSequence + 1,
+        }, /invalid or stale item cursor/);
+        await collectRecords("handoff_read", { topic, afterSequence: 0, limit: 200 }, "board", "entries", entries);
         const postTopic = `bounded-post-${modern ? "modern" : "legacy"}`;
         const post = (await call("handoff_post", { topic: postTopic, message, from: "fixture" }, "post")).value;
         assert.equal(post.message, undefined);
@@ -340,6 +393,233 @@ test("bounded MCP reads preserve durable state and reconstruct oversized payload
         assert.equal(stored[0].message, message);
         await collectRecords(post.page.continuation.tool, post.page.continuation.arguments, "board", "entries", stored);
       });
+    }
+  } finally { await daemon.close(); }
+});
+
+test("MCP aggregate continuations replay exact compare, review, graph and dynamic results", async (t) => {
+  const { home, directory, stateDir } = await fixture(t);
+  const evidence = Array.from({ length: 100 }, (_, i) => String(i).padEnd(4000, i % 2 ? "\u754c" : "\\"));
+  const result = structuredResult(JSON.stringify({
+    finalText: JSON.stringify({ scores: { correctness: 10 }, findings: ["fixture finding"] }),
+    evidence,
+  }));
+  const graphEvidence = evidence.slice(0, 24);
+  const dynamicResult = { runId: "dynamic-fixture", state: "completed", output: evidence.slice(0, 10) };
+  const services = createRuntimeServices({
+    stateDir, routeResolver: async (request) => request, detachBackground: false,
+    adapterFactory: () => ({
+      run: async (request) => ({
+        result: request.context?.graph ? { ...result, evidence: graphEvidence } : result,
+      }),
+    }),
+    dynamic: { result: async () => dynamicResult },
+  });
+  const { companion, graphs } = services;
+  let comparison, review;
+  const compare = companion.compare.bind(companion);
+  const reviewWork = companion.review.bind(companion);
+  companion.compare = async (input) => { comparison = await compare(input); return comparison; };
+  companion.review = async (input) => { review = await reviewWork(input); return review; };
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => services });
+  try {
+    const token = await readDaemonToken(directory);
+    const lanes = ["one", "two"].map((name) => ({ name, route: { model: name } }));
+    const request = { cwd: home, target: "pi", task: "review fixture" };
+    for (const modern of [false, true]) {
+      const { call, rejects } = await wireClient(daemon.port, token, modern);
+      const collect = async (tool, key, first) => {
+        const chunks = [];
+        let page = first.page;
+        assert.ok(page?.continuation);
+        let offset = 0;
+        while (page) {
+          assert.equal(page.offset, offset);
+          assert.ok(page.chunk.length);
+          chunks.push(page.chunk);
+          offset += Buffer.byteLength(page.chunk);
+          assert.equal(page.originalBytes - offset, page.omittedBytes);
+          if (!page.continuation) break;
+          const next = page.continuation;
+          assert.equal(next.tool, "handoff_page");
+          const { value } = await call(next.tool, next.arguments, "response");
+          assert.equal(value.tool, tool);
+          assert.equal(value.key, key);
+          page = value.page;
+        }
+        return chunks.join("");
+      };
+      const comparisonId = "compare-" + modern;
+      const compared = (await call("handoff_compare", {
+        request: { ...request, requestId: comparisonId }, candidates: lanes,
+      }, "comparison")).value;
+      assert.equal(compared.comparisonId, comparisonId);
+      assert.equal(compared.state, "completed");
+      assert.ok(comparison.lanes.every((lane) => lane.receipt.result.evidence.length === 100));
+      assert.equal(await collect("handoff_compare", "comparison", compared), JSON.stringify(comparison));
+
+      const reviewId = "review-" + modern;
+      const reviewed = (await call("handoff_review", {
+        request: { ...request, requestId: reviewId }, reviewers: lanes, rubric: ["correctness"], rounds: 1,
+      }, "review")).value;
+      assert.equal(reviewed.reviewId, reviewId);
+      assert.equal(reviewed.state, "completed");
+      assert.equal(review.final.overall, 10);
+      assert.ok(review.rounds[0].lanes.every((lane) => lane.result.evidence.length === 100));
+      assert.equal(await collect("handoff_review", "review", reviewed), JSON.stringify(review));
+
+      const graph = {
+        requestId: "graph-" + modern, cwd: home, execution: { background: false },
+        nodes: [{ id: "output", target: "pi", task: "output" }], outputs: ["output"],
+      };
+      const { value: started } = await call("handoff_graph_start", { graph }, "graph");
+      const { graphId } = started;
+      const graphResult = (await call("handoff_graph_result", { graphId }, "graph")).value;
+      assert.equal(graphResult.graphId, graphId);
+      assert.equal(graphResult.state, "completed");
+      const expectedGraph = await graphs.result(graphId);
+      assert.deepEqual(expectedGraph.outputs.output.evidence, graphEvidence);
+      assert.equal(await collect("handoff_graph_result", "graph", graphResult), JSON.stringify(expectedGraph));
+
+      const dynamicPage = (await call("handoff_dynamic_result", { runId: dynamicResult.runId }, "workflow")).value;
+      assert.equal(await collect("handoff_dynamic_result", "workflow", dynamicPage), JSON.stringify(dynamicResult));
+      const { cursor } = dynamicPage.page.continuation.arguments;
+      const [snapshot, , checksum] = cursor.split(".");
+      await rejects("handoff_page", { cursor: [snapshot, "1", checksum].join(".") }, /invalid or expired response cursor/);
+    }
+  } finally { await daemon.close(); }
+});
+
+test("MCP cancellation compacts an active receipt with hundreds of controls", async (t) => {
+  const { home, directory, stateDir } = await fixture(t);
+  let entered;
+  const services = createRuntimeServices({
+    stateDir, routeResolver: async (request) => request, detachBackground: false,
+    adapterFactory: () => ({
+      run(_request, { signal }) {
+        entered();
+        return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      },
+    }),
+  });
+  const { companion } = services;
+  const daemon = await startDaemon({ port: 0, directory, buildServices: () => services });
+  try {
+    const token = await readDaemonToken(directory);
+    for (const modern of [false, true]) {
+      const { call } = await wireClient(daemon.port, token, modern);
+      const running = new Promise((resolve) => { entered = resolve; });
+      const requestId = "active-cancel-" + modern;
+      const { value: receipt } = await call("handoff_workflow", {
+        request: { requestId, task: "wait for cancellation", cwd: home, target: "pi", execution: { background: true } },
+      }, "receipt");
+      await running;
+      const { jobId } = receipt;
+      const history = Array.from({ length: 300 }, (_, i) => ({
+        commandId: "control-" + i, kind: "message", state: "applied", acknowledgement: "\u754c".repeat(500),
+      }));
+      const error = { name: "FixtureError", message: "last diagnostic", details: { kind: "fixture" } };
+      const stored = await companion.store.transition(jobId, (job) => {
+        assert.equal(job.receipt.state, "running");
+        Object.assign(job.receipt, { controls: history, error });
+        return job;
+      });
+      const owner = companion.running.get(jobId).promise;
+      const { value: cancelled } = await call("handoff_cancel", { jobId }, "receipt", STATUS_RESPONSE_BYTES);
+      assert.equal(cancelled.state, "running");
+      assert.equal(cancelled.cancellation.state, "requested");
+      assert.equal(cancelled.jobId, jobId);
+      assert.equal(cancelled.requestId, requestId);
+      assert.equal(cancelled.contextDigest, receipt.contextDigest);
+      assert.deepEqual(cancelled.error, error);
+      assert.deepEqual(cancelled.recovery, stored.receipt.recovery);
+      assert.equal(cancelled.controls, undefined);
+      assert.equal(cancelled.controlCount, history.length);
+      assert.deepEqual(cancelled.resultRef, { tool: "handoff_result", arguments: { jobId } });
+      assert.equal((await owner).state, "cancelled");
+    }
+  } finally { await daemon.close(); }
+});
+
+test("every tool in the MCP catalog crosses the wire budget boundary", async (t) => {
+  const { home, directory } = await fixture(t);
+  const fail = async () => { throw new Error("large catalog fixture " + "\u754c".repeat(PAGE_RESPONSE_BYTES)); };
+  const throwingService = new Proxy({}, { get: () => fail });
+  const daemon = await startDaemon({
+    port: 0, directory, buildServices: () => ({
+      companion: { ...Object.fromEntries([
+        "start", "compare", "review", "statusReference", "resultReference", "cancel", "resume",
+        "traceReference", "sessions", "fleet", "message", "reroute", "postToBoard", "readBoard",
+      ].map((key) => [key, fail])), routeResolver: { diagnostics: fail } },
+      graphs: throwingService, dynamic: throwingService, workflowRegistry: throwingService,
+      routingSettings: throwingService, close: async () => {},
+    }),
+  });
+  try {
+    const token = await readDaemonToken(directory);
+    const job = { jobId: "job" };
+    const graph = { graphId: "graph" };
+    const run = { runId: "run" };
+    const saved = { name: "saved", cwd: home };
+    const request = { requestId: "fixture", target: "pi", task: "fixture", cwd: home };
+    const graphSpec = { requestId: "fixture", cwd: home, nodes: [{ id: "step", task: "fixture", target: "pi" }] };
+    const workflow = { requestId: "fixture", cwd: home, source: "return null;" };
+    const lanes = ["first", "second"].map((name) => ({ name, route: { model: name } }));
+    const revision = "a".repeat(64);
+    const args = {
+      handoff_cancel: job,
+      handoff_compare: { request, candidates: lanes },
+      handoff_dynamic_control: { ...run, commandId: "command", action: "pause" },
+      handoff_dynamic_delete: { ...saved, expectedRevision: revision },
+      handoff_dynamic_get: saved,
+      handoff_dynamic_history: {},
+      handoff_dynamic_inspect: { ...run, invocationId: "invocation" },
+      handoff_dynamic_invoke: { ...saved, requestId: "fixture", revision },
+      handoff_dynamic_list: {},
+      handoff_dynamic_result: run,
+      handoff_dynamic_resume: { ...run, commandId: "command" },
+      handoff_dynamic_revisions: saved,
+      handoff_dynamic_save: { ...saved, source: workflow.source },
+      handoff_dynamic_start: { workflow },
+      handoff_dynamic_status: run,
+      handoff_dynamic_validate: { workflow },
+      handoff_fleet: {},
+      handoff_graph_cancel: graph,
+      handoff_graph_result: graph,
+      handoff_graph_resume: { ...graph, commandId: "command" },
+      handoff_graph_start: { graph: graphSpec },
+      handoff_graph_status: graph,
+      handoff_graph_validate: { graph: graphSpec },
+      handoff_host_info: {},
+      handoff_message: { ...job, commandId: "command", message: "fixture" },
+      handoff_page: { cursor: "1".repeat(36) + ".1." + revision },
+      handoff_post: { topic: "fixture", from: "fixture", message: "fixture" },
+      handoff_read: { topic: "fixture" },
+      handoff_reroute: { ...job, commandId: "command", route: { provider: "fixture", model: "fixture" } },
+      handoff_result: job,
+      handoff_resume: job,
+      handoff_review: { request, reviewers: lanes },
+      handoff_routing_configure: { action: "set", expectedRevision: "missing" },
+      handoff_routing_get: {},
+      handoff_routing_preview: { request: { task: "fixture" } },
+      handoff_sessions: {},
+      handoff_status: job,
+      handoff_trace: job,
+      handoff_workflow: { request },
+    };
+    for (const modern of [false, true]) {
+      const { rpc, rejects } = await wireClient(daemon.port, token, modern);
+      const names = assertMcpCatalog((await rpc("tools/list")).result);
+      assert.deepEqual(Object.keys(args).sort(), names);
+      for (const name of names) {
+        // This read only accepts cursors emitted by the server. Its successful
+        // paging path is exercised by all four aggregate reconstruction cases.
+        const message = name === "handoff_page" ? /invalid or expired response cursor/ : /^large catalog fixture /;
+        await rejects(name, args[name], message);
+      }
+      await rejects("handoff_dynamic_status", Object.fromEntries(
+        Array.from({ length: 1_000 }, (_, i) => ["unrecognized-argument-" + i, true]),
+      ), /^Input validation error:/);
     }
   } finally { await daemon.close(); }
 });
@@ -464,7 +744,7 @@ test("the running stdio bridge rediscovers tools after the fixture daemon stops"
       command: process.execPath, args: [join(root, "src", "mcp-bridge.mjs")], cwd: home, env: fixtureEnv, stderr: "pipe",
     }));
     const catalog = await client.listTools();
-    assert.equal(catalog.tools.length, 38);
+    assertMcpCatalog(catalog);
     await daemon.close();
     assert.deepEqual(await client.listTools(), catalog);
     assert.notEqual(await nonce(), firstDaemon, "bridge must start a replacement without restarting the MCP client");

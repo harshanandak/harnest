@@ -13,6 +13,7 @@ test("the Pi extension registers the full handoff surface and a host-info tool",
   assert.match(raw, /export default function harnestExtension/);
   for (const tool of [
     "handoff_workflow",
+    "handoff_page",
     "handoff_compare",
     "handoff_review",
     "handoff_post",

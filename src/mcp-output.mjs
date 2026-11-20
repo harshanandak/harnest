@@ -1,24 +1,31 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { open, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { protectWindowsPath } from "./windows-acl.mjs";
 
 export const STATUS_RESPONSE_BYTES = 16 * 1024;
 export const PAGE_RESPONSE_BYTES = 64 * 1024;
 // Leave room for the JSON-RPC envelope, protocol metadata and stdio framing.
 const ENVELOPE_BYTES = 1024;
 const bytes = (text) => Buffer.byteLength(text, "utf8");
+const fitsWire = (response, budget) => bytes(JSON.stringify(response)) + ENVELOPE_BYTES <= budget;
+
+export function dataResponse(key, value, json = JSON.stringify(value)) {
+  return { content: [{ type: "text", text: json }], structuredContent: { [key]: value } };
+}
 
 function measure(key, value) {
   const json = JSON.stringify(value);
-  const response = {
-    content: [{ type: "text", text: json }],
-    structuredContent: { [key]: value },
-  };
+  const response = dataResponse(key, value, json);
   // Both MCP representations count, including the extra escaping of text.
   const size = bytes(json);
   return {
     json,
     response,
     fits: (budget) =>
-      2 * size + ENVELOPE_BYTES <= budget && bytes(JSON.stringify(response)) + ENVELOPE_BYTES <= budget,
+      2 * size + ENVELOPE_BYTES <= budget && fitsWire(response, budget),
   };
 }
 
@@ -121,31 +128,35 @@ function fragment(source, offset, build, budget) {
   return best.response;
 }
 
+const checksum = (value) => createHash("sha256").update(value).digest("hex");
+
+function jsonPage(chunk, offset, end, originalBytes, continuation) {
+  return {
+    encoding: "json-utf8",
+    chunk,
+    offset,
+    originalBytes,
+    omittedBytes: originalBytes - end,
+    omittedCount: Number(end < originalBytes),
+    continuation: end < originalBytes ? continuation : null,
+  };
+}
+
 function receiptPage(tool, json, header, cursor, budget) {
   const source = Buffer.from(json, "utf8");
-  const version = createHash("sha256").update(source).digest("hex");
-  const [expectedVersion, rawOffset] = cursor?.split(".") ?? [];
-  if (cursor && expectedVersion !== version)
-    throw validation("receipt changed; restart pagination without a cursor");
-  const offset = cursor ? Number(rawOffset) : 0;
+  const version = checksum(source);
+  const cursorAt = (offset) => checksum(JSON.stringify([tool, header.jobId, version, offset])) + "." + offset;
+  const offset = cursor ? Number(cursor.split(".")[1]) : 0;
+  if (cursor && cursor !== cursorAt(offset))
+    throw validation("invalid or stale receipt cursor; restart pagination without a cursor");
   return fragment(
     source,
     offset,
     (chunk, end) =>
       measure("receipt", {
         ...header,
-        page: {
-          encoding: "json-utf8",
-          chunk,
-          offset,
-          originalBytes: source.length,
-          omittedBytes: source.length - end,
-          omittedCount: Number(end < source.length),
-          continuation:
-            end < source.length
-              ? reference(tool, { jobId: header.jobId, cursor: `${version}.${end}` })
-              : null,
-        },
+        page: jsonPage(chunk, offset, end, source.length,
+          reference(tool, { jobId: header.jobId, cursor: cursorAt(end) })),
       }),
     budget,
   );
@@ -182,6 +193,11 @@ export function statusResponse(receipt, cursor) {
   return receiptPage("handoff_status", json, receiptHeader(status), cursor, STATUS_RESPONSE_BYTES);
 }
 
+export function activeReceiptResponse(receipt) {
+  const full = measure("receipt", receipt);
+  return full.fits(STATUS_RESPONSE_BYTES) ? full.response : statusResponse(receipt);
+}
+
 export function resultResponse(receipt, cursor) {
   const full = measure("receipt", receipt);
   if (!cursor && full.fits(PAGE_RESPONSE_BYTES)) return full.response;
@@ -209,16 +225,16 @@ function recordsPage(key, records, build) {
 }
 
 function sequenceResponse(key, tool, identity, field, source, options) {
-  const { afterSequence, itemOffset, limit } = options;
+  const { afterSequence, itemOffset, itemCursor, limit } = options;
   const records = source[field];
   const first = records[0];
   const start = afterSequence ?? (first ? first.sequence - 1 : 0);
-  const next = (sequence, offset = undefined) =>
+  const next = (sequence, offset, cursor) =>
     reference(tool, {
       ...identity,
       afterSequence: sequence,
       ...(limit === undefined ? {} : { limit }),
-      ...(offset === undefined ? {} : { itemOffset: offset }),
+      ...(offset === undefined ? {} : { itemOffset: offset, itemCursor: cursor }),
     });
   const best = recordsPage(key, records, (entries, originalBytes, omittedCount) => {
     const nextSequence = entries.at(-1)?.sequence ?? start;
@@ -234,11 +250,19 @@ function sequenceResponse(key, tool, identity, field, source, options) {
         : {}),
     };
   });
+  if ((itemOffset === undefined) !== (itemCursor === undefined)) {
+    throw validation("itemOffset and itemCursor must come from the same page continuation");
+  }
   if (itemOffset === undefined && (best.count || !first)) return best.response;
   if (!first || (itemOffset !== undefined && (afterSequence == null || first.sequence !== start + 1))) {
     throw validation("the item for this page is no longer available");
   }
   const data = Buffer.from(JSON.stringify(first), "utf8");
+  const version = checksum(data);
+  const cursorAt = (offset) => checksum(JSON.stringify([tool, identity, first.sequence, limit, version, offset]));
+  if (itemCursor && itemCursor !== cursorAt(itemOffset)) {
+    throw validation("invalid or stale item cursor; restart from the last complete sequence");
+  }
   const { originalBytes } = best;
   return fragment(
     data,
@@ -263,7 +287,7 @@ function sequenceResponse(key, tool, identity, field, source, options) {
             omittedBytes: data.length - end,
           },
           continuation: hasMore
-            ? next(complete ? first.sequence : first.sequence - 1, complete ? undefined : end)
+            ? complete ? next(first.sequence) : next(first.sequence - 1, end, cursorAt(end))
             : null,
         },
       });
@@ -305,21 +329,150 @@ export function postResponse(entry) {
   }).response;
 }
 
-export function sessionsResponse(sessions, { offset = 0, ...options }) {
-  return recordsPage("sessions", sessions.map(compactHeader), (rows, originalBytes, omittedCount) => ({
-    sessions: rows,
-    ...(omittedCount
-      ? {
-          page: {
-            originalBytes,
-            omittedCount,
-            continuation: reference("handoff_sessions", {
-              ...options,
-              limit: omittedCount,
-              offset: offset + rows.length,
-            }),
-          },
-        }
-      : {}),
-  })).response;
+function sessionsCursor(sessions, { offset, limit, state, target }) {
+  return checksum(JSON.stringify([offset, limit, state, target, sessions.map(({ jobId }) => jobId)]));
+}
+
+export function sessionsResponse(sessions, { offset = 0, cursor, ...options }) {
+  if (cursor && cursor !== sessionsCursor(sessions, { ...options, offset })) {
+    throw validation("invalid or stale session cursor; restart the session list");
+  }
+  return recordsPage("sessions", sessions.map(compactHeader), (rows, originalBytes, omittedCount) => {
+    const next = { ...options, limit: omittedCount, offset: offset + rows.length };
+    return {
+      sessions: rows,
+      ...(omittedCount && {
+        page: {
+          originalBytes,
+          omittedCount,
+          continuation: reference("handoff_sessions", {
+            ...next,
+            cursor: sessionsCursor(sessions.slice(rows.length), next),
+          }),
+        },
+      }),
+    };
+  }).response;
+}
+
+// Large incidental responses (including mutating tools) need a snapshot so
+// that following a continuation cannot rerun work or observe a different view.
+const MAX_SNAPSHOTS = 16;
+const SNAPSHOT_BYTES = 64 * 1024 * 1024;
+let snapshotDirectory;
+
+function responseDirectory() {
+  if (!snapshotDirectory) {
+    const directory = mkdtempSync(join(tmpdir(), "harnest-mcp-pages-"));
+    process.once("exit", () => {
+      try { rmSync(directory, { recursive: true, force: true }); } catch { /* best effort */ }
+    });
+    if (process.platform === "win32") protectWindowsPath(directory, { directory: true });
+    snapshotDirectory = directory;
+  }
+  return snapshotDirectory;
+}
+
+export function createResponseBoundary() {
+  const snapshots = new Map();
+  let snapshotBytes = 0;
+
+  const cursorAt = (id, offset) => id + "." + offset + "." + checksum(id + "." + offset);
+  const pageRef = (id, offset) => reference("handoff_page", { cursor: cursorAt(id, offset) });
+
+  async function save(source, tool, key, budget) {
+    const id = randomUUID();
+    const path = join(responseDirectory(), id);
+    try {
+      await writeFile(path, source, { mode: 0o600, flag: "wx" });
+    } catch (error) {
+      await unlink(path).catch(() => {});
+      throw error;
+    }
+    snapshots.set(id, { path, tool, key, budget, length: source.length });
+    snapshotBytes += source.length;
+    while (snapshots.size > MAX_SNAPSHOTS || (snapshots.size > 1 && snapshotBytes > SNAPSHOT_BYTES)) {
+      const oldest = snapshots.keys().next().value;
+      const entry = snapshots.get(oldest);
+      snapshots.delete(oldest);
+      snapshotBytes -= entry.length;
+      await unlink(entry.path).catch(() => {});
+    }
+    return id;
+  }
+
+  async function read(cursor) {
+    const [id, position] = cursor.split(".");
+    const offset = Number(position);
+    const entry = snapshots.get(id);
+    if (!entry || cursor !== cursorAt(id, offset) || offset >= entry.length) {
+      throw validation("invalid or expired response cursor; this snapshot is no longer available");
+    }
+    const handle = await open(entry.path, "r").catch(() => null);
+    if (!handle) throw validation("response snapshot expired while paging");
+    try {
+      const window = Buffer.allocUnsafe(Math.min(entry.budget + 4, entry.length - offset));
+      let loaded = 0;
+      while (loaded < window.length) {
+        const { bytesRead } = await handle.read(window, loaded, window.length - loaded, offset + loaded);
+        if (!bytesRead) throw validation("response snapshot changed while paging");
+        loaded += bytesRead;
+      }
+      return fragment(window, 0, (chunk, consumed) => {
+        const end = offset + consumed;
+        return measure("response", {
+          tool: entry.tool,
+          key: entry.key,
+          page: jsonPage(chunk, offset, end, entry.length, pageRef(id, end)),
+        });
+      }, entry.budget);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async function bound(tool, response, project) {
+    const budget = tool.endsWith("_status") ? STATUS_RESPONSE_BYTES : PAGE_RESPONSE_BYTES;
+    const projected = project(response);
+    // Skip encoding a second oversized copy of text just to reject it.
+    if (projected.content.every(({ text }) => typeof text !== "string" || bytes(text) < budget) &&
+        fitsWire(projected, budget)) return projected;
+
+    if (response.isError) {
+      const error = response.structuredContent?.error;
+      const body = {
+        error: {
+          kind: preview(error?.kind ?? "Error"),
+          message: preview(error?.message ?? response.content[0]?.text ?? "Tool failed", 1024),
+        },
+        runtime: response.structuredContent?.runtime,
+      };
+      const compact = project({
+        content: [{ type: "text", text: JSON.stringify(body) }], structuredContent: body, isError: true,
+      });
+      if (fitsWire(compact, budget)) return compact;
+      throw new Error("MCP tool error exceeds its response budget");
+    }
+
+    const [[key, value]] = Object.entries(response.structuredContent);
+    const source = Buffer.from(response.content[0].text, "utf8");
+    const header = {};
+    for (const field of ["comparisonId", "reviewId", "graphId", "runId", "requestId", "contextDigest",
+      "state", "revision", "cancellation", "recoveryRequired", "counts"]) {
+      const fieldValue = value?.[field];
+      if (fieldValue !== undefined && measure(key, { ...header, [field]: fieldValue }).fits(budget - 4096)) {
+        header[field] = fieldValue;
+      }
+    }
+    const id = await save(source, tool, key, budget);
+    const first = fragment(source, 0, (chunk, end) => measure(key, {
+      ...header,
+      page: jsonPage(chunk, 0, end, source.length, pageRef(id, end)),
+    }), budget);
+    const page = project(first);
+    if (fitsWire(page, budget)) return page;
+    throw new Error("MCP continuation exceeds its response budget");
+  }
+
+  return { read, bound };
 }
