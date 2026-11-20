@@ -405,7 +405,12 @@ test("MCP aggregate continuations replay exact compare, review, graph and dynami
     evidence,
   }));
   const graphEvidence = evidence.slice(0, 24);
-  const dynamicResult = { runId: "dynamic-fixture", state: "completed", output: evidence.slice(0, 10) };
+  // Diagnostics sit after the large output, beyond the first chunk, so the header must carry them.
+  const dynamicResult = {
+    runId: "dynamic-fixture", state: "completed", output: evidence.slice(0, 10),
+    error: { kind: "timeout", message: "step deadline ".repeat(400) },
+    errors: Array.from({ length: 12 }, (_, i) => ({ kind: "step", message: `step ${i} failed` })),
+  };
   const services = createRuntimeServices({
     stateDir, routeResolver: async (request) => request, detachBackground: false,
     adapterFactory: () => ({
@@ -457,6 +462,8 @@ test("MCP aggregate continuations replay exact compare, review, graph and dynami
       assert.equal(compared.state, "completed");
       assert.ok(comparison.lanes.every((lane) => lane.receipt.result.evidence.length === 100));
       assert.equal(await collect("handoff_compare", "comparison", compared), JSON.stringify(comparison));
+      assert.deepEqual(compared.lanes.map(({ name, jobId, state }) => ({ name, jobId, state })),
+        comparison.lanes.map((lane) => ({ name: lane.name, jobId: lane.receipt.jobId, state: lane.receipt.state })));
 
       const reviewId = "review-" + modern;
       const reviewed = (await call("handoff_review", {
@@ -467,6 +474,8 @@ test("MCP aggregate continuations replay exact compare, review, graph and dynami
       assert.equal(review.final.overall, 10);
       assert.ok(review.rounds[0].lanes.every((lane) => lane.result.evidence.length === 100));
       assert.equal(await collect("handoff_review", "review", reviewed), JSON.stringify(review));
+      assert.deepEqual(reviewed.lanes.map(({ jobId }) => jobId), review.rounds.at(-1).lanes.map(({ jobId }) => jobId));
+      assert.ok(reviewed.lanes.every(({ jobId }) => typeof jobId === "string" && jobId.length));
 
       const graph = {
         requestId: "graph-" + modern, cwd: home, execution: { background: false },
@@ -483,9 +492,14 @@ test("MCP aggregate continuations replay exact compare, review, graph and dynami
 
       const dynamicPage = (await call("handoff_dynamic_result", { runId: dynamicResult.runId }, "workflow")).value;
       assert.equal(await collect("handoff_dynamic_result", "workflow", dynamicPage), JSON.stringify(dynamicResult));
+      assert.equal(dynamicPage.error.kind, "timeout");
+      assert.ok(dynamicPage.error.message.length <= 1025 && dynamicPage.error.message.endsWith("\u2026"));
+      assert.equal(dynamicPage.errors.length, 10);
+      assert.equal(dynamicPage.errorCount, 12);
       const { cursor } = dynamicPage.page.continuation.arguments;
       const [snapshot, , checksum] = cursor.split(".");
-      await rejects("handoff_page", { cursor: [snapshot, "1", checksum].join(".") }, /invalid or expired response cursor/);
+      await rejects("handoff_page", { cursor: [snapshot, "1", checksum].join(".") },
+        /invalid or expired response cursor.*handoff_result using its jobId.*Do not rerun handoff_review or handoff_compare/s);
     }
   } finally { await daemon.close(); }
 });

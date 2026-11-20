@@ -373,6 +373,35 @@ function responseDirectory() {
   return snapshotDirectory;
 }
 
+const EXPIRED_SNAPSHOT = "this page snapshot is no longer available (the daemon restarted, or newer large " +
+  "responses replaced it). Recover from the identifiers in the first page header: read each lane or job " +
+  "with handoff_result using its jobId, and runs or graphs with their status tools. Do not rerun " +
+  "handoff_review or handoff_compare to recover: that starts new work.";
+
+// Bounded copy of an error so a paged response keeps its diagnosis on the first page.
+function boundedError(error) {
+  if (error === null || error === undefined) return error;
+  if (typeof error !== "object") return preview(String(error), 1024);
+  return {
+    ...(error.kind !== undefined && { kind: preview(String(error.kind)) }),
+    ...(error.code !== undefined && { code: preview(String(error.code)) }),
+    message: preview(String(error.message ?? JSON.stringify(error)), 1024),
+  };
+}
+
+// Per-lane identity for compare and review results, so every lane stays reachable through
+// handoff_result even after the paged snapshot expires.
+function laneRecovery(value) {
+  const lanes = Array.isArray(value?.lanes) ? value.lanes : value?.rounds?.at?.(-1)?.lanes;
+  if (!Array.isArray(lanes)) return undefined;
+  return lanes.slice(0, 16).map((lane) => ({
+    name: preview(String(lane?.name ?? "")),
+    jobId: lane?.jobId ?? lane?.receipt?.jobId ?? null,
+    state: lane?.state ?? lane?.receipt?.state ?? (lane?.error ? "failed" : null),
+    ...(lane?.error && { error: boundedError(lane.error) }),
+  }));
+}
+
 export function createResponseBoundary() {
   const snapshots = new Map();
   let snapshotBytes = 0;
@@ -406,10 +435,10 @@ export function createResponseBoundary() {
     const offset = Number(position);
     const entry = snapshots.get(id);
     if (!entry || cursor !== cursorAt(id, offset) || offset >= entry.length) {
-      throw validation("invalid or expired response cursor; this snapshot is no longer available");
+      throw validation("invalid or expired response cursor; " + EXPIRED_SNAPSHOT);
     }
     const handle = await open(entry.path, "r").catch(() => null);
-    if (!handle) throw validation("response snapshot expired while paging");
+    if (!handle) throw validation("response snapshot expired while paging; " + EXPIRED_SNAPSHOT);
     try {
       const window = Buffer.allocUnsafe(Math.min(entry.budget + 4, entry.length - offset));
       let loaded = 0;
@@ -457,9 +486,17 @@ export function createResponseBoundary() {
     const [[key, value]] = Object.entries(response.structuredContent);
     const source = Buffer.from(response.content[0].text, "utf8");
     const header = {};
+    const diagnostics = {
+      error: value?.error === undefined ? undefined : boundedError(value.error),
+      errors: Array.isArray(value?.errors) ? value.errors.slice(0, 10).map(boundedError) : undefined,
+      errorCount: Array.isArray(value?.errors) && value.errors.length > 10 ? value.errors.length : undefined,
+      lanes: laneRecovery(value),
+    };
+    // Identity and state first, then diagnostics and lane recovery, each kept only while the
+    // header still leaves room for page content.
     for (const field of ["comparisonId", "reviewId", "graphId", "runId", "requestId", "contextDigest",
-      "state", "revision", "cancellation", "recoveryRequired", "counts"]) {
-      const fieldValue = value?.[field];
+      "state", "revision", "cancellation", "recoveryRequired", "counts", "error", "errors", "errorCount", "lanes"]) {
+      const fieldValue = field in diagnostics ? diagnostics[field] : value?.[field];
       if (fieldValue !== undefined && measure(key, { ...header, [field]: fieldValue }).fits(budget - 4096)) {
         header[field] = fieldValue;
       }
