@@ -95,24 +95,33 @@ async function clientDriver() {
   for (const peer of clients) peer.close();
 }
 
-async function childProcesses(parentPids) {
+// Windows never updates ParentProcessId and reuses PIDs, so a process that was already running
+// (csrss.exe, wininit.exe) can name a dead parent whose PID the daemon or driver later receives.
+// Record every running process by PID plus creation time before anything is launched: a process
+// in that snapshot cannot be a child of something started afterwards. Nothing here compares
+// clock times, so a clock adjustment cannot hide a real child.
+async function runningProcessIdentities() {
+  if (process.platform !== "win32") return new Set();
+  const { stdout } = await exec(windowsSystemCommand("powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command",
+    `Get-CimInstance Win32_Process -Property ProcessId,CreationDate | ` +
+    `ForEach-Object { if ($_.CreationDate) { '{0}:{1}' -f $_.ProcessId, $_.CreationDate.Ticks } }`],
+  { windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  return new Set(stdout.split(/\r?\n/).map((row) => row.trim()).filter(Boolean));
+}
+
+async function childProcesses(parentPids, preexisting = new Set()) {
   if (process.platform === "win32") {
     const filter = parentPids.map((pid) => `ParentProcessId = ${pid}`).join(" OR ");
-    const parentFilter = parentPids.map((pid) => `ProcessId = ${pid}`).join(" OR ");
-    // Windows never updates ParentProcessId and reuses PIDs, so a boot-time process such as
-    // csrss.exe can name a dead parent whose PID the daemon or driver now holds. A real child
-    // is always created after its parent, so drop only rows created before their parent.
     const { stdout } = await exec(windowsSystemCommand("powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command",
-      `$parents = @{}; Get-CimInstance Win32_Process -Filter '${parentFilter}' | ` +
-      `ForEach-Object { $parents[[uint32]$_.ProcessId] = $_.CreationDate }; ` +
-      `$children = Get-CimInstance Win32_Process -Filter '${filter}' | Where-Object { ` +
-      `$started = $parents[[uint32]$_.ParentProcessId]; ` +
-      `-not ($started -and $_.CreationDate -and $_.CreationDate -lt $started) } | Select-Object ` +
+      `$children = Get-CimInstance Win32_Process -Filter '${filter}' | Select-Object ` +
       `@{n='image';e={$_.Name}}, @{n='pid';e={$_.ProcessId}}, ` +
-      `@{n='parentPid';e={$_.ParentProcessId}}, @{n='rssBytes';e={[uint64]$_.WorkingSetSize}}; ` +
+      `@{n='parentPid';e={$_.ParentProcessId}}, @{n='rssBytes';e={[uint64]$_.WorkingSetSize}}, ` +
+      `@{n='created';e={if ($_.CreationDate) { $_.CreationDate.Ticks.ToString() } else { '' }}}; ` +
       `ConvertTo-Json -InputObject @($children) -Compress`],
     { windowsHide: true });
-    return JSON.parse(stdout);
+    return JSON.parse(stdout)
+      .filter(({ pid, created }) => !(created && preexisting.has(`${pid}:${created}`)))
+      .map((row) => ({ image: row.image, pid: row.pid, parentPid: row.parentPid, rssBytes: row.rssBytes }));
   }
   const { stdout } = await exec(requireNativeCommand("ps"), ["-eo", "pid=,ppid=,rss=,comm="]);
   return stdout.trim().split("\n").map((row) => {
@@ -191,6 +200,7 @@ async function measure(sampleNumber) {
     assert.equal((await fixtureOwner.start({ requestId, cwd: fixture, target: "pi", task: "fixture" })).state, "completed");
     await fixtureOwner.close();
     const workload = async () => {
+      const preexisting = await runningProcessIdentities();
       daemon = launch(["src/daemon.mjs", "--fixture-port", "0"], env);
       const { port, pid } = await daemonReady(daemon.child, fixture);
       assert.equal(pid, daemon.child.pid);
@@ -209,7 +219,7 @@ async function measure(sampleNumber) {
       sample.catalogSha256 = catalogs.digest;
       sample.clientCount = catalogs.clients;
       const parentPids = [pid, driver.child.pid];
-      const children = await childProcesses(parentPids);
+      const children = await childProcesses(parentPids, preexisting);
       sample.processes = { daemon: pid, driver: driver.child.pid, children };
       assert.ok(children.every(({ image, parentPid }) => process.platform === "win32"
         && image.toLowerCase() === "conhost.exe" && parentPids.includes(parentPid)),
