@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { exec, execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -137,8 +137,11 @@ test("ACP preset lead setup and doctor use the stdio bridge", async (t) => {
         const prefix = windowsCursor ? "Reverse path (cmd.exe): " : "Reverse path: ";
         const outputLines = stdout.split(/\r?\n/);
         const reverseLines = outputLines.filter((line) => line.startsWith(prefix));
-        const projectArg = windowsCursor ? `"${project}"` : `'${project}'`;
-        const remove = host === "cursor" ? `remove cursor --project ${projectArg}` : `remove ${host}`;
+        let remove = `remove ${host}`;
+        if (host === "cursor") {
+          const canonicalProject = await realpath(project);
+          remove += ` --project ${windowsCursor ? `"${canonicalProject}"` : `'${canonicalProject}'`}`;
+        }
         assert.deepEqual(reverseLines, [`${prefix}harnest setup ${remove}`]);
         assert.equal(outputLines[outputLines.indexOf(reverseLines[0]) + 1],
           "Use the same config path environment variables you used for setup.");
