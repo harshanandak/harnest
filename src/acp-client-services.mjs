@@ -19,6 +19,7 @@ import {
 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
+import { resolveWindowsPathCommand } from "./launch-command.mjs";
 import { redactSecrets, terminateProcessTree } from "./process.mjs";
 
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -50,6 +51,15 @@ function terminalEnvironment() {
   return Object.fromEntries(Object.keys(process.env)
     .filter((name) => TERMINAL_ENV_NAMES.has(caseInsensitive ? name.toUpperCase() : name))
     .map((name) => [name, process.env[name]]));
+}
+
+function spawnTerminalCommand(command, args, options) {
+  // Approved agent-requested commands use PATH lookup without Windows' implicit cwd search.
+  const executable = process.platform === "win32" && !/[\\/:]/.test(command)
+    ? resolveWindowsPathCommand(command, options.cwd, options.env)
+    : command;
+  if (!executable) throw new Error("terminal command was not found on PATH");
+  return nodeSpawn(executable, args, options);
 }
 
 const RPC_CODES = Object.freeze({
@@ -288,7 +298,7 @@ export function createAcpClientServices({
   write,
   writeApproved,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  spawnFn = nodeSpawn,
+  spawnFn = spawnTerminalCommand,
 } = {}) {
   const terminalEnabled = write === true && writeApproved === true;
   const requestedRoot = absolutePath(cwd, "cwd");

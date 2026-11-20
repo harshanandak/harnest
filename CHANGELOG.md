@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Bound OpenCode health probes to the readiness timeout.
+- Resolve the Codex worker installer through absolute PATH entries, require absolute ACP registration paths, and exclude implicit Windows working-directory lookup for ACP terminal commands.
+
 ## 0.1.0 - 2026-11-19
 
 Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`. The [install guide](docs/users/getting-started.md#install-from-github) covers the checkout, frozen Bun install, and daemon setup.

@@ -13,7 +13,7 @@ import { resolvePolicyRoute } from "../src/routing-policy.mjs";
 import { summarizeUsage } from "../src/usage.mjs";
 
 const registration = {
-  command: "C:\\tools\\fixture-acp.exe",
+  command: process.execPath,
   args: ["serve", "--stdio"],
   trusted: true,
   registryId: "fixture-agent",
