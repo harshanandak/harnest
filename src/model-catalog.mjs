@@ -403,7 +403,7 @@ export async function runCodexMetadata({ command, args, env, cwd, timeoutMs, max
   else signal?.addEventListener?.("abort", onAbort, { once: true });
   const conversation = (async () => {
     await request("initialize", {
-      clientInfo: { name: "harnest", title: "Harnest", version: "0.1.1" },
+      clientInfo: { name: "harnest", title: "Harnest", version: "0.1.0" },
       capabilities: {},
     });
     notify("initialized");

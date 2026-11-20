@@ -1,6 +1,6 @@
 # Release limits
 
-Harnest `v0.1.1` is distributed as a tagged source checkout from the public `harshanandak/harnest` GitHub repository.
+Harnest `v0.1.0` is distributed as a tagged source checkout from the public `harshanandak/harnest` GitHub repository.
 
 ## Distribution and verification
 

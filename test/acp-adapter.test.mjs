@@ -133,7 +133,7 @@ test("ACP v2 waits for idle completion, streams with backpressure, and returns n
     if (message.method === "initialize") {
       assert.equal(message.params.protocolVersion, 2);
       assert.deepEqual(message.params.capabilities, {});
-      assert.deepEqual(message.params.info, { name: "harnest", title: "Harnest", version: "0.1.1" });
+      assert.deepEqual(message.params.info, { name: "harnest", title: "Harnest", version: "0.1.0" });
       child.respond(message, initializeResult(2, { session: {} }));
     } else if (message.method === "session/new") {
       child.respond(message, { sessionId: "session-v2" });

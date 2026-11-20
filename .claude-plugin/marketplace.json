@@ -9,7 +9,7 @@
       "name": "harnest",
       "source": "./",
       "description": "Harnest MCP coordinates durable handoffs across supported native harnesses and trusted registered ACP agents.",
-      "version": "0.1.1+claude.20261120084149"
+      "version": "0.1.0+claude.20261120111520"
     }
   ]
 }

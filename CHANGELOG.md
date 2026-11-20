@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.1.1 - 2026-11-20
+## 0.1.0 - 2026-11-20
 
-Install with `bun add -g github:harshanandak/harnest#v0.1.1`, or check out tag `v0.1.1`. The [install guide](docs/users/getting-started.md#install-from-github) covers both.
+Install with `bun add -g github:harshanandak/harnest#v0.1.0`, or check out tag `v0.1.0`. The [install guide](docs/users/getting-started.md#install-from-github) covers both.
 
 ### Added
 
@@ -13,19 +13,6 @@ Install with `bun add -g github:harshanandak/harnest#v0.1.1`, or check out tag `
 - Checkout setup prints reverse commands that work from any directory. Cursor reversal also disconnects the selected project and reverses the files setup installed there.
 - MCP tool results share a serialized UTF-8 budget in both protocol eras. Status uses 16 KiB and other results use 64 KiB. Status, session lists, trace headers, and oversized active receipts expose recovery fields and replace long control histories with `controlCount`.
 - Follow `page.continuation` to reconstruct large receipts, trace and board entries, and session lists. Oversized compare, review, graph, and other tool results use `handoff_page` to read the original response without repeating the operation. Pi preserves these pages in tool output. See the [MCP paging contract](docs/users/mcp-usage.md#response-limits-and-continuations).
-
-### Fixed
-
-- Dynamic workflow status no longer reports a live run as missing during a snapshot replacement on Windows.
-- Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
-- Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
-- Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
-
-## 0.1.0 - 2026-11-19
-
-Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`. The [install guide](docs/users/getting-started.md#install-from-github) covers the checkout, frozen Bun install, and daemon setup.
-
-### Added
 
 - `execution.addDirs` passes approved extra directories to Claude, Codex, and Cursor.
 - `execution.attachments` sends bounded local images or files to targets with native input support.
@@ -70,6 +57,11 @@ Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`
 
 ### Fixed
 
+- Dynamic workflow status no longer reports a live run as missing during a snapshot replacement on Windows.
+- Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
+- Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
+- Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
+- Retake Windows daemon memory samples when PID reuse makes child-process attribution ambiguous. ([#39](https://github.com/harshanandak/harnest/pull/39))
 - Managed OpenCode V2 handoffs wait for `/global/health`, where OpenCode 2.2.1 serves health. Before this fix, they timed out with "OpenCode server did not become ready".
 - Replacing an older daemon no longer misses its startup deadline. The client's proof, health, stop and port-release probes open a fresh connection each time instead of reusing a kept-alive socket to the stopping daemon.
 - JavaScript workflows finalize pending controls when they settle or recover. Workers reject ambiguous unstamped controls when claiming a later attempt, and late acknowledgements can resolve controls whose delivery was in flight.
