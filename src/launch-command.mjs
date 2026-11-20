@@ -12,7 +12,7 @@ function envValue(env, name) {
   return env[key];
 }
 
-function isFullyQualified(path) {
+export function isFullyQualified(path) {
   // A Windows path rooted at a single slash still depends on the child's drive.
   return isAbsolute(path) && (!windows || parse(path).root.length > 1);
 }
@@ -34,7 +34,24 @@ export function resolveTrustedCommand(command, env = process.env) {
       .filter((extension) => windowsExecutable.test(extension))
       .map((extension) => command + extension)
     : [command];
-  for (const directory of trustedPathDirectories(env)) {
+  return findCommand(trustedPathDirectories(env), names);
+}
+
+// Direct Windows spawn checks the literal extension, then .com and .exe in PATH order.
+export function resolveWindowsPathCommand(command, cwd, env) {
+  const entries = (envValue(env, "PATH") || "").match(/"[^"]*"|'[^']*'|[^;]+/g) || [];
+  const directories = entries
+    .map((entry) => entry.replace(/^(["'])(.*)\1$/, "$2"))
+    .filter(Boolean)
+    .map((entry) => win32.resolve(cwd, entry));
+  const suffix = command.endsWith(".") ? "" : ".";
+  const names = [command + suffix + "com", command + suffix + "exe"];
+  if (command.slice(0, -1).includes(".")) names.unshift(command);
+  return findCommand(directories, names);
+}
+
+function findCommand(directories, names) {
+  for (const directory of directories) {
     for (const name of names) {
       const candidate = join(directory, name);
       try {

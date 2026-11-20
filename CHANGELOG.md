@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
+- Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
+- Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
+
 ## 0.1.0 - 2026-11-19
 
 Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`. The [install guide](docs/users/getting-started.md#install-from-github) covers the checkout, frozen Bun install, and daemon setup.

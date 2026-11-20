@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -28,6 +28,39 @@ test("native Codex installer uses CODEX_HOME for personal workers", async (t) =>
     await exec("bash", [join(root, "scripts", "install-native-agents.sh")], options);
   }
   assert.deepEqual((await readdir(join(codexHome, "agents"))).sort(), codexWorkers);
+});
+
+test("native Codex installer ignores relative and empty PATH entries", async (t) => {
+  const windows = process.platform === "win32";
+  const directory = await mkdtemp(join(tmpdir(), "harnest-native-path-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, "tools"));
+  const fixtures = windows
+    ? [join("tools", "node.exe"), "node.exe"]
+    : [join("tools", "node"), "node", "dirname"];
+  const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"));
+
+  for (const fixture of fixtures) {
+    await t.test(fixture, async () => {
+      const file = join(directory, fixture);
+      await writeFile(file, "#!/bin/bash\nexit 79\n", { mode: 0o755 });
+      try {
+        const codexHome = join(directory, "codex home");
+        const options = {
+          cwd: directory,
+          env: { ...hostEnv, CODEX_HOME: codexHome, PATH: ["tools", "", dirname(process.execPath), ...(windows ? [] : ["/usr/bin", "/bin"])].join(delimiter) },
+        };
+        const { stdout } = windows
+          ? await exec(join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+            ["-NoProfile", "-File", join(root, "scripts", "install-native-agents.ps1")], options)
+          : await exec("/bin/bash", [join(root, "scripts", "install-native-agents.sh")], options);
+        assert.match(stdout, /Installed native Codex agents:/);
+        assert.deepEqual((await readdir(join(codexHome, "agents"))).sort(), codexWorkers);
+      } finally {
+        await rm(file);
+      }
+    });
+  }
 });
 
 test("native Codex installers preserve customized and removed worker bytes and skip identical files", async (t) => {
