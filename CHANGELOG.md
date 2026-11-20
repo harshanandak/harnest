@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Bound OpenCode health probes to the readiness timeout.
-- Resolve the Codex worker installer through absolute PATH entries, require absolute ACP registration paths, and exclude implicit Windows working-directory lookup for ACP terminal commands.
+- Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
+- Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
+- Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
 
 ## 0.1.0 - 2026-11-19
 

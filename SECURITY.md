@@ -4,7 +4,7 @@ Harnest MCP launches locally installed coding agents. Review their native config
 
 Approve the scope of write work. Generic ACP registration is write-only. Setting `trusted: true` permits the executable to load its native configuration, hooks, plugins, and MCP servers. That executable runs with its local permissions. Unsupported policy controls fail explicitly. See [supported agents](docs/users/supported-agents.md).
 
-Approved ACP v1 agents can request terminal commands. Harnest launches them directly with PATH lookup for bare names. On Windows, Harnest searches only directories listed in PATH and skips empty entries. An agent can explicitly name a workspace executable by path.
+Approved ACP v1 agents can request terminal commands. Harnest launches them directly with PATH lookup for bare names. On Windows, Harnest resolves bare names before spawning, skips empty PATH entries, and searches the terminal working directory only when a PATH entry resolves to it. Relative PATH entries resolve against the terminal working directory. Agents can also explicitly name a workspace executable by path.
 
 The per-user daemon binds to `127.0.0.1` and requires a local bearer credential. It stores the credential in a private `token` file in its daemon directory. Host MCP settings and installer backups can also contain the credential. Protect these files with operating-system permissions. Code running as the same user can access them. See [daemon architecture and token locations](docs/architecture.md#shared-daemon).
 

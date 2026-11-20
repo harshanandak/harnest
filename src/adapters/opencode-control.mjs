@@ -163,16 +163,23 @@ export class OpenCodeControl {
       for (const path of ["/global/health", "/api/health"]) {
         const remaining = Math.ceil(deadline - performance.now());
         if (remaining <= 0 || signal?.aborted || this.serverClosed) break;
-        const timeout = AbortSignal.timeout(remaining);
-        const probeSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        const probe = new AbortController();
+        const abortProbe = () => probe.abort(signal.reason);
+        signal?.addEventListener("abort", abortProbe, { once: true });
+        const timer = setTimeout(() => {
+          probe.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+        }, remaining);
         try {
           const response = await this.fetchFn(joinUrl(this.serverUrl, path), {
-            method: "GET", headers: this.authHeaders(), signal: probeSignal,
+            method: "GET", headers: this.authHeaders(), signal: probe.signal,
           });
-          if (responseOk(response) && !probeSignal.aborted && performance.now() < deadline) return response;
+          if (responseOk(response) && !probe.signal.aborted && performance.now() < deadline) return response;
           lastError = new Error(`${path} returned HTTP ${responseStatus(response) ?? "unknown"}`);
         } catch (error) {
           lastError = error;
+        } finally {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abortProbe);
         }
       }
       const remaining = deadline - performance.now();

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -426,6 +426,53 @@ test("ACP v1 registration pin advertises client services on its single initializ
   assert.equal(output.result.finalText, "ok");
   assert.equal(fake.calls.length, 1);
   assert.equal(fake.children[0].received.filter((item) => item.method === "initialize").length, 1);
+});
+
+test("ACP v1 resolves Windows terminal commands before calling the adapter's launcher", {
+  skip: process.platform !== "win32",
+}, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "harnest-acp-terminal-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cwd = join(directory, "workspace");
+  const bin = join(directory, "bin");
+  await mkdir(cwd);
+  await mkdir(bin);
+  const command = "acp-terminal-fixture";
+  const expected = join(bin, `${command}.exe`);
+  await writeFile(expected, "");
+  await writeFile(join(cwd, `${command}.exe`), "");
+
+  const sessionId = "legacy-terminal";
+  let terminalResponse;
+  const fake = createFakeAcpSpawn((message, child) => {
+    if (message.method === "initialize") child.respond(message, initializeResult(1));
+    else if (message.method === "session/new") child.respond(message, { sessionId });
+    else if (message.method === "session/prompt") {
+      child.request("create-terminal", "terminal/create", { sessionId, command });
+    } else if (message.id === "create-terminal") {
+      terminalResponse = message;
+      child.notify("session/update", { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "ok" } } });
+      child.respond(child.received.find((item) => item.method === "session/prompt"), { stopReason: "end_turn" });
+    }
+  });
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `;${bin};`;
+  try {
+    const adapter = new ACPAdapter({
+      registrations: { fake: { command: process.execPath, trusted: true, protocolVersion: 1 } },
+      spawn: fake.spawn,
+      timeoutMs: 5_000,
+    });
+    await adapter.run(request({ cwd }));
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+
+  assert.match(terminalResponse?.result?.terminalId, /^terminal-/);
+  assert.deepEqual(fake.calls.map((call) => call.command), [process.execPath, expected]);
+  assert.equal(fake.calls[1].options.shell, false);
 });
 
 test("an unpinned v2 negotiation may follow v1 on the same process without claiming v1 callbacks", async () => {

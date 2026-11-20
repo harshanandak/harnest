@@ -53,15 +53,6 @@ function terminalEnvironment() {
     .map((name) => [name, process.env[name]]));
 }
 
-function spawnTerminalCommand(command, args, options) {
-  // Approved agent-requested commands use PATH lookup without Windows' implicit cwd search.
-  const executable = process.platform === "win32" && !/[\\/:]/.test(command)
-    ? resolveWindowsPathCommand(command, options.cwd, options.env)
-    : command;
-  if (!executable) throw new Error("terminal command was not found on PATH");
-  return nodeSpawn(executable, args, options);
-}
-
 const RPC_CODES = Object.freeze({
   INVALID_PARAMS: -32602,
   METHOD_NOT_FOUND: -32601,
@@ -298,7 +289,7 @@ export function createAcpClientServices({
   write,
   writeApproved,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  spawnFn = spawnTerminalCommand,
+  spawnFn = nodeSpawn,
 } = {}) {
   const terminalEnabled = write === true && writeApproved === true;
   const requestedRoot = absolutePath(cwd, "cwd");
@@ -577,9 +568,15 @@ export function createAcpClientServices({
 
     let child;
     try {
-      child = spawnFn(command, [...args], {
+      const env = terminalEnvironment();
+      // Pass an absolute executable for Windows bare names, including with an injected launcher.
+      const executable = process.platform === "win32" && !/[\\/:]/.test(command)
+        ? resolveWindowsPathCommand(command, terminalCwd, env)
+        : command;
+      if (!executable) throw new Error("terminal command was not found on PATH");
+      child = spawnFn(executable, [...args], {
         cwd: terminalCwd,
-        env: terminalEnvironment(),
+        env,
         windowsHide: true,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],

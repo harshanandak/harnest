@@ -98,7 +98,7 @@ test("#39 terminal capability and creation require approved write access", async
     t.after(() => service.close());
     const enabled = write && writeApproved;
     assert.equal(service.capabilities.terminal, enabled);
-    const creation = service.handleRequest("terminal/create", { sessionId: "session-gate", command: "node" });
+    const creation = service.handleRequest("terminal/create", { sessionId: "session-gate", command: process.execPath });
     if (enabled) assert.match((await creation).terminalId, /^terminal-/);
     else await rejectsCode(creation, "METHOD_NOT_FOUND");
   }
@@ -123,7 +123,7 @@ test("#39 terminal spawn passes only allowlisted environment variables", async (
   }
   const service = createAcpClientServices({ cwd, write: true, writeApproved: true, spawnFn: fake.spawnFn });
   t.after(() => service.close());
-  await service.handleRequest("terminal/create", { sessionId: "session-env", command: "node" });
+  await service.handleRequest("terminal/create", { sessionId: "session-env", command: process.execPath });
   const { env } = fake.calls[0].options;
   assert.ok(env, "spawn receives an explicit environment");
   const names = Object.fromEntries(Object.entries(env).map(([key, value]) => [key.toUpperCase(), value]));
@@ -245,7 +245,7 @@ test("terminal/create spawns argv directly with an explicit environment and cont
 
   const created = await service.handleRequest("terminal/create", {
     sessionId: "session-1",
-    command: "node",
+    command: process.execPath,
     args: ["--version"],
     env: [],
     cwd: nested,
@@ -253,7 +253,7 @@ test("terminal/create spawns argv directly with an explicit environment and cont
   });
   assert.match(created.terminalId, /^terminal-/);
   assert.equal(fake.calls.length, 1);
-  assert.equal(fake.calls[0].command, "node");
+  assert.equal(fake.calls[0].command, process.execPath);
   assert.deepEqual(fake.calls[0].args, ["--version"]);
   assert.equal(fake.calls[0].options.shell, false);
   assert.equal(fake.calls[0].options.windowsHide, true);
@@ -327,7 +327,7 @@ test("terminal output is bounded, backpressured, session-owned, and released aft
   t.after(() => service.close());
   const { terminalId } = await service.handleRequest("terminal/create", {
     sessionId: "session-1",
-    command: "node",
+    command: process.execPath,
     outputByteLimit: 5,
   });
   const child = fake.children[0];
@@ -384,7 +384,7 @@ test("redacts recognized credentials at terminal callback and output boundaries"
   t.after(() => service.close());
   const { terminalId } = await service.handleRequest("terminal/create", {
     sessionId: "session-redaction",
-    command: "node",
+    command: process.execPath,
   });
   const sensitiveValue = ["synthetic", "credential", "value"].join("-");
   fake.children[0].stdout.write(`authorization: Bearer ${sensitiveValue}`);
@@ -428,7 +428,7 @@ test("abort and close do not wait for a stalled progress callback", async (t) =>
       });
       const { terminalId } = await service.handleRequest("terminal/create", {
         sessionId: `session-${mode}`,
-        command: "stalled-progress",
+        command: join(cwd, "stalled-progress"),
       });
       fake.children[0].stdout.write("progress awaiting persistence");
       await progressStarted;
@@ -466,7 +466,7 @@ test("kill and close wait for owned process exit and never address unknown termi
   const cwd = await fixture(t);
   const fake = fakeSpawner({ closeDelayMs: 10 });
   const service = createAcpClientServices({ cwd, ...approvedWrite, spawnFn: fake.spawnFn });
-  const first = await service.handleRequest("terminal/create", { sessionId: "session-1", command: "first" });
+  const first = await service.handleRequest("terminal/create", { sessionId: "session-1", command: join(cwd, "first") });
   await service.handleRequest("terminal/kill", { sessionId: "session-1", terminalId: first.terminalId });
   assert.equal(fake.children[0].killCalls, 1);
   assert.notEqual(fake.children[0].exitCode !== null || fake.children[0].signalCode !== null, false);
@@ -476,7 +476,7 @@ test("kill and close wait for owned process exit and never address unknown termi
     terminalId: "terminal-not-owned",
   }), "UNKNOWN_TERMINAL");
 
-  await service.handleRequest("terminal/create", { sessionId: "session-1", command: "second" });
+  await service.handleRequest("terminal/create", { sessionId: "session-1", command: join(cwd, "second") });
   await service.close();
   assert.equal(fake.children[1].killCalls, 1);
   await rejectsCode(service.handleRequest("terminal/create", {
@@ -508,7 +508,7 @@ test("abort, timeout, unsupported methods, and malformed params fail closed", as
   t.after(() => service.close());
   const { terminalId } = await service.handleRequest("terminal/create", {
     sessionId: "session-1",
-    command: "times-out",
+    command: join(cwd, "times-out"),
   });
   await new Promise((resolveWait) => setTimeout(resolveWait, 40));
   assert.equal(fake.children[0].killCalls, 1);

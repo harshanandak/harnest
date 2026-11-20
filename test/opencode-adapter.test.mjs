@@ -638,6 +638,31 @@ test("a stalled OpenCode health probe stops at the readiness deadline", async (t
   }
 });
 
+test("caller cancellation aborts the in-flight OpenCode readiness probe", { timeout: 5_000 }, async () => {
+  const caller = new AbortController();
+  const reason = new Error("cancel readiness");
+  let probeSignal;
+  let probeAbortReason;
+  const control = new OpenCodeControl({
+    fetchFn(_url, { signal }) {
+      probeSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          probeAbortReason = signal.reason;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    },
+  });
+  control.serverUrl = SERVER_URL;
+
+  const readiness = assert.rejects(control.waitReady(caller.signal), (error) => error.details?.kind === "aborted");
+  assert.equal(probeSignal?.aborted, false, "a probe must be in flight before cancellation");
+  caller.abort(reason);
+  await readiness;
+  assert.equal(probeAbortReason, reason);
+});
+
 test("control rejects cleanly before the managed server is ready", async () => {
   const control = new OpenCodeControl({ serverUrl: SERVER_URL });
   await assert.rejects(control.control({ commandId: "not-ready", kind: "message", delivery: "steer", message: "x" }), (error) => error?.details?.kind === "not-ready");
