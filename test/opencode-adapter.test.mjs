@@ -604,6 +604,28 @@ test("attached server readiness uses /global/health, where OpenCode V2 serves he
   await control.stop();
 });
 
+test("a stalled OpenCode health probe stops at the readiness deadline", async (t) => {
+  const timeoutMs = 60;
+  const caller = new AbortController();
+  const watchdog = setTimeout(() => caller.abort(), 1_000);
+  t.after(() => clearTimeout(watchdog));
+  const control = new OpenCodeControl({
+    timeoutMs,
+    fetchFn(_url, { signal }) {
+      return new Promise((_resolve, reject) => {
+        if (signal?.aborted) reject(signal.reason);
+        else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  });
+  control.serverUrl = SERVER_URL;
+
+  const start = performance.now();
+  await assert.rejects(control.waitReady(caller.signal), (error) => error.details?.kind === "not-ready");
+  const elapsed = performance.now() - start;
+  assert.ok(elapsed >= timeoutMs - 10 && elapsed < timeoutMs + 400, `readiness rejected after ${elapsed}ms`);
+});
+
 test("control rejects cleanly before the managed server is ready", async () => {
   const control = new OpenCodeControl({ serverUrl: SERVER_URL });
   await assert.rejects(control.control({ commandId: "not-ready", kind: "message", delivery: "steer", message: "x" }), (error) => error?.details?.kind === "not-ready");

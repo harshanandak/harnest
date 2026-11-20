@@ -717,6 +717,21 @@ test("missing and untrusted registrations reject before spawn", async () => {
   assert.equal(spawned, 0);
 });
 
+test("a trusted ACP registration still needs an absolute executable path", async () => {
+  let spawnCount = 0;
+  const adapter = new ACPAdapter({
+    registrations: { fake: { command: "fake-acp", args: [], trusted: true } },
+    spawn() { spawnCount += 1; throw new Error("unexpected spawn"); },
+  });
+
+  await assert.rejects(adapter.run(request()), (error) => {
+    assert.equal(error.details?.kind, "configuration");
+    assert.match(error.message, /acp add .*--trust/);
+    return true;
+  });
+  assert.equal(spawnCount, 0);
+});
+
 test("permission callbacks choose allow_once only for understood coding operations", async () => {
   const responses = new Map();
   const fake = createFakeAcpSpawn((message, child) => {
