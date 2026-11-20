@@ -21,16 +21,37 @@ export function bridgeEntry() {
   };
 }
 
-const codexServerTable = /^[ \t]*\[\s*(?:mcp_servers|"mcp_servers"|'mcp_servers')\s*\.\s*["']?harnest["']?\s*(?:\.\s*(.+?))?\s*\][ \t]*(?:#.*)?$/;
+const codexServerTable = /^[ \t]*\[\s*(?:mcp_servers|"mcp_servers"|'mcp_servers')\s*\.\s*(?:harnest|"harnest"|'harnest')\s*(?:\.\s*(.+?))?\s*\][ \t]*(?:#.*)?$/;
+const codexTokens = /(?<table>^[ \t]*\[{1,2}(?:[^"'[\]\r\n]|"(?:\\.|[^"\\\r\n])*"|'[^'\r\n]*')+\]{1,2}[ \t]*(?:#[^\r\n]*)?$)|"""(?:\\[\s\S]|"(?!"")|[^"\\])*?"{3,5}|'''[\s\S]*?'{3,5}|"(?:\\.|[^"\\\r\n])*"|'[^'\r\n]*'|#[^\r\n]*|(?<open>[[{])|(?<close>[\]}])/gm;
+const harnestTable = (section) => codexServerTable.exec(section.trimStart().split(/\r?\n/, 1)[0]);
+export const codexConfigDir = (home = homedir()) => process.env.CODEX_HOME || join(home, ".codex");
+
+function codexTables(text) {
+  const sections = [];
+  let start = 0;
+  let depth = 0;
+  // A bracketed line inside a multiline string or array is not a TOML table.
+  for (const token of text.matchAll(codexTokens)) {
+    const { table, open, close } = token.groups;
+    if (open) depth++;
+    if (close) depth--;
+    if (table && depth === 0 && token.index > start) {
+      sections.push(text.slice(start, token.index));
+      start = token.index;
+    }
+  }
+  return [...sections, text.slice(start)];
+}
 
 // Replace just the Harnest transport table(s), keeping all other Codex configuration verbatim.
 export function codexConfig(previous, entry) {
-  const tables = (previous ?? "").split(/(?=^\s*\[{1,2}[^\r\n\]]+\]{1,2}\s*(?:#.*)?$)/m);
+  const bom = previous?.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const tables = codexTables(previous?.slice(bom.length) ?? "");
   const unmanaged = [];
   const keptSettings = [];
   const transportKey = /^(?:command|args|env|env_vars|cwd|url|http_headers|env_http_headers|bearer_token_env_var|auth)\s*=/;
   for (const section of tables) {
-    const header = codexServerTable.exec(section.trimStart().split(/\r?\n/, 1)[0]);
+    const header = harnestTable(section);
     if (!header) {
       unmanaged.push(section);
       continue;
@@ -49,14 +70,14 @@ export function codexConfig(previous, entry) {
   const remainder = unmanaged.join("").trimEnd();
   const lines = ["[mcp_servers.harnest]", `command = ${JSON.stringify(entry.command)}`, `args = ${JSON.stringify(entry.args)}`];
   if (entry.env) lines.push(`env = { ${Object.entries(entry.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(", ")} }`);
-  return (remainder ? `${remainder}\n\n` : "") + [...lines, ...keptSettings].join("\n") + "\n";
+  return bom + (remainder ? `${remainder}\n\n` : "") + [...lines, ...keptSettings].join("\n") + "\n";
 }
 
 export function cursorUserConfig(home = homedir()) {
   return { path: join(home, ".cursor", "mcp.json"), key: "mcpServers" };
 }
 
-export async function installHostConfig(host, { home = homedir(), codexHome = process.env.CODEX_HOME || join(home, ".codex") } = {}) {
+export async function installHostConfig(host, { home = homedir(), codexHome = codexConfigDir(home) } = {}) {
   const entry = bridgeEntry();
   if (host === "cursor") {
     const { path, key } = cursorUserConfig(home);
@@ -67,6 +88,17 @@ export async function installHostConfig(host, { home = homedir(), codexHome = pr
   const previous = await readExisting(path);
   const backup = await replaceWithBackup(path, codexConfig(previous, entry), previous, { sensitive: true });
   return { path, backup };
+}
+
+export async function removeCodexConfig() {
+  const path = join(codexConfigDir(), "config.toml");
+  const previous = await readExisting(path);
+  if (previous === null) return { path, backup: null, status: "config-missing" };
+  const bom = previous.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const next = bom + codexTables(previous.slice(bom.length)).filter((section) => !harnestTable(section)).join("");
+  if (next === previous) return { path, backup: null, status: "already-absent" };
+  const backup = await replaceWithBackup(path, next, previous, { sensitive: true });
+  return { path, backup, status: "removed" };
 }
 
 const jsonOptions = (format) => ({ disallowComments: format === "json", allowTrailingComma: format === "jsonc" });

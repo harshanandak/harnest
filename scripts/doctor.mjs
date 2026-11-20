@@ -12,7 +12,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const leadOptions = {};
 const leadFlags = { "--host": "host", "--project": "project", "--config": "configPath" };
 const args = process.argv.slice(2);
-const usage = "Usage: bun run doctor [--host " + [...doctorHosts, "other"].join("|") + "] [--project DIR] [--config FILE]";
+const usage = "Usage: harnest doctor [--host " + [...doctorHosts, "other"].join("|") + "] [--project DIR] [--config FILE]";
 if (args.length === 1 && ["--help", "-h"].includes(args[0])) { console.log(usage); process.exit(0); }
 for (let index = 0; index < args.length; index += 2) {
   const option = leadFlags[args[index]];

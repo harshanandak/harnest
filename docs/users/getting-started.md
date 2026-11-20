@@ -1,6 +1,6 @@
 # Getting started
 
-Harnest MCP runs from a source checkout. Clients share one local HTTP daemon. A small stdio bridge is available for clients that need it.
+Clients share one local Harnest HTTP daemon. A small stdio bridge is available for clients that need it.
 
 ## Requirements
 
@@ -13,7 +13,14 @@ Harnest does not accept a downstream provider key in a handoff request and does 
 
 ## Install from GitHub
 
-Clone the repository and install dependencies from its default branch:
+Install Harnest directly from GitHub and ensure Bun's global bin directory is on your `PATH`.
+
+```sh
+bun add -g github:harshanandak/harnest
+harnest --version
+```
+
+For development or an older release, you can use a checkout.
 
 ```sh
 git clone https://github.com/harshanandak/harnest.git
@@ -21,19 +28,21 @@ cd harnest
 bun install --frozen-lockfile --omit optional
 ```
 
+From the checkout, use the `bun run setup`, `bun run doctor`, `bun run daemon`, `bun run acp`, and `bun run routing:setup` aliases. Use those aliases if you have only a checkout and need to run a printed `harnest setup` command.
+
 ## Add the MCP server
 
-Install the lead client's integration from the Harnest checkout. For example, this installs Codex's plugin, MCP config, and native workers:
+Connect the lead client. For example, this installs Codex's plugin, MCP config, and native workers.
 
 ```sh
-bun run setup codex
+harnest setup codex
 ```
 
-Run `bun run setup --help` for supported names, including the [ACP preset lead hosts](integrations.md#acp-presets-as-lead-clients). Use `bun run setup cursor --project "/absolute/path/to/project"` for a Cursor workspace outside the Harnest checkout. See the [host installation instructions](integrations.md) for paths, native approval, and restoring migration backups.
+Run `harnest setup --help` for supported names, including the [ACP preset lead hosts](integrations.md#acp-presets-as-lead-clients). Use `harnest setup cursor --project "/absolute/path/to/project"` to select a Cursor workspace. See the [host installation instructions](integrations.md) for paths, native approval, and restoring migration backups.
 
 Run setup with the downstream CLIs on `PATH` and the intended `HARNEST_STATE_DIR` if customized. Pass `--no-autostart` to skip login registration. The bridge starts the daemon when the host connects and can restart it on connection failure.
 
-For a stdio-only client, merge this entry into its configuration. Keep existing servers and replace the example with the checkout's absolute path:
+For a stdio-only client, merge this entry into its configuration. Keep existing servers and replace the example with the absolute path to Harnest.
 
 ```json
 {
@@ -46,28 +55,27 @@ For a stdio-only client, merge this entry into its configuration. Keep existing 
 }
 ```
 
-Run `bun run setup other` to print the stdio snippet with your checkout's path.
+Run `harnest setup other` to print the stdio snippet with your installation path.
 
 For an HTTP client, set the server URL to `http://127.0.0.1:41237/mcp` and the `Authorization` header to `Bearer <token>`. If the client uses an `mcpServers` JSON object, the installer reads the token file and writes the header directly to your private local config:
 
 ```sh
-bun run setup other --http-config "/absolute/path/to/private/mcp.json"
+harnest setup other --http-config "/absolute/path/to/private/mcp.json"
 ```
 
-The generated entry uses `{"type":"http","url":"http://127.0.0.1:41237/mcp","headers":{"Authorization":"Bearer <token>"}}`. For a client with a different schema, use its local file import or header helper to load the same value from the private token file. It's under `%LOCALAPPDATA%/harnest/daemon/token` on Windows, `~/Library/Application Support/harnest/daemon/token` on macOS, and `$XDG_STATE_HOME/harnest/daemon/token` on Linux, defaulting to `~/.local/state/harnest/daemon/token`. For custom `HARNEST_STATE_DIR`, look in the sibling `daemon/token`. Keep the client config, token, and any installer backups private. For HTTP-only clients, use `bun run daemon start` if the daemon is stopped.
+The generated entry uses `{"type":"http","url":"http://127.0.0.1:41237/mcp","headers":{"Authorization":"Bearer <token>"}}`. For a client with a different schema, use its local file import or header helper to load the same value from the private token file. It's under `%LOCALAPPDATA%/harnest/daemon/token` on Windows, `~/Library/Application Support/harnest/daemon/token` on macOS, and `$XDG_STATE_HOME/harnest/daemon/token` on Linux, defaulting to `~/.local/state/harnest/daemon/token`. For custom `HARNEST_STATE_DIR`, look in the sibling `daemon/token`. Keep the client config, token, and any installer backups private. For HTTP-only clients, use `harnest daemon start` if the daemon is stopped.
 
 Restart or reload the MCP client after changing its configuration.
 
 ## Verify the connection
 
-Check the installed lead configuration and tool discovery from the repository root:
+Check the installed lead configuration and tool discovery.
 
 ```powershell
-bun run doctor --host codex
-bun run smoke:mcp --bridge
+harnest doctor --host codex
 ```
 
-Use the relevant host name. For a generic JSON config, use `bun run doctor --host other --config "/absolute/path/to/private/mcp.json"`. For a Cursor workspace outside the checkout, pass `--project` with its path. The smoke uses an isolated daemon fixture. Then confirm that the client discovers at least these tools:
+Use the relevant host name. For a generic JSON config, use `harnest doctor --host other --config "/absolute/path/to/private/mcp.json"`. For Cursor, pass `--project` with the workspace path. Then confirm that the client discovers at least these tools.
 
 - `handoff_workflow`
 - `handoff_status`

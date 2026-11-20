@@ -143,7 +143,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 const options = parseArgs(process.argv.slice(2));
 if (options.help) {
   console.log([
-    "Usage: node scripts/setup-routing.mjs [--order pi,claude,codex,opencode,cursor,amp] [--tier balanced]",
+    "Usage: harnest routing setup [--order pi,claude,codex,opencode,cursor,amp] [--tier balanced]",
     "  [--model target=model] [--budget 2] [--cheap-lane model-id] [--flagship-lane model-id]",
     "  [--sub target=1] [--no-rules] [--allow-training-endpoints|--no-training-endpoints] [--out path] [--yes]",
     "Writes the simple preference keys plus starter task rules; the engine expands them into full policy.",

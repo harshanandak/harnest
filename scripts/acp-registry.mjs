@@ -176,7 +176,7 @@ async function registerLaunch({ registry, agentId, command, args = [], trust, pr
 }
 
 function usage() {
-  return "Usage: bun run acp list [--config <path>] | describe <registry-id> | register <registry-id> --command <native-executable> [--arg <value> ...] [--protocol-version 1|2] --trust | add <preset-id> [--command <native-executable>] [--protocol-version 1|2] --trust";
+  return "Usage: harnest acp list [--config <path>] | describe <registry-id> | register <registry-id> --command <native-executable> [--arg <value> ...] [--protocol-version 1|2] --trust | add <preset-id> [--command <native-executable>] [--protocol-version 1|2] --trust";
 }
 
 function parseRegisterArgs(argv) {

@@ -47,7 +47,7 @@ You do not need to learn the full policy engine. Three knobs cover nearly
 everyone — run the one-minute wizard or write them by hand:
 
 ```powershell
-node scripts/setup-routing.mjs
+harnest routing setup
 ```
 
 ```json

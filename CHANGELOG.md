@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Install the `harnest` CLI from GitHub with Bun. Run setup, doctor, daemon, ACP registration, and routing setup from any directory.
+- Host setup prints pasteable removal or restore commands, including native plugin removal for Claude and Codex and extension removal for Pi.
+
 ## 0.1.0 - 2026-11-19
 
 Install from the public `harshanandak/harnest` GitHub repository at tag `v0.1.0`. The [install guide](docs/users/getting-started.md#install-from-github) covers the checkout, frozen Bun install, and daemon setup.

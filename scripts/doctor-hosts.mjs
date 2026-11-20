@@ -146,7 +146,7 @@ async function checkConnection(entry, project) {
     const expected = bridgeEntry();
     if (!/^node(?:\.exe)?$/i.test(basename(entry.command)) || entry.args?.length !== 1 ||
         !entry.args[0] || await realpath(resolve(project, entry.args[0])).catch(() => null) !== await realpath(expected.args[0])) {
-      throw new Error("Expected the stdio bridge from this Harnest checkout. Run setup again.");
+      throw new Error("Expected the stdio bridge from this Harnest installation. Run harnest setup again.");
     }
     if (entry.command !== "node" && !await exists(entry.command)) throw new Error("The configured Node executable is missing.");
     const env = Object.fromEntries(Object.entries(entry.env ?? {}).filter(([name, value]) =>

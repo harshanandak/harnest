@@ -43,43 +43,38 @@ flowchart LR
 
 You need **Git**, **Bun**, and **Node.js 22 or newer**. Install and log in to each downstream CLI through its own setup first, and keep those CLIs on `PATH`.
 
-**1. Clone and install.** Pick a directory you will keep, because host configs point at it.
+**1. Install from GitHub.** Make sure Bun's global bin directory is on your `PATH`.
 
 ```sh
-git clone https://github.com/harshanandak/harnest.git
-cd harnest
-bun install --frozen-lockfile --omit optional
+bun add -g github:harshanandak/harnest
+harnest --version
 ```
 
 **2. Connect your lead agent.** This example uses Codex. Pick your own host below.
 
 ```sh
-bun run setup codex
-bun run doctor --host codex
+harnest setup codex
+harnest doctor --host codex
 ```
 
 **3. Restart the lead agent** and check that it lists `handoff_workflow`, `handoff_status`, `handoff_trace`, and `handoff_result`. Then run [your first handoff](#your-first-handoff).
 
 > [!TIP]
-> Run `bun run setup --help` to see every host name. Setup also installs the shared daemon and a login item so it starts with your machine. Pass `--no-autostart` to skip that.
+> Run `harnest setup --help` to see every host name. Setup also installs the shared daemon and a login item so it starts with your machine. Pass `--no-autostart` to skip that.
 
 ### Or let your agent set it up
 
-Paste this prompt into the coding agent you want to use as the lead. It installs the pinned release, connects that agent, and leaves logins and secrets to you.
+Paste this prompt into the coding agent you want to use as the lead. It installs Harnest from GitHub, connects that agent, and leaves logins and secrets to you.
 
 ```text
 Install and set up Harnest (https://github.com/harshanandak/harnest) on this machine so you can hand off work to other coding agents.
 
 1. Check that git, bun, and Node.js 22 or newer are installed. If any is missing, stop and tell me what to install.
-2. Ask me where to keep the checkout. It must stay in place, because host configs point at it. Suggest ~/harnest.
-3. Clone and install the release:
-   git clone --branch v0.1.0 https://github.com/harshanandak/harnest.git <directory>
-   cd <directory>
-   bun install --frozen-lockfile --omit optional
-4. Run `bun run setup --help` and find the host name that matches you. Setup writes your host configuration and starts a local background daemon. Ask me for permission first, and stop if I say no. Then ask whether the daemon should also start at login, and add --no-autostart if I say no. Run `bun run setup <host>`. If you are Cursor, also ask me for the absolute path of the project I use you in and add `--project "<that path>"`, so the project files go there instead of into the Harnest checkout.
-   Some hosts (for example goose, mistral-vibe, and `other`) are set up by hand: setup only prints configuration for me to add. In that case, show me the printed instructions, do not edit the configuration yourself, skip step 5, and tell me setup is not finished until I add it.
-5. Run `bun run doctor --host <host>`. Fix what you can and report anything still failing.
-6. Check which downstream agent CLIs from the README's "Supported clients and downstream agents" table are on PATH. Do not install them or log in to them. Tell me which ones I still need to install or log in to.
+2. Install Harnest with `bun add -g github:harshanandak/harnest`. Run `harnest --version` to check the global command is on PATH.
+3. Run `harnest setup --help` and find the host name that matches you. Setup writes your host configuration and starts a local background daemon. Ask me for permission first, and stop if I say no. Then ask whether the daemon should also start at login, and add --no-autostart if I say no. Run `harnest setup <host>`. If you are Cursor, also ask me for the absolute path of the project I use you in and add `--project "<that path>"`.
+   Some hosts (for example goose, mistral-vibe, and `other`) are set up by hand: setup only prints configuration for me to add. In that case, show me the printed instructions, do not edit the configuration yourself, skip step 4, and tell me setup is not finished until I add it.
+4. Run `harnest doctor --host <host>`. Fix what you can and report anything still failing.
+5. Check which downstream agent CLIs from the README's "Supported clients and downstream agents" table are on PATH. Do not install them or log in to them. Tell me which ones I still need to install or log in to.
 
 Rules: never read, print, or ask me for API keys, tokens, or other secrets. Do not change configuration beyond what setup writes. When you finish, tell me to restart you and check that the handoff_workflow, handoff_status, handoff_trace, and handoff_result tools are listed, then point me to the README's "Your first handoff" section.
 ```
@@ -90,7 +85,7 @@ Rules: never read, print, or ask me for API keys, tokens, or other secrets. Do n
 <summary><b>Claude Code</b></summary>
 
 ```sh
-bun run setup claude
+harnest setup claude
 ```
 
 Installs the local marketplace and the Harnest plugin. Restart Claude Code. See [Claude Code setup](docs/users/integrations.md#claude-code).
@@ -100,7 +95,7 @@ Installs the local marketplace and the Harnest plugin. Restart Claude Code. See 
 <summary><b>Codex</b></summary>
 
 ```sh
-bun run setup codex
+harnest setup codex
 ```
 
 Installs the plugin, the user MCP bridge, and native workers. Restart Codex and invoke the skill as `$handoff`. See [Codex setup](docs/users/integrations.md#codex).
@@ -110,7 +105,7 @@ Installs the plugin, the user MCP bridge, and native workers. Restart Codex and 
 <summary><b>OpenCode</b></summary>
 
 ```sh
-bun run setup opencode
+harnest setup opencode
 ```
 
 Installs the MCP entry, plugin, worker agents, skill, and commands. Save the reverse command it prints. See [OpenCode setup](docs/users/integrations.md#opencode).
@@ -120,7 +115,7 @@ Installs the MCP entry, plugin, worker agents, skill, and commands. Save the rev
 <summary><b>Pi</b></summary>
 
 ```sh
-bun run setup pi
+harnest setup pi
 ```
 
 Installs the native extension, its settings entry, and the handoff skill. Start a new Pi session afterwards. See [Pi setup](docs/users/integrations.md#pi).
@@ -130,7 +125,7 @@ Installs the native extension, its settings entry, and the handoff skill. Start 
 <summary><b>Cursor</b></summary>
 
 ```sh
-bun run setup cursor --project "/absolute/path/to/project"
+harnest setup cursor --project "/absolute/path/to/project"
 ```
 
 Installs the user MCP bridge plus the project's skill, router rule, worker, and commands. Restart Cursor. See [Cursor setup](docs/users/integrations.md#cursor).
@@ -140,7 +135,7 @@ Installs the user MCP bridge plus the project's skill, router rule, worker, and 
 <summary><b>Amp</b></summary>
 
 ```sh
-bun run setup amp
+harnest setup amp
 ```
 
 If Amp reports `awaiting approval`, run `amp mcp approve harnest`. See [Amp](docs/users/integrations.md#amp-as-a-lead-client).
@@ -150,10 +145,10 @@ If Amp reports `awaiting approval`, run `amp mcp approve harnest`. See [Amp](doc
 <summary><b>GitHub Copilot CLI, Qwen Code, Kilo, Cline, Kiro, Factory Droid, Auggie, Kimi, Devin</b></summary>
 
 ```sh
-bun run setup github-copilot-cli   # or qwen-code, kilo, cline, kiro, factory-droid, auggie, kimi, devin
+harnest setup github-copilot-cli   # or qwen-code, kilo, cline, kiro, factory-droid, auggie, kimi, devin
 ```
 
-Setup installs the MCP bridge into that host's config. For Goose and Mistral Vibe, `bun run setup goose` and `bun run setup mistral-vibe` print the config to add by hand.
+Setup installs the MCP bridge into that host's config. For Goose and Mistral Vibe, `harnest setup goose` and `harnest setup mistral-vibe` print the config to add by hand.
 
 > [!NOTE]
 > These preset setups are covered by CI fixtures only. They have not been tested against the live CLIs. See the [preset lead host instructions](docs/users/integrations.md#acp-presets-as-lead-clients).
@@ -163,13 +158,13 @@ Setup installs the MCP bridge into that host's config. For Goose and Mistral Vib
 <summary><b>Any other MCP client</b></summary>
 
 ```sh
-bun run setup other
+harnest setup other
 ```
 
 Prints a stdio bridge snippet to paste into your client. For a direct HTTP connection, see [the HTTP setup instructions](docs/users/getting-started.md#add-the-mcp-server) and [choose a connection](#choose-a-connection).
 </details>
 
-To disconnect, run `bun run setup remove <host>` for an automatic preset, Amp, or Cursor's user config. Use the same config path overrides as setup. It backs up the file before it removes the Harnest entry. See [removing a registration](docs/users/integrations.md#remove-an-mcp-registration).
+To disconnect, paste the reverse command printed by setup. Use the same config path overrides. See [removing a registration](docs/users/integrations.md#remove-an-mcp-registration).
 
 ## Your first handoff
 
@@ -249,7 +244,7 @@ A **lead client** connects to Harnest through MCP. A **downstream agent** runs t
 | Cursor | Stdio bridge via the integration installer | `cursor` supports read and approved write, session resume, and optional session transport. UI subagents need their own MCP registration. |
 | Amp | MCP configuration | `amp` supports approved write only, with native-session follow-up. Run Harnest on Linux, macOS, or inside WSL. |
 | Antigravity CLI | [Manual MCP configuration](docs/users/integrations.md#antigravity-cli-as-a-lead-client) | `acp` with `route.agent: "antigravity"` launches `agy acp` for approved writes. Harnest has not verified the preset against the real CLI. |
-| Registered ACP agent | Depends on the client's MCP support | `acp` supports approved writes with an explicitly trusted local registration. Register with `bun run acp add <preset-id> --trust` or [supply your own command](docs/acp-agents.md#register-manually). Harnest has not verified the twelve presets against the real agents. |
+| Registered ACP agent | Depends on the client's MCP support | `acp` supports approved writes with an explicitly trusted local registration. Register with `harnest acp add <preset-id> --trust` or [supply your own command](docs/acp-agents.md#register-manually). Harnest has not verified the twelve presets against the real agents. |
 
 Personal Google accounts can use the [Antigravity ACP preset](docs/acp-agents.md#register-from-a-preset).
 
@@ -260,7 +255,7 @@ Amp and generic ACP use native-session follow-up and reject session transport an
 <details>
 <summary><b>Shared daemon over HTTP</b> (default for Claude Code, OpenCode, Pi)</summary>
 
-Use `http://127.0.0.1:41237/mcp` with the daemon's local bearer credential. The [HTTP setup instructions](docs/users/getting-started.md#add-the-mcp-server) show how to write the header into a private client config. URL-only clients need a running daemon; start one by hand with `bun run daemon start`.
+Use `http://127.0.0.1:41237/mcp` with the daemon's local bearer credential. The [HTTP setup instructions](docs/users/getting-started.md#add-the-mcp-server) show how to write the header into a private client config. URL-only clients need a running daemon; start one by hand with `harnest daemon start`.
 </details>
 
 <details>
@@ -299,20 +294,20 @@ Call `handoff_routing_preview` to see the chosen route before dispatch.
 <details>
 <summary><b>Update or roll back</b></summary>
 
-Fetch tags, check out the release tag you want, run `bun install --frozen-lockfile --omit optional`, rerun the integration installer, and restart the host. Keep the installer backups. To roll back, repeat with the previous tag, or follow the [host restore instructions](docs/users/integrations.md) for configuration changes.
+Run `bun add -g github:harshanandak/harnest` again in the same Bun global prefix. The bridge and login item use paths within that prefix. Rerun `harnest setup <host>` to refresh files copied into the host, then restart it. Wait for active work to finish before stopping and restarting the daemon to load the new version. To roll back Harnest, reinstall a previous CLI-enabled revision with `bun add -g github:harshanandak/harnest#<revision>`. For a configuration rollback, use the [host restore instructions](docs/users/integrations.md#restore-a-host-configuration).
 </details>
 
 <details>
 <summary><b>Remove the daemon login item</b></summary>
 
-Run these from the checkout with the same state settings you used at install. If stop reports `busy`, wait for active work to finish and run stop again before removing autostart.
+Run these with the same state settings you used at install. If stop reports `busy`, wait for active work to finish and run stop again before removing autostart.
 
 ```sh
-bun run daemon stop
-bun run daemon uninstall-autostart
+harnest daemon stop
+harnest daemon uninstall-autostart
 ```
 
-Run uninstall as the installing user. On Linux, use the same `XDG_CONFIG_HOME` if you customized it. This keeps durable jobs and host configurations. To disconnect a host, remove its Harnest MCP entry or restore its installer backup, then restart it.
+Run uninstall as the installing user. On Linux, use the same `XDG_CONFIG_HOME` if you customized it. This keeps durable jobs and host configurations. To disconnect a host, run its printed reverse command, then restart it. To remove the global CLI after disconnecting your hosts, run `bun remove -g harnest`.
 </details>
 
 ## Documentation index

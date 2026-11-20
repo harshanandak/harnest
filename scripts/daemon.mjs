@@ -22,7 +22,7 @@ try {
       console.log("Harnest login item removed.");
       break;
     default:
-      console.error("Usage: bun run daemon start|stop|status|uninstall-autostart");
+      console.error("Usage: harnest daemon start|stop|status|uninstall-autostart");
       process.exitCode = 1;
   }
 } catch {

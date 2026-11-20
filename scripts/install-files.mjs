@@ -14,6 +14,12 @@ export async function readExisting(path, encoding = "utf8") {
   }
 }
 
+export async function removeInstalledCopy(source, target) {
+  const previous = await readExisting(target, null);
+  if (!previous?.equals(await readFile(source))) return null;
+  return replaceWithBackup(target, null, previous);
+}
+
 export async function isPrivateInstallerFile(path) {
   const stat = await lstat(path);
   if (!stat.isFile()) return false;
