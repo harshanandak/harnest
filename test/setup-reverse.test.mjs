@@ -204,6 +204,8 @@ test("printed setup reversal works from a different directory", async (t) => {
     assert.deepEqual(JSON.parse(removal.stdout).project.preserved, ["agents/cursor-worker.md"]);
     const viaAlias = await cli(["setup", "remove", "cursor", "--project", alias]);
     assert.deepEqual(JSON.parse(viaAlias.stdout).project.preserved, ["agents/cursor-worker.md"]);
+    const implicit = await cli(["setup", "remove", "cursor"], { cwd: project });
+    assert.deepEqual(JSON.parse(implicit.stdout).project.preserved, ["agents/cursor-worker.md"]);
     for (const path of [userMcp, projectMcp]) assert.deepEqual(JSON.parse(await readFile(path, "utf8")), unrelated);
     assert.equal(await readFile(router, "utf8"), "original router");
     assert.equal(await readFile(existing, "utf8"), "unrelated agent");

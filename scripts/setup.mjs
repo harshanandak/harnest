@@ -5,7 +5,7 @@ import { readDaemonToken } from "../src/daemon-settings.mjs";
 import { setupDaemon } from "./install-daemon.mjs";
 import { bridgeEntry, cursorUserConfig, httpEntry, installJsonServer, removeJsonServer, restoreHostConfig } from "./install-host-config.mjs";
 import { installPluginHost, removePluginHost } from "./install-plugin-host.mjs";
-import { defaultCursorProject, installCursorIntegration, removeCursorProject } from "./install-cursor-integration.mjs";
+import { installCursorIntegration, removeCursorProject } from "./install-cursor-integration.mjs";
 import { installIntegration, latestInstallManifest, openCodeConfigDir, restoreIntegration } from "./install-opencode-integration.mjs";
 import { installPiIntegration, removePiIntegration } from "./install-pi-integration.mjs";
 import { manualBridgeConfig, manualBridgeHosts, presetBridgeHosts } from "./preset-lead-hosts.mjs";
@@ -50,7 +50,7 @@ async function removeHost([target, ...flags]) {
     : target === "cursor" ? cursorUserConfig() : bridgeHostConfig(target);
   if (!config) throw new Error(`Removal is unsupported for host: ${target}. See harnest setup --help.`);
   const result = await removeJsonServer(config);
-  const project = cursor ? await removeCursorProject(resolve(flags[1])) : undefined;
+  const project = target === "cursor" ? await removeCursorProject(cursor ? flags[1] : undefined) : undefined;
   const messages = {
     "config-missing": "Host configuration file does not exist.",
     "already-absent": "The Harnest MCP entry is already absent.",
@@ -85,9 +85,8 @@ async function setup(args) {
     console.log("To reverse a manual setup, remove the harnest entry you added to that file.");
     return;
   }
-  const cursorProject = host === "cursor" ? project ?? await defaultCursorProject() : null;
   const prepareDaemon = () => setupDaemon({ noAutostart: flags.includes("--no-autostart") });
-  if (host !== "opencode") await prepareDaemon();
+  if (host !== "opencode" && host !== "cursor") await prepareDaemon();
   let result;
   const reverse = [];
   switch (host) {
@@ -104,7 +103,7 @@ async function setup(args) {
       break;
     }
     case "cursor":
-      result = await installCursorIntegration(cursorProject);
+      result = await installCursorIntegration(project, { prepareDaemon });
       console.log(`Cursor project: ${result.projectPath}`);
       reverse.push(setupCommand("remove cursor --project", result.projectPath));
       if (result.mcp.backup) reverse.push(setupCommand("--restore", resolve(result.mcp.backup)));

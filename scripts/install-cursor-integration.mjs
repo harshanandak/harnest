@@ -29,10 +29,10 @@ async function canonicalPath(path, { create = false } = {}) {
   return realpath(path);
 }
 
-export async function defaultCursorProject() {
+async function defaultCursorProject(home, required = true) {
   const project = await realpath(process.cwd());
-  const home = await canonicalPath(homedir());
-  if (project === home || project === parse(project).root) {
+  if (project === await canonicalPath(home) || project === parse(project).root) {
+    if (!required) return null;
     throw new Error("Cursor setup cannot use your home directory or a filesystem root by default. Pass --project DIR or run from your project.");
   }
   return project;
@@ -161,9 +161,11 @@ async function installDocs(projectRoot, { state, save }) {
   return installed;
 }
 
-/** @param {string} [projectRoot] repository root containing `.cursor/` */
-export async function installCursorIntegration(projectRoot = root, { home = homedir() } = {}) {
-  projectRoot = await canonicalPath(projectRoot, { create: true });
+/** @param {string|null} [projectRoot] project directory, or null to use the current directory */
+export async function installCursorIntegration(projectRoot = root, { home = homedir(), prepareDaemon = undefined } = {}) {
+  const cwd = projectRoot === null ? await defaultCursorProject(home) : null;
+  await prepareDaemon?.();
+  projectRoot = cwd ?? await canonicalPath(projectRoot, { create: true });
   const project = await cursorProjectState(projectRoot, home);
   const docs = await installDocs(projectRoot, project);
   const mcp = await installHostConfig("cursor", { home });
@@ -179,8 +181,10 @@ export async function installCursorIntegration(projectRoot = root, { home = home
 }
 
 export async function removeCursorProject(projectRoot, home = homedir()) {
-  projectRoot = await canonicalPath(projectRoot);
+  projectRoot = projectRoot ? await canonicalPath(projectRoot) : await defaultCursorProject(home, false);
+  if (!projectRoot) return;
   const { state, save } = await cursorProjectState(projectRoot, home);
+  if (!Object.keys(state.files).length && !state.mcp) return;
   const cursorDir = join(projectRoot, ".cursor");
   const restored = [];
   const preserved = [];

@@ -89,7 +89,7 @@ On Windows, copy the printed command for PowerShell or cmd.exe. For OpenCode, us
 
 ## Remove an MCP registration
 
-Paste the reverse command printed by setup. A checkout prints a command with the absolute checkout path. Cursor's command includes `--project` to remove the project MCP entry managed by setup and reverse the installed project files. It preserves unrelated files and later edits. `harnest setup remove cursor` without `--project` removes the user MCP entry. Use the same config path environment variables you used for setup.
+Paste the reverse command printed by setup. A checkout prints a command with the absolute checkout path. Cursor's command includes `--project` to remove the project MCP entry managed by setup and reverse the installed project files. It preserves unrelated files and later edits. Without `--project`, Cursor removal uses the current directory if setup recorded it as a workspace. Run from your home directory to remove just the user MCP entry. Use the same config path environment variables you used for setup.
 
 Claude and Codex removal use the native plugin CLI to uninstall Harnest and remove its local marketplace. Codex also removes its MCP table and matching copies of the bundled workers. Pi removes the auto-loaded extension, unregisters it in settings, and removes matching copies of the bundled skill. MCP config removal saves a private backup and keeps other registrations. For a Cursor project's migrated MCP entry, use the printed backup command. For a manual setup, remove the entry you added. Restart the host afterward.
 
