@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+### Added
+
 - Install the `harnest` CLI from GitHub with Bun. Run setup, doctor, daemon, ACP registration, and routing setup from any directory.
 - Host setup prints pasteable removal or restore commands, including native plugin removal for Claude and Codex and extension removal for Pi.
 - Checkout setup prints reverse commands that work from any directory. Cursor reversal also disconnects the selected project and reverses the files setup installed there.
+
+### Fixed
+
+- Dynamic workflow status no longer reports a live run as missing during a snapshot replacement on Windows.
 - Bound OpenCode health probes to the readiness timeout, abort them on caller cancellation, and clear each probe's timer when it finishes.
 - Resolve Node for the Codex worker installer through absolute PATH entries and require absolute ACP registration paths.
 - Resolve bare ACP terminal commands on Windows through explicit, nonempty PATH entries before spawning. Relative entries resolve against the terminal working directory.
